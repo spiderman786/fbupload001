@@ -4,13 +4,13 @@ export function Footer() {
   return (
     <footer className="border-t border-border bg-muted/30 py-20">
       <div className="container mx-auto px-4">
-        <div className="grid gap-10 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-10 md:grid-cols-2 lg:grid-cols-3">
           <div className="space-y-5">
             <a href="#" className="inline-flex items-center space-x-3">
               <div className="rounded-xl border border-primary/15 bg-primary/5 p-2">
-                <img src="/logo.svg" alt="FBupload Pro Logo" className="h-8 w-8" />
+                <img src="/logo.svg" alt="FBupload Plus Logo" className="h-8 w-8" />
               </div>
-              <span className="font-display text-xl font-bold tracking-tight">FBupload Pro</span>
+              <span className="font-display text-xl font-bold tracking-tight">FBupload Plus</span>
             </a>
             <p className="text-sm leading-relaxed text-muted-foreground">
               A reliable distribution platform for agencies running Facebook growth workflows.
@@ -53,42 +53,18 @@ export function Footer() {
               </li>
               <li>
                 <a
-                  href="mailto:support@fbuploadpro.com"
+                  href="mailto:support@fbuploadplus.com"
                   className="transition-colors hover:text-primary"
                 >
-                  support@fbuploadpro.com
+                  support@fbuploadplus.com
                 </a>
               </li>
             </ul>
           </div>
-
-          <div>
-            <h4 className="mb-5 text-xs font-semibold tracking-[0.12em] uppercase">Contact</h4>
-            <div className="space-y-3 rounded-2xl border border-border bg-muted/30 p-5">
-              <p className="font-semibold text-foreground">Shahzeb Malik</p>
-              <p className="text-xs text-muted-foreground">Founder</p>
-              <a
-                href="https://wa.me/923278644204"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block w-full rounded-lg bg-primary px-4 py-2.5 text-center text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
-              >
-                WhatsApp
-              </a>
-              <a
-                href="https://www.facebook.com/shahzaib.pyc"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block w-full rounded-lg border border-border px-4 py-2.5 text-center text-sm font-semibold transition-colors hover:bg-muted"
-              >
-                Facebook
-              </a>
-            </div>
-          </div>
         </div>
 
         <div className="mt-14 flex flex-col items-center justify-between gap-4 border-t border-border pt-6 text-xs text-muted-foreground md:flex-row">
-          <span>© {new Date().getFullYear()} FBupload Pro</span>
+          <span>© {new Date().getFullYear()} FBupload Plus</span>
           <span>Secure operations • Encrypted workflows • Automated publishing</span>
         </div>
       </div>

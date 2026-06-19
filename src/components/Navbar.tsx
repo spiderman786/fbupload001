@@ -15,9 +15,9 @@ export function Navbar() {
     <nav className="fixed top-0 right-0 left-0 z-50 bg-background/80 py-5 backdrop-blur-md">
       <div className="container mx-auto flex items-center justify-between px-4">
         <Link to="/" className="flex items-center space-x-3">
-          <img src="/logo.svg" alt="FBupload Pro Logo" className="h-8 w-8" />
+          <img src="/logo.svg" alt="FBupload Plus Logo" className="h-8 w-8" />
           <span className="font-display text-xl font-bold tracking-tight whitespace-nowrap">
-            FBupload Pro
+            FBupload Plus
           </span>
         </Link>
 

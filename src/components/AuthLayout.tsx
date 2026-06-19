@@ -15,10 +15,10 @@ export function AuthLayout({ children }: AuthLayoutProps) {
       <div className="relative w-full max-w-md">
         <div className="mb-8 text-center">
           <div className="mx-auto mb-4 inline-flex rounded-xl border border-primary/15 bg-primary/5 p-3">
-            <img src="/logo.svg" alt="FBupload Pro Logo" className="h-10 w-10" />
+            <img src="/logo.svg" alt="FBupload Plus Logo" className="h-10 w-10" />
           </div>
           <h1 className="font-display text-2xl font-bold tracking-tight">
-            FBupload <span className="text-primary">Pro</span>
+            FBupload <span className="text-primary">Plus</span>
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">Agency automation portal</p>
         </div>
