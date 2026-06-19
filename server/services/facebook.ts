@@ -1,0 +1,189 @@
+import { v4 as uuid } from 'uuid'
+import { db } from '../db.js'
+import { getByocCredentials, isFacebookConfiguredForAgency } from './byoc.js'
+import { seedFollowerBaseline, syncPageFollowers } from './followerSync.js'
+
+export function isFacebookConfigured(agencyId?: string): boolean {
+  if (agencyId) return isFacebookConfiguredForAgency(agencyId)
+  return Boolean(process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET)
+}
+
+export function getOAuthUrl(agencyId: string, state: string): string {
+  const creds = getByocCredentials(agencyId, 'facebook')
+  if (!creds) throw new Error('Facebook app not configured. Add BYOC credentials in Settings.')
+
+  const params = new URLSearchParams({
+    client_id: creds.appId,
+    redirect_uri: creds.redirectUri,
+    state,
+    scope: 'pages_show_list,pages_manage_posts,pages_read_engagement,publish_video,pages_manage_metadata',
+    response_type: 'code',
+  })
+  return `https://www.facebook.com/v21.0/dialog/oauth?${params}`
+}
+
+export async function exchangeCodeForToken(agencyId: string, code: string): Promise<{
+  accessToken: string
+  metaUserId: string
+}> {
+  const creds = getByocCredentials(agencyId, 'facebook')
+  if (!creds) {
+    if (code === 'mock_code') {
+      return { accessToken: 'mock_token', metaUserId: 'mock_user_' + Date.now() }
+    }
+    throw new Error('Facebook app not configured')
+  }
+
+  const tokenRes = await fetch(
+    `https://graph.facebook.com/v21.0/oauth/access_token?${new URLSearchParams({
+      client_id: creds.appId,
+      client_secret: creds.appSecret,
+      redirect_uri: creds.redirectUri,
+      code,
+    })}`,
+  )
+  const tokenData = (await tokenRes.json()) as { access_token?: string; error?: { message: string } }
+  if (!tokenData.access_token) {
+    throw new Error(tokenData.error?.message ?? 'Failed to exchange OAuth code')
+  }
+
+  const meRes = await fetch(
+    `https://graph.facebook.com/v21.0/me?fields=id&access_token=${tokenData.access_token}`,
+  )
+  const meData = (await meRes.json()) as { id?: string }
+  if (!meData.id) throw new Error('Failed to fetch Meta user ID')
+
+  return { accessToken: tokenData.access_token, metaUserId: meData.id }
+}
+
+export async function fetchUserPages(agencyId: string, accessToken: string): Promise<
+  { id: string; name: string; followers?: string; fanCount: number; accessToken?: string }[]
+> {
+  if (!isFacebookConfigured(agencyId) && accessToken === 'mock_token') {
+    return [
+      { id: 'mock_page_1', name: 'Adam Sullivan', followers: '12.4K', fanCount: 12_400, accessToken: 'mock_page_token_1' },
+      { id: 'mock_page_2', name: 'Adin Ross', followers: '8.1K', fanCount: 8_100, accessToken: 'mock_page_token_2' },
+      { id: 'mock_page_3', name: 'AI Baby Magic', followers: '5.6K', fanCount: 5_600, accessToken: 'mock_page_token_3' },
+    ]
+  }
+
+  const res = await fetch(
+    `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,fan_count,access_token&access_token=${accessToken}`,
+  )
+  const data = (await res.json()) as {
+    data?: { id: string; name: string; fan_count?: number; access_token?: string }[]
+    error?: { message: string }
+  }
+
+  if (data.error) throw new Error(data.error.message)
+
+  return (data.data ?? []).map((p) => ({
+    id: p.id,
+    name: p.name,
+    fanCount: p.fan_count ?? 0,
+    followers: p.fan_count ? formatFollowers(p.fan_count) : '0',
+    accessToken: p.access_token,
+  }))
+}
+
+function formatFollowers(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
+}
+
+export function saveFacebookAccount(agencyId: string, userId: string, metaUserId: string, accessToken: string) {
+  const existing = db
+    .prepare('SELECT id FROM facebook_accounts WHERE agency_id = ? AND meta_user_id = ?')
+    .get(agencyId, metaUserId) as { id: string } | undefined
+
+  if (existing) {
+    db.prepare(`UPDATE facebook_accounts SET access_token = ?, connected_at = datetime('now') WHERE id = ?`).run(
+      accessToken,
+      existing.id,
+    )
+    return existing.id
+  }
+
+  const id = uuid()
+  db.prepare(
+    'INSERT INTO facebook_accounts (id, user_id, agency_id, meta_user_id, access_token) VALUES (?, ?, ?, ?, ?)',
+  ).run(id, userId, agencyId, metaUserId, accessToken)
+  return id
+}
+
+export async function connectPagesForAgency(
+  agencyId: string,
+  userId: string,
+  accountId: string,
+  accessToken: string,
+) {
+  const pages = await fetchUserPages(agencyId, accessToken)
+  const connected: string[] = []
+
+  for (const page of pages) {
+    const existing = db
+      .prepare('SELECT id FROM facebook_pages WHERE agency_id = ? AND meta_page_id = ?')
+      .get(agencyId, page.id) as { id: string } | undefined
+
+    if (existing) {
+      if (page.accessToken) {
+        db.prepare('UPDATE facebook_pages SET page_access_token = ?, health_status = ? WHERE id = ?').run(
+          page.accessToken,
+          'completed',
+          existing.id,
+        )
+      }
+      const row = db.prepare(`
+        SELECT id, user_id, meta_page_id, page_access_token, followers_count, followers
+        FROM facebook_pages WHERE id = ?
+      `).get(existing.id) as {
+        id: string
+        user_id: string
+        meta_page_id: string
+        page_access_token: string | null
+        followers_count: number | null
+        followers: string
+      }
+      if (row) {
+        row.page_access_token = page.accessToken ?? row.page_access_token
+        await syncPageFollowers(row)
+      }
+      connected.push(existing.id)
+      continue
+    }
+
+    const id = uuid()
+    db.prepare(`
+      INSERT INTO facebook_pages (id, user_id, agency_id, facebook_account_id, meta_page_id, name, followers, page_access_token, health_status, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'active')
+    `).run(id, userId, agencyId, accountId, page.id, page.name, page.followers ?? '0', page.accessToken ?? null)
+    seedFollowerBaseline(id, page.fanCount)
+    connected.push(id)
+  }
+
+  return connected
+}
+
+/** @deprecated */
+export async function connectPagesForUser(userId: string, accountId: string, accessToken: string) {
+  const agency = db
+    .prepare("SELECT agency_id FROM agency_members WHERE user_id = ? AND role = 'owner' LIMIT 1")
+    .get(userId) as { agency_id: string } | undefined
+  if (!agency) throw new Error('No agency found')
+  return connectPagesForAgency(agency.agency_id, userId, accountId, accessToken)
+}
+
+export async function publishReelToPage(
+  pageId: string,
+  metaPageId: string,
+  accessToken: string,
+  sourceUsername: string,
+): Promise<{ postId: string }> {
+  const { publishReelVideo } = await import('./publisher.js')
+  const page = db.prepare('SELECT page_access_token FROM facebook_pages WHERE id = ?').get(pageId) as
+    | { page_access_token: string | null }
+    | undefined
+  const token = page?.page_access_token ?? accessToken
+  return publishReelVideo(metaPageId, token, '', `Reel from ${sourceUsername}`)
+}

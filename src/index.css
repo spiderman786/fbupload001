@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #f4fbf8;
+  --color-foreground: #10221a;
+  --color-primary: #059669;
+  --color-primary-foreground: #ffffff;
+  --color-muted: #e8f5ee;
+  --color-muted-foreground: #3f5a4e;
+  --color-border: #d8e8df;
+  --color-accent: #d1fae5;
+  --color-card: #ffffff;
+  --color-secondary: #ecfdf5;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-display: "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply m-0 bg-background font-sans text-foreground antialiased;
+  }
+
+  ::selection {
+    @apply bg-primary/10 text-primary;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display);
+  }
+
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+
+  .text-display-xl {
+    font-size: clamp(2.5rem, 5vw, 4rem);
+    line-height: 1.05;
+  }
+
+  .text-display-lg {
+    font-size: clamp(2rem, 4vw, 3rem);
+    line-height: 1.1;
+  }
+
+  .text-display-md {
+    font-size: clamp(1.75rem, 3vw, 2.5rem);
+    line-height: 1.15;
+  }
+
+  .animate-pulse-slow {
+    animation: pulse-slow 6s ease-in-out infinite;
+  }
+
+  .animate-mist-drift {
+    animation: mist-drift 18s ease-in-out infinite;
+  }
+}
+
+@keyframes pulse-slow {
+  0%,
+  100% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes mist-drift {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(-20px, 15px);
+  }
+}
+
+.automation-snapshot-surface {
+  @apply relative overflow-hidden rounded-2xl border border-border bg-card/80 p-6 shadow-sm backdrop-blur-sm;
+}
+
+.marketing-card {
+  @apply relative overflow-hidden rounded-xl border border-border bg-card p-6 shadow-sm transition-all duration-200 hover:-translate-y-1 hover:border-primary/20 hover:shadow-md sm:p-7;
+}
+
+.section-blob {
+  @apply pointer-events-none absolute rounded-full bg-primary/[0.07] blur-3xl;
+}

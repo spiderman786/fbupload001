@@ -1,0 +1,22 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 120
+restartPolicyType = "on_failure"
+
+# ── Railway setup checklist ─────────────────────────────────────────────
+# 1. Web service (this repo): startCommand = npm start  (default above)
+# 2. Worker service (duplicate): Settings → Deploy → Custom Start Command:
+#      npm run worker
+# 3. Volume on BOTH services: mount path /app/data
+# 4. Variables on BOTH services (see .env.example):
+#      CLIENT_URL=https://YOUR-APP.up.railway.app
+#      JWT_SECRET=...
+#      DATABASE_PATH=/app/data/fbuploadpro.db
+#      FACEBOOK_APP_ID / FACEBOOK_APP_SECRET / FACEBOOK_REDIRECT_URI
+# 5. Meta app → Valid OAuth Redirect:
+#      https://YOUR-APP.up.railway.app/facebook/callback

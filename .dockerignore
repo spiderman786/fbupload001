@@ -1,0 +1,12 @@
+node_modules
+dist
+data
+.env
+.env.local
+.env.production
+.git
+.gitignore
+.cursor
+.vscode
+terminals
+npm-debug.log*
