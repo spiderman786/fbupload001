@@ -10,20 +10,33 @@ type SmtpConfig = {
   secure: boolean
 }
 
+type ProviderDefaults = { host: string; port: number; secure: boolean }
+
+const SMTP_PROVIDER_DEFAULTS: Record<string, ProviderDefaults> = {
+  gmail: { host: 'smtp.gmail.com', port: 587, secure: false },
+  outlook: { host: 'smtp.office365.com', port: 587, secure: false },
+}
+
 function asBool(value: string | undefined, fallback: boolean): boolean {
   if (value === undefined) return fallback
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase())
 }
 
 function getSmtpConfig(): SmtpConfig | null {
-  const host = process.env.SMTP_HOST?.trim()
+  const provider = process.env.SMTP_PROVIDER?.trim().toLowerCase()
+  const providerDefaults = provider ? SMTP_PROVIDER_DEFAULTS[provider] : undefined
+  const host = process.env.SMTP_HOST?.trim() || providerDefaults?.host
   if (!host) return null
 
-  const port = Number(process.env.SMTP_PORT ?? 587)
+  const port = Number(process.env.SMTP_PORT ?? providerDefaults?.port ?? 587)
   const user = process.env.SMTP_USER?.trim()
   const pass = process.env.SMTP_PASS
   const from = process.env.SMTP_FROM?.trim() || user
-  const secure = asBool(process.env.SMTP_SECURE, port === 465)
+  const secure = asBool(process.env.SMTP_SECURE, providerDefaults?.secure ?? port === 465)
+
+  if (provider && !providerDefaults) {
+    throw new Error(`Unsupported SMTP_PROVIDER "${provider}". Use "gmail" or "outlook".`)
+  }
 
   if (!user || !pass || !from) {
     throw new Error('SMTP is partially configured. Set SMTP_USER, SMTP_PASS, and SMTP_FROM (or SMTP_USER).')
@@ -150,7 +163,9 @@ export async function sendVerificationEmail(email: string, code: string): Promis
   const smtp = getSmtpConfig()
   if (!smtp) {
     if (process.env.NODE_ENV === 'production') {
-      throw new Error('Email delivery is not configured. Add SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS in Railway.')
+      throw new Error(
+        'Email delivery is not configured. Set SMTP_PROVIDER (gmail/outlook) or SMTP_HOST, plus SMTP_USER/SMTP_PASS.',
+      )
     }
     console.log('\n========================================')
     console.log(`  VERIFICATION CODE for ${email}`)
