@@ -61,7 +61,15 @@ authRouter.post('/signup', async (req, res) => {
 
   createAgencyForUser(id, (agencyName?.trim() || `${fullName}'s Agency`))
 
-  await sendVerificationEmail(email, code)
+  try {
+    await sendVerificationEmail(email, code)
+  } catch (error) {
+    // Avoid trapping users in an unverified account when delivery fails.
+    db.prepare('DELETE FROM users WHERE id = ?').run(id)
+    res.status(502).json({ error: error instanceof Error ? error.message : 'Failed to send verification code' })
+    return
+  }
+
   res.status(201).json({ message: 'Verification code sent to your Gmail', userId: id })
 })
 
@@ -140,8 +148,12 @@ authRouter.post('/send-verification', async (req, res) => {
     expires,
     user.id,
   )
-  await sendVerificationEmail(email, code)
-  res.json({ message: 'Verification code resent' })
+  try {
+    await sendVerificationEmail(email, code)
+    res.json({ message: 'Verification code resent' })
+  } catch (error) {
+    res.status(502).json({ error: error instanceof Error ? error.message : 'Failed to resend verification code' })
+  }
 })
 
 authRouter.post('/login', async (req, res) => {
