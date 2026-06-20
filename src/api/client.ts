@@ -9,8 +9,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     ...options,
   })
 
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw data as ApiError
+  const data = await res.json().catch(() => ({} as Partial<ApiError>))
+  if (!res.ok) {
+    const message =
+      typeof data.error === 'string' && data.error.trim()
+        ? data.error
+        : `Request failed (${res.status}). Please try again.`
+    throw { ...data, error: message } as ApiError
+  }
   return data as T
 }
 

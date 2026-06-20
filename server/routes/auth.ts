@@ -66,7 +66,11 @@ authRouter.post('/signup', async (req, res) => {
   } catch (error) {
     // Avoid trapping users in an unverified account when delivery fails.
     db.prepare('DELETE FROM users WHERE id = ?').run(id)
-    res.status(502).json({ error: error instanceof Error ? error.message : 'Failed to send verification code' })
+    const message =
+      error instanceof Error && error.message.trim()
+        ? error.message
+        : 'Failed to send verification code. Please check SMTP configuration.'
+    res.status(502).json({ error: message })
     return
   }
 
@@ -152,7 +156,11 @@ authRouter.post('/send-verification', async (req, res) => {
     await sendVerificationEmail(email, code)
     res.json({ message: 'Verification code resent' })
   } catch (error) {
-    res.status(502).json({ error: error instanceof Error ? error.message : 'Failed to resend verification code' })
+    const message =
+      error instanceof Error && error.message.trim()
+        ? error.message
+        : 'Failed to resend verification code. Please check SMTP configuration.'
+    res.status(502).json({ error: message })
   }
 })
 

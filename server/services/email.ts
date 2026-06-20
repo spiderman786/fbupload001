@@ -117,8 +117,8 @@ function createSmtpSession(socket: SocketLike) {
 }
 
 async function sendViaSmtp(config: SmtpConfig, to: string, subject: string, body: string): Promise<void> {
-  const socket = await createSocket(config)
-  const session = createSmtpSession(socket)
+  let socket = await createSocket(config)
+  let session = createSmtpSession(socket)
 
   try {
     const greeting = await session.waitForReply()
@@ -127,6 +127,23 @@ async function sendViaSmtp(config: SmtpConfig, to: string, subject: string, body
     }
 
     await session.command('EHLO fbuploadplus.app')
+    if (!config.secure) {
+      // Port 587 commonly requires STARTTLS before AUTH LOGIN.
+      await session.command('STARTTLS')
+      socket = await new Promise<tls.TLSSocket>((resolve, reject) => {
+        const upgraded = tls.connect(
+          {
+            socket,
+            servername: config.host,
+            rejectUnauthorized: true,
+          },
+          () => resolve(upgraded),
+        )
+        upgraded.once('error', reject)
+      })
+      session = createSmtpSession(socket)
+      await session.command('EHLO fbuploadplus.app')
+    }
     await session.command('AUTH LOGIN', '3')
     await session.command(Buffer.from(config.user).toString('base64'), '3')
     await session.command(Buffer.from(config.pass).toString('base64'), '2')
