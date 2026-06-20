@@ -47,6 +47,12 @@ function getSmtpConfig(): SmtpConfig | null {
 
 type SocketLike = net.Socket | tls.TLSSocket
 
+function errorText(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message.trim()
+  if (typeof error === 'string' && error.trim()) return error.trim()
+  return 'Unknown SMTP error'
+}
+
 async function createSocket(config: SmtpConfig): Promise<SocketLike> {
   if (config.secure) {
     return new Promise((resolve, reject) => {
@@ -59,13 +65,25 @@ async function createSocket(config: SmtpConfig): Promise<SocketLike> {
         },
         () => resolve(socket),
       )
-      socket.once('error', reject)
+      socket.once('error', (error) => {
+        reject(
+          new Error(
+            `SMTP TLS connection failed (${config.host}:${config.port}): ${errorText(error)}`,
+          ),
+        )
+      })
     })
   }
 
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ host: config.host, port: config.port }, () => resolve(socket))
-    socket.once('error', reject)
+    socket.once('error', (error) => {
+      reject(
+        new Error(
+          `SMTP TCP connection failed (${config.host}:${config.port}): ${errorText(error)}`,
+        ),
+      )
+    })
   })
 }
 
@@ -119,16 +137,20 @@ function createSmtpSession(socket: SocketLike) {
 async function sendViaSmtp(config: SmtpConfig, to: string, subject: string, body: string): Promise<void> {
   let socket = await createSocket(config)
   let session = createSmtpSession(socket)
+  let stage = 'connect'
 
   try {
+    stage = 'greeting'
     const greeting = await session.waitForReply()
     if (!greeting.startsWith('2')) {
       throw new Error(`SMTP greeting failed: ${greeting}`)
     }
 
+    stage = 'ehlo'
     await session.command('EHLO fbuploadplus.app')
     if (!config.secure) {
       // Port 587 commonly requires STARTTLS before AUTH LOGIN.
+      stage = 'starttls'
       await session.command('STARTTLS')
       socket = await new Promise<tls.TLSSocket>((resolve, reject) => {
         const upgraded = tls.connect(
@@ -139,16 +161,25 @@ async function sendViaSmtp(config: SmtpConfig, to: string, subject: string, body
           },
           () => resolve(upgraded),
         )
-        upgraded.once('error', reject)
+        upgraded.once('error', (error) =>
+          reject(new Error(`SMTP TLS upgrade failed: ${errorText(error)}`)),
+        )
       })
       session = createSmtpSession(socket)
+      stage = 'ehlo-after-starttls'
       await session.command('EHLO fbuploadplus.app')
     }
+    stage = 'auth-login'
     await session.command('AUTH LOGIN', '3')
+    stage = 'auth-user'
     await session.command(Buffer.from(config.user).toString('base64'), '3')
+    stage = 'auth-pass'
     await session.command(Buffer.from(config.pass).toString('base64'), '2')
+    stage = 'mail-from'
     await session.command(`MAIL FROM:<${config.from}>`)
+    stage = 'rcpt-to'
     await session.command(`RCPT TO:<${to}>`)
+    stage = 'data'
     await session.command('DATA', '3')
 
     const escapedBody = body.replace(/\r?\n\./g, '\n..')
@@ -164,13 +195,20 @@ async function sendViaSmtp(config: SmtpConfig, to: string, subject: string, body
       '',
     ].join('\r\n')
 
+    stage = 'data-body'
     socket.write(message)
     const dataReply = await session.waitForReply()
     if (!dataReply.startsWith('2')) {
       throw new Error(`SMTP DATA failed: ${dataReply}`)
     }
 
+    stage = 'quit'
     await session.command('QUIT')
+  } catch (error) {
+    const details = errorText(error)
+    throw new Error(
+      `SMTP send failed at "${stage}" (${config.host}:${config.port}, secure=${config.secure}): ${details}`,
+    )
   } finally {
     socket.destroy()
   }
