@@ -59,6 +59,12 @@ export function Footer() {
                   support@fbuploadplus.com
                 </a>
               </li>
+              <li>
+                <a href="https://wa.me/923080752936" className="transition-colors hover:text-primary">
+                  WhatsApp: +92 308 0752936
+                </a>
+              </li>
+              <li>Founder: BTMEDIA</li>
             </ul>
           </div>
         </div>

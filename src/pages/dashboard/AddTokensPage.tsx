@@ -1,18 +1,21 @@
 import { useState, type FormEvent } from 'react'
 import { Coins, ExternalLink } from 'lucide-react'
 import { api } from '../../api/client'
-import { useAuth } from '../../context/AuthContext'
+import { useAgencyRole, useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
 import { getApiError } from '../../lib/apiError'
 
 export function AddTokensPage() {
   const { user, refreshUser } = useAuth()
+  const { isAdmin } = useAgencyRole()
   const toast = useToast()
   const [amount, setAmount] = useState(100)
   const [note, setNote] = useState('')
+  const [memberEmail, setMemberEmail] = useState('')
   const [whatsappUrl, setWhatsappUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [devLoading, setDevLoading] = useState(false)
+  const [memberLoading, setMemberLoading] = useState(false)
   const [message, setMessage] = useState('')
 
   const totalPkr = amount * 0.5
@@ -48,6 +51,24 @@ export function AddTokensPage() {
       toast.error(msg)
     } finally {
       setDevLoading(false)
+    }
+  }
+
+  async function handleCreditMember(e: FormEvent) {
+    e.preventDefault()
+    setMemberLoading(true)
+    try {
+      const res = await api.tokens.creditMember({ amount, memberEmail, note })
+      setMessage(`${res.message}. New agency balance: ${res.balance}`)
+      setMemberEmail('')
+      await refreshUser()
+      toast.success(res.message)
+    } catch (err) {
+      const msg = getApiError(err, 'Credit failed')
+      setMessage(msg)
+      toast.error(msg)
+    } finally {
+      setMemberLoading(false)
     }
   }
 
@@ -121,6 +142,28 @@ export function AddTokensPage() {
           {devLoading ? 'Crediting...' : `Credit ${amount} tokens`}
         </button>
       </div>
+
+      {isAdmin && (
+        <form onSubmit={handleCreditMember} className="rounded-lg border border-border p-4 space-y-3">
+          <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Owner/Admin</p>
+          <p className="text-sm text-muted-foreground">Credit tokens directly to an agency member by email.</p>
+          <input
+            type="email"
+            required
+            value={memberEmail}
+            onChange={(e) => setMemberEmail(e.target.value)}
+            placeholder="member@gmail.com"
+            className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+          />
+          <button
+            type="submit"
+            disabled={memberLoading}
+            className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+          >
+            {memberLoading ? 'Crediting member...' : `Credit ${amount} tokens to member`}
+          </button>
+        </form>
+      )}
     </div>
   )
 }

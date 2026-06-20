@@ -113,6 +113,14 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ amount, note }),
       }),
+    creditMember: (body: { amount: number; memberEmail: string; note?: string }) =>
+      request<{ balance: number; message: string; member: { id: string; email: string; fullName: string } }>(
+        '/tokens/credit-member',
+        {
+          method: 'POST',
+          body: JSON.stringify(body),
+        },
+      ),
   },
   facebook: {
     status: () => request<{ configured: boolean; mockMode: boolean }>('/facebook/status'),

@@ -42,7 +42,7 @@ tokensRouter.post('/request', requireRole('owner', 'admin'), (req: AgencyRequest
 
   const user = req.user!
   const totalPkr = amount * TOKEN_COST_PKR
-  const whatsapp = process.env.WHATSAPP_NUMBER ?? '923278644204'
+  const whatsapp = (process.env.WHATSAPP_NUMBER ?? '923080752936').replace(/\D+/g, '')
   const message = encodeURIComponent(
     `Hi, I'd like to purchase ${amount} tokens (Rs ${totalPkr}) for agency "${req.agency!.name}" (${user.email}). ${note ?? ''}`,
   )
@@ -73,4 +73,53 @@ tokensRouter.post('/credit', requireRole('owner'), (req: AgencyRequest, res) => 
     token_balance: number
   }
   res.json({ balance: balance.token_balance, message: 'Tokens credited' })
+})
+
+tokensRouter.post('/credit-member', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
+  const { amount, memberEmail, note } = req.body ?? {}
+  if (!amount || amount < 1) {
+    res.status(400).json({ error: 'Amount must be at least 1' })
+    return
+  }
+  if (!memberEmail || typeof memberEmail !== 'string') {
+    res.status(400).json({ error: 'Member email is required' })
+    return
+  }
+
+  const agencyId = req.agency!.id
+  const member = db
+    .prepare(
+      `
+      SELECT u.id, u.email, u.full_name
+      FROM users u
+      JOIN agency_members am ON am.user_id = u.id
+      WHERE am.agency_id = ? AND lower(u.email) = lower(?)
+      LIMIT 1
+    `,
+    )
+    .get(agencyId, memberEmail.trim()) as
+    | { id: string; email: string; full_name: string }
+    | undefined
+
+  if (!member) {
+    res.status(404).json({ error: 'Member not found in this agency' })
+    return
+  }
+
+  db.prepare('UPDATE agencies SET token_balance = token_balance + ? WHERE id = ?').run(amount, agencyId)
+  const actor = req.user!.email
+  const details = note ? ` (${note})` : ''
+  db.prepare(`
+    INSERT INTO token_transactions (id, user_id, agency_id, amount, type, note)
+    VALUES (?, ?, ?, ?, 'purchase', ?)
+  `).run(uuid(), member.id, agencyId, amount, `Manual credit to ${member.email} by ${actor}${details}`)
+
+  const balance = db.prepare('SELECT token_balance FROM agencies WHERE id = ?').get(agencyId) as {
+    token_balance: number
+  }
+  res.json({
+    balance: balance.token_balance,
+    message: `Credited ${amount} tokens to ${member.email}`,
+    member: { id: member.id, email: member.email, fullName: member.full_name },
+  })
 })

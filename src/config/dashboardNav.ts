@@ -79,10 +79,11 @@ export const PLATFORM_ICONS: Record<string, LucideIcon> = {
 
 export const QUICK_LINKS = [
   { to: '/facebook/accounts', label: 'FB Accounts', desc: 'Connect accounts', icon: Link2 },
-  { to: '/facebook/auto-download-upload', label: 'Auto Download/Upload', desc: 'Start automation', icon: Upload },
+  { to: '/facebook/auto-download-upload', label: 'Auto Download/Upload', desc: 'Reel automation', icon: Upload },
   { to: '/facebook/direct-schedule', label: 'Direct Schedule', desc: 'Schedule posts', icon: CalendarClock },
   { to: '/facebook/direct-post', label: 'Direct Post', desc: 'Publish now', icon: Send },
   { to: '/facebook/inapp-schedule', label: 'InApp Schedule', desc: 'In-app queue', icon: CalendarClock },
+  { to: '/facebook/bulk-delete', label: 'Bulk Delete', desc: 'Remove posts', icon: Trash2 },
   { to: '/settings/facebook-byoc', label: 'FB BYOC Settings', desc: 'App credentials', icon: Settings },
 ]
 

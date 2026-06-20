@@ -43,7 +43,7 @@ export function DashboardLayout() {
       >
         <div className="flex items-center justify-between border-b border-border px-4 py-4">
           <Link to="/dashboard" className="font-display text-lg font-bold tracking-tight">
-            Fbupload<span className="text-primary">Pro</span>
+            Fbupload<span className="text-primary">Plus</span>
           </Link>
           <button className="rounded-md p-1.5 hover:bg-muted lg:hidden" onClick={() => setSidebarOpen(false)} aria-label="Close menu">
             <X className="h-5 w-5" />
