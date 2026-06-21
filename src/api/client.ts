@@ -130,15 +130,31 @@ export const api = {
   },
   facebook: {
     status: () => request<{ configured: boolean; mockMode: boolean }>('/facebook/status'),
-    oauthUrl: () => request<{ url: string }>('/facebook/oauth'),
+    oauthUrl: (byocCredentialId?: string) => {
+      const q = byocCredentialId ? `?byocCredentialId=${encodeURIComponent(byocCredentialId)}` : ''
+      return request<{ url: string; byocCredentialId?: string | null }>(`/facebook/oauth${q}`)
+    },
     callback: (code: string, state?: string) =>
       request<{ message: string; pagesConnected: number }>('/facebook/callback', {
         method: 'POST',
         body: JSON.stringify({ code, state }),
       }),
-    connectMock: () =>
-      request<{ message: string; pagesConnected: number }>('/facebook/connect-mock', { method: 'POST' }),
-    accounts: () => request<{ accounts: { id: string; meta_user_id: string; connected_at: string }[] }>('/facebook/accounts'),
+    connectMock: (byocCredentialId?: string) =>
+      request<{ message: string; pagesConnected: number }>('/facebook/connect-mock', {
+        method: 'POST',
+        body: JSON.stringify(byocCredentialId ? { byocCredentialId } : {}),
+      }),
+    accounts: () =>
+      request<{
+        accounts: {
+          id: string
+          meta_user_id: string
+          connected_at: string
+          byoc_credential_id: string | null
+          byoc_label: string | null
+          byoc_app_id: string | null
+        }[]
+      }>('/facebook/accounts'),
     accountPages: (accountId: string) =>
       request<{ pages: { id: string; name: string; followers?: string; fanCount: number }[] }>(
         `/facebook/accounts/${accountId}/pages`,
@@ -208,16 +224,39 @@ export const api = {
       ),
   },
   byoc: {
+    listApps: (platform: string) =>
+      request<{
+        apps: ByocApp[]
+        envFallback: boolean
+        configured: boolean
+      }>(`/byoc/${platform}/apps`),
+    createApp: (
+      platform: string,
+      body: { label: string; appId: string; appSecret: string; redirectUri?: string },
+    ) => request<{ message: string; app: ByocApp }>(`/byoc/${platform}/apps`, { method: 'POST', body: JSON.stringify(body) }),
+    updateApp: (
+      platform: string,
+      id: string,
+      body: { label?: string; appId?: string; appSecret?: string; redirectUri?: string },
+    ) =>
+      request<{ message: string; app: ByocApp }>(`/byoc/${platform}/apps/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    deleteApp: (platform: string, id: string) =>
+      request<{ message: string }>(`/byoc/${platform}/apps/${id}`, { method: 'DELETE' }),
     get: (platform: string) =>
       request<{
         configured: boolean
         hasByoc: boolean
+        appCount: number
+        apps: ByocApp[]
         appId: string | null
         redirectUri: string | null
         updatedAt: string | null
         usingEnvFallback: boolean
       }>(`/byoc/${platform}`),
-    save: (platform: string, body: { appId: string; appSecret: string; redirectUri?: string }) =>
+    save: (platform: string, body: { appId: string; appSecret: string; redirectUri?: string; label?: string }) =>
       request<{ message: string }>(`/byoc/${platform}`, { method: 'PUT', body: JSON.stringify(body) }),
     remove: (platform: string) =>
       request<{ message: string }>(`/byoc/${platform}`, { method: 'DELETE' }),
@@ -253,6 +292,15 @@ export const api = {
     acceptInvite: (token: string) =>
       request<SessionResponse>('/agencies/invites/accept', { method: 'POST', body: JSON.stringify({ token }) }),
   },
+}
+
+export type ByocApp = {
+  id: string
+  label: string
+  appId: string
+  redirectUri: string
+  updatedAt: string
+  linkedAccounts: number
 }
 
 export type AgencyRole = 'owner' | 'admin' | 'staff'

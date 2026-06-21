@@ -13,7 +13,7 @@ export function FacebookCallbackPage() {
 
     if (!code) {
       setStatus('Missing OAuth code. Redirecting...')
-      setTimeout(() => navigate('/pages'), 2000)
+      setTimeout(() => navigate('/facebook/accounts'), 2000)
       return
     }
 
@@ -21,11 +21,11 @@ export function FacebookCallbackPage() {
       .callback(code, state)
       .then((res) => {
         setStatus(`Connected! ${res.pagesConnected} page(s) added. Redirecting...`)
-        setTimeout(() => navigate('/pages'), 1500)
+        setTimeout(() => navigate('/facebook/accounts'), 1500)
       })
       .catch((err) => {
         setStatus((err as { error?: string }).error ?? 'Connection failed')
-        setTimeout(() => navigate('/pages'), 3000)
+        setTimeout(() => navigate('/facebook/accounts'), 3000)
       })
   }, [params, navigate])
 

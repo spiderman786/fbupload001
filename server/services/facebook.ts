@@ -8,8 +8,8 @@ export function isFacebookConfigured(agencyId?: string): boolean {
   return Boolean(process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET)
 }
 
-export function getOAuthUrl(agencyId: string, state: string): string {
-  const creds = getByocCredentials(agencyId, 'facebook')
+export function getOAuthUrl(agencyId: string, state: string, byocCredentialId?: string | null): string {
+  const creds = getByocCredentials(agencyId, 'facebook', byocCredentialId)
   if (!creds) throw new Error('Facebook app not configured. Add BYOC credentials in Settings.')
 
   const params = new URLSearchParams({
@@ -22,11 +22,15 @@ export function getOAuthUrl(agencyId: string, state: string): string {
   return `https://www.facebook.com/v21.0/dialog/oauth?${params}`
 }
 
-export async function exchangeCodeForToken(agencyId: string, code: string): Promise<{
+export async function exchangeCodeForToken(
+  agencyId: string,
+  code: string,
+  byocCredentialId?: string | null,
+): Promise<{
   accessToken: string
   metaUserId: string
 }> {
-  const creds = getByocCredentials(agencyId, 'facebook')
+  const creds = getByocCredentials(agencyId, 'facebook', byocCredentialId)
   if (!creds) {
     if (code === 'mock_code') {
       return { accessToken: 'mock_token', metaUserId: 'mock_user_' + Date.now() }
@@ -142,23 +146,30 @@ function formatFollowers(n: number): string {
   return String(n)
 }
 
-export function saveFacebookAccount(agencyId: string, userId: string, metaUserId: string, accessToken: string) {
+export function saveFacebookAccount(
+  agencyId: string,
+  userId: string,
+  metaUserId: string,
+  accessToken: string,
+  byocCredentialId?: string | null,
+) {
   const existing = db
     .prepare('SELECT id FROM facebook_accounts WHERE agency_id = ? AND meta_user_id = ?')
     .get(agencyId, metaUserId) as { id: string } | undefined
 
   if (existing) {
-    db.prepare(`UPDATE facebook_accounts SET access_token = ?, connected_at = datetime('now') WHERE id = ?`).run(
-      accessToken,
-      existing.id,
-    )
+    db.prepare(`
+      UPDATE facebook_accounts
+      SET access_token = ?, byoc_credential_id = COALESCE(?, byoc_credential_id), connected_at = datetime('now')
+      WHERE id = ?
+    `).run(accessToken, byocCredentialId ?? null, existing.id)
     return existing.id
   }
 
   const id = uuid()
   db.prepare(
-    'INSERT INTO facebook_accounts (id, user_id, agency_id, meta_user_id, access_token) VALUES (?, ?, ?, ?, ?)',
-  ).run(id, userId, agencyId, metaUserId, accessToken)
+    'INSERT INTO facebook_accounts (id, user_id, agency_id, meta_user_id, access_token, byoc_credential_id) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(id, userId, agencyId, metaUserId, accessToken, byocCredentialId ?? null)
   return id
 }
 

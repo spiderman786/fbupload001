@@ -15,7 +15,14 @@ import {
 
 type Tab = 'pages' | 'sources'
 type AddMode = 'single' | 'bulk' | 'csv'
-type FbAccount = { id: string; meta_user_id: string; connected_at: string }
+type FbAccount = {
+  id: string
+  meta_user_id: string
+  connected_at: string
+  byoc_credential_id: string | null
+  byoc_label: string | null
+  byoc_app_id: string | null
+}
 type FbPage = { id: string; name: string; followers?: string; fanCount: number }
 
 const SYNC_STALE_MS = 60 * 60 * 1000
@@ -528,7 +535,10 @@ export function AutoDownloadUploadPage() {
                       }`}
                     >
                       <p className="font-medium">{acc.meta_user_id}</p>
-                      <p className="text-xs text-muted-foreground">Connected {new Date(acc.connected_at).toLocaleDateString()}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {acc.byoc_label ? `${acc.byoc_label} · ` : ''}
+                        Connected {new Date(acc.connected_at).toLocaleDateString()}
+                      </p>
                     </button>
                     ))}
                   {!accounts.length && <p className="text-xs text-muted-foreground">No Facebook accounts connected yet.</p>}

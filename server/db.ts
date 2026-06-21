@@ -342,6 +342,69 @@ function migrate() {
   `)
 
   migrateAgencies()
+  migrateMultiByoc()
+}
+
+function migrateMultiByoc() {
+  const byocCols = db.prepare('PRAGMA table_info(byoc_credentials)').all() as { name: string }[]
+  if (byocCols.length && !byocCols.some((c) => c.name === 'id')) {
+    db.exec(`
+      CREATE TABLE byoc_credentials_v2 (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        agency_id TEXT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+        platform TEXT NOT NULL CHECK(platform IN ('facebook', 'youtube', 'instagram', 'tiktok')),
+        label TEXT NOT NULL DEFAULT 'App 1',
+        app_id TEXT NOT NULL,
+        app_secret TEXT NOT NULL,
+        redirect_uri TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `)
+
+    const legacy = db.prepare('SELECT * FROM byoc_credentials').all() as {
+      user_id: string
+      agency_id: string | null
+      platform: string
+      app_id: string
+      app_secret: string
+      redirect_uri: string
+      updated_at: string
+    }[]
+
+    const insert = db.prepare(`
+      INSERT INTO byoc_credentials_v2 (id, user_id, agency_id, platform, label, app_id, app_secret, redirect_uri, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+
+    for (const row of legacy) {
+      if (!row.agency_id) continue
+      insert.run(
+        uuid(),
+        row.user_id,
+        row.agency_id,
+        row.platform,
+        'Default App',
+        row.app_id,
+        row.app_secret,
+        row.redirect_uri,
+        row.updated_at,
+      )
+    }
+
+    db.exec('DROP TABLE byoc_credentials')
+    db.exec('ALTER TABLE byoc_credentials_v2 RENAME TO byoc_credentials')
+  }
+
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_byoc_agency_platform_app ON byoc_credentials(agency_id, platform, app_id);
+    CREATE INDEX IF NOT EXISTS idx_byoc_agency_platform ON byoc_credentials(agency_id, platform);
+  `)
+
+  const accountCols = db.prepare('PRAGMA table_info(facebook_accounts)').all() as { name: string }[]
+  if (!accountCols.some((c) => c.name === 'byoc_credential_id')) {
+    db.exec(`ALTER TABLE facebook_accounts ADD COLUMN byoc_credential_id TEXT REFERENCES byoc_credentials(id) ON DELETE SET NULL`)
+  }
 }
 
 export type UserRow = {
