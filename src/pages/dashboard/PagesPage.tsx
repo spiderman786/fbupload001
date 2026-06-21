@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Globe, Link2, Pause, Play, Trash2 } from 'lucide-react'
 import { api, type ByocApp, type FacebookPage } from '../../api/client'
+import { ByocOAuthGuide } from '../../components/ByocOAuthGuide'
 import { StatusBadge } from '../../components/StatusBadge'
+import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
 import { getApiError } from '../../lib/apiError'
 
 export function PagesPage() {
   const toast = useToast()
+  const { agency } = useAuth()
   const [pages, setPages] = useState<FacebookPage[]>([])
   const [byocApps, setByocApps] = useState<ByocApp[]>([])
   const [selectedAppId, setSelectedAppId] = useState('')
@@ -148,13 +151,18 @@ export function PagesPage() {
       )}
 
       {!byocApps.length && !mockMode && (
-        <p className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-2 text-sm text-orange-800">
-          Add at least one Facebook Developer app in{' '}
-          <Link to="/settings/facebook-byoc" className="font-medium underline">
-            BYOC Settings
-          </Link>{' '}
-          before connecting accounts.
-        </p>
+        <div className="space-y-3">
+          <p className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-2 text-sm text-orange-800">
+            Add at least one Facebook Developer app before connecting accounts.
+          </p>
+          <ByocOAuthGuide subdomain={agency?.subdomain} compact />
+          <p className="text-sm text-muted-foreground">
+            Then save credentials in{' '}
+            <Link to="/settings/facebook-byoc" className="text-primary hover:underline">
+              Facebook BYOC Settings
+            </Link>
+          </p>
+        </div>
       )}
 
       {error && <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>}

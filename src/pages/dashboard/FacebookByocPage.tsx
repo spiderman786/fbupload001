@@ -1,23 +1,30 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, Settings, ShieldCheck, Trash2 } from 'lucide-react'
+import { Eye, EyeOff, Plus, Settings, Trash2 } from 'lucide-react'
 import { api, type ByocApp } from '../../api/client'
+import { ByocOAuthGuide } from '../../components/ByocOAuthGuide'
+import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
 import { getApiError } from '../../lib/apiError'
-
-const DEFAULT_REDIRECT = 'https://app.fbuploadplus.com/facebook/callback'
+import { primaryOAuthRedirectUri } from '../../lib/byocUrls'
 
 export function FacebookByocPage() {
   const toast = useToast()
+  const { agency } = useAuth()
   const [apps, setApps] = useState<ByocApp[]>([])
   const [envFallback, setEnvFallback] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [showForm, setShowForm] = useState(false)
+  const [showSecret, setShowSecret] = useState(false)
   const [label, setLabel] = useState('')
   const [appId, setAppId] = useState('')
   const [appSecret, setAppSecret] = useState('')
-  const [redirectUri, setRedirectUri] = useState(DEFAULT_REDIRECT)
+  const [redirectUri, setRedirectUri] = useState(() => primaryOAuthRedirectUri(agency?.subdomain))
+
+  useEffect(() => {
+    setRedirectUri(primaryOAuthRedirectUri(agency?.subdomain))
+  }, [agency?.subdomain])
 
   async function load() {
     setLoading(true)
@@ -41,7 +48,7 @@ export function FacebookByocPage() {
     setSaving(true)
     try {
       await api.byoc.createApp('facebook', { label, appId, appSecret, redirectUri })
-      toast.success('Facebook Developer app added')
+      toast.success('Facebook Developer app added — ready to connect accounts')
       setLabel('')
       setAppId('')
       setAppSecret('')
@@ -73,9 +80,10 @@ export function FacebookByocPage() {
         <div className="mb-2 inline-flex rounded-lg border border-primary/15 bg-primary/5 p-2">
           <Settings className="h-5 w-5 text-primary" />
         </div>
-        <h1 className="font-display text-2xl font-bold">Facebook BYOC Apps</h1>
+        <h1 className="font-display text-2xl font-bold">Facebook BYOC</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Add multiple Meta Developer apps to one agency. Each app supports ~50 test users in Development mode — add App 2, App 3, etc. to scale without extra signups.
+          Add multiple Meta Developer apps to this agency. Each app supports ~50 test users in Development mode — add
+          App 2, App 3, etc. All pages and tokens stay on one account.
         </p>
       </div>
 
@@ -86,12 +94,16 @@ export function FacebookByocPage() {
       ) : (
         <>
           <div className="rounded-xl border border-border bg-card p-4 text-sm">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className={`h-4 w-4 ${apps.length || envFallback ? 'text-primary' : 'text-muted-foreground'}`} />
-              <span className="font-medium">
-                {apps.length} developer app{apps.length !== 1 ? 's' : ''} · {totalLinked} connected account{totalLinked !== 1 ? 's' : ''}
-              </span>
-            </div>
+            <p className="font-medium">
+              {apps.length} developer app{apps.length !== 1 ? 's' : ''} · {totalLinked} connected account
+              {totalLinked !== 1 ? 's' : ''}
+            </p>
+            {agency?.subdomain && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Agency workspace:{' '}
+                <span className="font-medium text-foreground">{agency.subdomain}.fbuploadplus.com</span>
+              </p>
+            )}
             {envFallback && (
               <p className="mt-2 text-xs text-muted-foreground">
                 Platform .env fallback is available when no BYOC apps are configured.
@@ -99,33 +111,51 @@ export function FacebookByocPage() {
             )}
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-4">
             {apps.map((app) => (
-              <div key={app.id} className="rounded-xl border border-border bg-card p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold">{app.label}</p>
-                    <p className="text-xs text-muted-foreground">App ID: {app.appId}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {app.linkedAccounts} account{app.linkedAccounts !== 1 ? 's' : ''} connected
-                      {app.linkedAccounts >= 50 && (
-                        <span className="ml-1 text-orange-600">· near dev-mode limit</span>
-                      )}
-                    </p>
+              <div key={app.id} className="overflow-hidden rounded-xl border border-border bg-card">
+                <div className="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <Settings className="h-4 w-4 text-primary" />
+                    <span className="text-xs font-semibold tracking-[0.14em] text-muted-foreground uppercase">
+                      BYOC configuration
+                    </span>
                   </div>
                   <button
                     type="button"
                     onClick={() => handleDelete(app)}
                     disabled={app.linkedAccounts > 0}
                     title={app.linkedAccounts > 0 ? 'Disconnect accounts first' : 'Remove app'}
-                    className="rounded-lg border border-border p-2 text-red-600 hover:bg-red-50 disabled:opacity-40"
+                    className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-40"
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Remove
                   </button>
+                </div>
+
+                <div className="space-y-4 p-4">
+                  <div>
+                    <h3 className="font-display text-xl font-bold">{app.label}</h3>
+                    <p className="mt-1 text-xs text-muted-foreground">App ID: {app.appId}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {app.linkedAccounts} account{app.linkedAccounts !== 1 ? 's' : ''} connected
+                      {app.linkedAccounts >= 50 && (
+                        <span className="ml-1 text-orange-600">· near dev-mode limit — add another app</span>
+                      )}
+                    </p>
+                  </div>
+
+                  <ByocOAuthGuide subdomain={agency?.subdomain} compact verified />
+
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Redirect URI saved</p>
+                    <p className="font-mono text-xs break-all text-foreground">{app.redirectUri}</p>
+                  </div>
                 </div>
               </div>
             ))}
-            {!apps.length && (
+
+            {!apps.length && !showForm && (
               <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
                 No Facebook Developer apps yet. Add your first app below.
               </div>
@@ -133,65 +163,75 @@ export function FacebookByocPage() {
           </div>
 
           {showForm ? (
-            <form onSubmit={handleAdd} className="marketing-card space-y-4">
-              <p className="text-sm font-semibold">Add Facebook Developer App</p>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Label</label>
-                <input
-                  value={label}
-                  onChange={(e) => setLabel(e.target.value)}
-                  placeholder="e.g. App 2 — Client Batch B"
-                  className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">App ID</label>
-                <input
-                  required
-                  value={appId}
-                  onChange={(e) => setAppId(e.target.value)}
-                  placeholder="Meta App ID"
-                  className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">App Secret</label>
-                <input
-                  required
-                  type="password"
-                  value={appSecret}
-                  onChange={(e) => setAppSecret(e.target.value)}
-                  className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">OAuth Redirect URI</label>
-                <input
-                  value={redirectUri}
-                  onChange={(e) => setRedirectUri(e.target.value)}
-                  className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Add this URI in Meta Developer → Facebook Login → Valid OAuth Redirect URIs
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                >
-                  {saving ? 'Saving...' : 'Add app'}
-                </button>
-              </div>
-            </form>
+            <div className="space-y-4">
+              <ByocOAuthGuide subdomain={agency?.subdomain} />
+
+              <form onSubmit={handleAdd} className="marketing-card space-y-4">
+                <p className="text-sm font-semibold">Step 4 — Enter app credentials</p>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">App label</label>
+                  <input
+                    value={label}
+                    onChange={(e) => setLabel(e.target.value)}
+                    placeholder="e.g. videos hub, App 2 — Batch B"
+                    className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">App ID</label>
+                  <input
+                    required
+                    value={appId}
+                    onChange={(e) => setAppId(e.target.value)}
+                    placeholder="Meta App ID"
+                    className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">App Secret</label>
+                  <div className="relative">
+                    <input
+                      required
+                      type={showSecret ? 'text' : 'password'}
+                      value={appSecret}
+                      onChange={(e) => setAppSecret(e.target.value)}
+                      className="h-10 w-full rounded-md border border-border bg-background px-3 pr-10 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSecret((v) => !v)}
+                      className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-muted"
+                    >
+                      {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">OAuth redirect URI (must match Meta)</label>
+                  <input
+                    value={redirectUri}
+                    onChange={(e) => setRedirectUri(e.target.value)}
+                    className="h-10 w-full rounded-md border border-border bg-background px-3 font-mono text-xs"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowForm(false)}
+                    className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {saving ? 'Verifying...' : 'Save & verify app'}
+                  </button>
+                </div>
+              </form>
+            </div>
           ) : (
             <button
               type="button"
@@ -199,15 +239,16 @@ export function FacebookByocPage() {
               className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-semibold hover:bg-muted"
             >
               <Plus className="h-4 w-4" />
-              Add another Facebook app
+              {apps.length ? 'Add another Facebook app' : 'Add Facebook Developer app'}
             </button>
           )}
 
           <p className="text-sm text-muted-foreground">
-            When connecting accounts, choose which app to use. All pages stay in this agency with one token balance.{' '}
+            After saving, go to{' '}
             <Link to="/facebook/accounts" className="text-primary hover:underline">
-              Connect Facebook accounts
-            </Link>
+              Facebook Accounts
+            </Link>{' '}
+            — pick which app to use, then connect up to ~50 accounts per app (Development mode).
           </p>
         </>
       )}
