@@ -75,8 +75,8 @@ facebookRouter.post('/callback', authMiddleware, requireVerified, agencyMiddlewa
   }
 
   try {
-    const { accessToken, metaUserId } = await exchangeCodeForToken(agencyId, code ?? 'mock_code', byocCredentialId)
-    const accountId = saveFacebookAccount(agencyId, userId, metaUserId, accessToken, byocCredentialId)
+    const { accessToken, metaUserId, displayName } = await exchangeCodeForToken(agencyId, code ?? 'mock_code', byocCredentialId)
+    const accountId = saveFacebookAccount(agencyId, userId, metaUserId, accessToken, byocCredentialId, displayName)
     const pageIds = await connectPagesForAgency(agencyId, userId, accountId, accessToken)
 
     res.json({
@@ -97,8 +97,8 @@ facebookRouter.post('/connect-mock', authMiddleware, requireVerified, agencyMidd
     const agencyId = req.agency!.id
     const byocCredentialId =
       typeof req.body?.byocCredentialId === 'string' ? resolveByocCredentialId(agencyId, req.body.byocCredentialId) : null
-    const { accessToken, metaUserId } = await exchangeCodeForToken(agencyId, 'mock_code', byocCredentialId)
-    const accountId = saveFacebookAccount(agencyId, userId, metaUserId, accessToken, byocCredentialId)
+    const { accessToken, metaUserId, displayName } = await exchangeCodeForToken(agencyId, 'mock_code', byocCredentialId)
+    const accountId = saveFacebookAccount(agencyId, userId, metaUserId, accessToken, byocCredentialId, displayName)
     const pageIds = await connectPagesForAgency(agencyId, userId, accountId, accessToken)
     res.json({ message: 'Demo pages connected', pagesConnected: pageIds.length })
   } catch (err) {
@@ -112,6 +112,7 @@ facebookRouter.get('/accounts', authMiddleware, requireVerified, agencyMiddlewar
       SELECT
         fa.id,
         fa.meta_user_id,
+        fa.display_name,
         fa.connected_at,
         fa.byoc_credential_id,
         b.label AS byoc_label,
@@ -192,11 +193,21 @@ facebookRouter.post(
         skipped += batch.length - ids.length
       }
 
+      const connectedPages =
+        connected.length > 0
+          ? (db
+              .prepare(
+                `SELECT id, meta_page_id as metaPageId FROM facebook_pages WHERE id IN (${connected.map(() => '?').join(',')})`,
+              )
+              .all(...connected) as { id: string; metaPageId: string }[])
+          : []
+
       res.json({
         message: 'Pages added to automation',
         pagesConnected: connected.length,
         skipped,
         ids: connected,
+        connectedPages,
       })
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to add pages' })

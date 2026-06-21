@@ -499,6 +499,9 @@ function migrateMultiByoc() {
   if (!accountCols.some((c) => c.name === 'byoc_credential_id')) {
     db.exec(`ALTER TABLE facebook_accounts ADD COLUMN byoc_credential_id TEXT REFERENCES byoc_credentials(id) ON DELETE SET NULL`)
   }
+  if (!accountCols.some((c) => c.name === 'display_name')) {
+    db.exec(`ALTER TABLE facebook_accounts ADD COLUMN display_name TEXT`)
+  }
 }
 
 export type UserRow = {

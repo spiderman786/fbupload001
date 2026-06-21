@@ -165,6 +165,7 @@ export const api = {
         accounts: {
           id: string
           meta_user_id: string
+          display_name: string | null
           connected_at: string
           byoc_credential_id: string | null
           byoc_label: string | null
@@ -176,13 +177,16 @@ export const api = {
         `/facebook/accounts/${accountId}/pages`,
       ),
     connectPages: (accountId: string, pageIds: string[]) =>
-      request<{ message: string; pagesConnected: number; skipped?: number; ids: string[] }>(
-        `/facebook/accounts/${accountId}/connect-pages`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ pageIds }),
-        },
-      ),
+      request<{
+        message: string
+        pagesConnected: number
+        skipped?: number
+        ids: string[]
+        connectedPages?: { id: string; metaPageId: string }[]
+      }>(`/facebook/accounts/${accountId}/connect-pages`, {
+        method: 'POST',
+        body: JSON.stringify({ pageIds }),
+      }),
   },
   reels: {
     list: () => request<{ jobs: ReelJob[] }>('/reels'),

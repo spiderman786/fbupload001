@@ -1,0 +1,17 @@
+export const COMMON_TIMEZONES = [
+  { value: 'America/New_York', label: 'America/New_York (GMT-5)' },
+  { value: 'America/Chicago', label: 'America/Chicago (GMT-6)' },
+  { value: 'America/Denver', label: 'America/Denver (GMT-7)' },
+  { value: 'America/Los_Angeles', label: 'America/Los_Angeles (GMT-8)' },
+  { value: 'America/Toronto', label: 'America/Toronto (GMT-5)' },
+  { value: 'Europe/London', label: 'Europe/London (GMT+0)' },
+  { value: 'Europe/Paris', label: 'Europe/Paris (GMT+1)' },
+  { value: 'Europe/Berlin', label: 'Europe/Berlin (GMT+1)' },
+  { value: 'Asia/Dubai', label: 'Asia/Dubai (GMT+4)' },
+  { value: 'Asia/Karachi', label: 'Asia/Karachi (GMT+5)' },
+  { value: 'Asia/Kolkata', label: 'Asia/Kolkata (GMT+5:30)' },
+  { value: 'Asia/Singapore', label: 'Asia/Singapore (GMT+8)' },
+  { value: 'Asia/Tokyo', label: 'Asia/Tokyo (GMT+9)' },
+  { value: 'Australia/Sydney', label: 'Australia/Sydney (GMT+10)' },
+  { value: 'Pacific/Auckland', label: 'Pacific/Auckland (GMT+12)' },
+]

@@ -29,11 +29,12 @@ export async function exchangeCodeForToken(
 ): Promise<{
   accessToken: string
   metaUserId: string
+  displayName?: string | null
 }> {
   const creds = getByocCredentials(agencyId, 'facebook', byocCredentialId)
   if (!creds) {
     if (code === 'mock_code') {
-      return { accessToken: 'mock_token', metaUserId: 'mock_user_' + Date.now() }
+      return { accessToken: 'mock_token', metaUserId: 'mock_user_' + Date.now(), displayName: 'Demo Facebook User' }
     }
     throw new Error('Facebook app not configured')
   }
@@ -52,12 +53,12 @@ export async function exchangeCodeForToken(
   }
 
   const meRes = await fetch(
-    `https://graph.facebook.com/v21.0/me?fields=id&access_token=${tokenData.access_token}`,
+    `https://graph.facebook.com/v21.0/me?fields=id,name&access_token=${tokenData.access_token}`,
   )
-  const meData = (await meRes.json()) as { id?: string }
+  const meData = (await meRes.json()) as { id?: string; name?: string }
   if (!meData.id) throw new Error('Failed to fetch Meta user ID')
 
-  return { accessToken: tokenData.access_token, metaUserId: meData.id }
+  return { accessToken: tokenData.access_token, metaUserId: meData.id, displayName: meData.name ?? null }
 }
 
 type FbPageRow = { id: string; name: string; followers?: string; fanCount: number; accessToken?: string }
@@ -152,6 +153,7 @@ export function saveFacebookAccount(
   metaUserId: string,
   accessToken: string,
   byocCredentialId?: string | null,
+  displayName?: string | null,
 ) {
   const existing = db
     .prepare('SELECT id FROM facebook_accounts WHERE agency_id = ? AND meta_user_id = ?')
@@ -160,16 +162,17 @@ export function saveFacebookAccount(
   if (existing) {
     db.prepare(`
       UPDATE facebook_accounts
-      SET access_token = ?, byoc_credential_id = COALESCE(?, byoc_credential_id), connected_at = datetime('now')
+      SET access_token = ?, byoc_credential_id = COALESCE(?, byoc_credential_id),
+          display_name = COALESCE(?, display_name), connected_at = datetime('now')
       WHERE id = ?
-    `).run(accessToken, byocCredentialId ?? null, existing.id)
+    `).run(accessToken, byocCredentialId ?? null, displayName ?? null, existing.id)
     return existing.id
   }
 
   const id = uuid()
   db.prepare(
-    'INSERT INTO facebook_accounts (id, user_id, agency_id, meta_user_id, access_token, byoc_credential_id) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(id, userId, agencyId, metaUserId, accessToken, byocCredentialId ?? null)
+    'INSERT INTO facebook_accounts (id, user_id, agency_id, meta_user_id, access_token, byoc_credential_id, display_name) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  ).run(id, userId, agencyId, metaUserId, accessToken, byocCredentialId ?? null, displayName ?? null)
   return id
 }
 
