@@ -10,6 +10,8 @@ import { recordPostedReel } from './dedup.js'
 import { canPagePostToday } from './pageQuota.js'
 import { appendJobLog } from './jobLog.js'
 import { maybeAutoRetryJob } from './autoRetry.js'
+import { applySelfHealingOnJobFailure, resetPageFailureStreak, resetSourceFailureStreak } from './selfHealing.js'
+import { isPlatformFlagEnabled, isAgencyInMaintenance } from './platformSettings.js'
 
 export type JobType = 'direct' | 'inapp' | 'scheduled'
 
@@ -21,6 +23,11 @@ export async function runAutomationJob(jobId: string): Promise<void> {
 
   const userId = job.user_id as string
   const agencyId = (job.agency_id as string | null) ?? userId
+
+  if (!isPlatformFlagEnabled('publishing_enabled')) throw new Error('Publishing disabled platform-wide')
+  if (!isPlatformFlagEnabled('downloads_enabled')) throw new Error('Downloads disabled platform-wide')
+  if (isAgencyInMaintenance(agencyId)) throw new Error('Agency is in maintenance mode')
+
   let sourceId = job.source_account_id as string | null
   const pageId = job.target_page_id as string
 
@@ -158,11 +165,14 @@ export async function runAutomationJob(jobId: string): Promise<void> {
   })()
 
   appendJobLog(jobId, 'complete', 'Job finished successfully')
+  resetPageFailureStreak(pageId)
+  if (sourceId) resetSourceFailureStreak(sourceId)
   cleanupJobFiles(agencyId, jobId)
 }
 
 export function failAutomationJob(jobId: string, message: string) {
   appendJobLog(jobId, 'failed', message, 'error')
+  applySelfHealingOnJobFailure(jobId, message)
   if (maybeAutoRetryJob(jobId, message)) return
 
   const job = db.prepare('SELECT user_id, agency_id FROM reel_jobs WHERE id = ?').get(jobId) as

@@ -101,8 +101,11 @@ export function OpsOverviewPage() {
         <Link to="/ops/agencies" className="rounded-lg bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700">
           All agencies
         </Link>
-        <Link to="/ops/system" className="rounded-lg bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700">
-          System status
+        <Link to="/ops/live" className="rounded-lg bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700">
+          Live feed
+        </Link>
+        <Link to="/ops/settings" className="rounded-lg bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700">
+          Settings
         </Link>
       </div>
     </div>

@@ -393,6 +393,40 @@ function migrateOps() {
   if (!jobCols.some((c) => c.name === 'retry_count')) {
     db.exec(`ALTER TABLE reel_jobs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`)
   }
+
+  const agencyCols = db.prepare('PRAGMA table_info(agencies)').all() as { name: string }[]
+  if (!agencyCols.some((c) => c.name === 'parent_agency_id')) {
+    db.exec(`ALTER TABLE agencies ADD COLUMN parent_agency_id TEXT REFERENCES agencies(id) ON DELETE SET NULL`)
+  }
+  if (!agencyCols.some((c) => c.name === 'maintenance_mode')) {
+    db.exec(`ALTER TABLE agencies ADD COLUMN maintenance_mode INTEGER NOT NULL DEFAULT 0`)
+  }
+
+  const pageCols = db.prepare('PRAGMA table_info(facebook_pages)').all() as { name: string }[]
+  if (!pageCols.some((c) => c.name === 'consecutive_failures')) {
+    db.exec(`ALTER TABLE facebook_pages ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0`)
+  }
+
+  const sourceCols = db.prepare('PRAGMA table_info(source_accounts)').all() as { name: string }[]
+  if (!sourceCols.some((c) => c.name === 'consecutive_failures')) {
+    db.exec(`ALTER TABLE source_accounts ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0`)
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS platform_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS ops_alert_config (
+      alert_type TEXT PRIMARY KEY,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      threshold REAL,
+      webhook_url TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `)
 }
 
 function migrateMultiByoc() {

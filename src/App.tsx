@@ -34,6 +34,8 @@ import { OpsPagesPage } from './pages/ops/OpsPagesPage'
 import { OpsAnalyticsPage } from './pages/ops/OpsAnalyticsPage'
 import { OpsAuditPage } from './pages/ops/OpsAuditPage'
 import { OpsSystemPage } from './pages/ops/OpsSystemPage'
+import { OpsLiveFeedPage } from './pages/ops/OpsLiveFeedPage'
+import { OpsSettingsPage } from './pages/ops/OpsSettingsPage'
 
 function App() {
   return (
@@ -131,6 +133,8 @@ function App() {
             <Route path="/ops/agencies/:id" element={<OpsAgencyDetailPage />} />
             <Route path="/ops/pages" element={<OpsPagesPage />} />
             <Route path="/ops/jobs" element={<OpsJobsPage />} />
+            <Route path="/ops/live" element={<OpsLiveFeedPage />} />
+            <Route path="/ops/settings" element={<OpsSettingsPage />} />
             <Route path="/ops/analytics" element={<OpsAnalyticsPage />} />
             <Route path="/ops/system" element={<OpsSystemPage />} />
             <Route path="/ops/audit" element={<OpsAuditPage />} />

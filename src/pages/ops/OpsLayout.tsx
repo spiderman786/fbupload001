@@ -8,9 +8,12 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
+  Radio,
   Server,
+  Settings,
   Shield,
 } from 'lucide-react'
+import { OpsGlobalSearch } from './OpsGlobalSearch'
 import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
 import { getApiError } from '../../lib/apiError'
@@ -18,10 +21,12 @@ import { api } from '../../api/client'
 
 const NAV = [
   { to: '/ops', label: 'Overview', icon: LayoutDashboard, end: true },
+  { to: '/ops/live', label: 'Live Feed', icon: Radio },
   { to: '/ops/agencies', label: 'Agencies', icon: Building2 },
   { to: '/ops/pages', label: 'All Pages', icon: Globe },
   { to: '/ops/jobs', label: 'Jobs & Errors', icon: ListChecks },
   { to: '/ops/analytics', label: 'Analytics', icon: Activity },
+  { to: '/ops/settings', label: 'Settings', icon: Settings },
   { to: '/ops/system', label: 'System', icon: Server },
   { to: '/ops/audit', label: 'Audit Log', icon: FileText },
 ]
@@ -82,6 +87,7 @@ export function OpsLayout() {
         </div>
       </aside>
       <main className="min-w-0 flex-1 overflow-y-auto p-6">
+        <OpsGlobalSearch />
         <Outlet />
       </main>
     </div>

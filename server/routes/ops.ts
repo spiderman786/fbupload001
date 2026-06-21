@@ -13,6 +13,11 @@ import { getProxyPoolStats } from '../services/proxyPool.js'
 import { readWorkerHeartbeat } from '../services/workerHeartbeat.js'
 import { enqueueJob } from '../services/jobQueue.js'
 import { setAgencyCookie, buildSessionPayload } from '../utils/agency.js'
+import { deleteAgency, pauseAllAgencyPages } from '../services/deleteAgency.js'
+import { getAgencyHealthScores, globalOpsSearch, getJobErrorGroups } from '../services/agencyHealth.js'
+import { getAllPlatformSettings, setPlatformSetting, setAgencyMaintenance, type PlatformFlag } from '../services/platformSettings.js'
+import { pollLiveEvents } from '../services/opsLiveFeed.js'
+import { explainJobFailure } from '../services/jobExplain.js'
 
 export const opsRouter = Router()
 
@@ -62,16 +67,23 @@ opsRouter.get('/overview', ...guard, (_req, res) => {
 })
 
 opsRouter.get('/agencies', ...guard, (_req, res) => {
+  const healthMap = new Map(getAgencyHealthScores().map((h) => [h.agencyId, h]))
   const rows = db
     .prepare(`
       SELECT a.*,
         (SELECT COUNT(*) FROM facebook_pages p WHERE p.agency_id = a.id) as page_count,
         (SELECT COUNT(*) FROM agency_members m WHERE m.agency_id = a.id) as member_count,
-        (SELECT email FROM users u JOIN agency_members m ON m.user_id = u.id WHERE m.agency_id = a.id AND m.role = 'owner' LIMIT 1) as owner_email
+        (SELECT email FROM users u JOIN agency_members m ON m.user_id = u.id WHERE m.agency_id = a.id AND m.role = 'owner' LIMIT 1) as owner_email,
+        (SELECT name FROM agencies pa WHERE pa.id = a.parent_agency_id) as parent_name
       FROM agencies a
       ORDER BY a.created_at DESC
     `)
     .all()
+    .map((row) => {
+      const r = row as Record<string, unknown>
+      const health = healthMap.get(String(r.id))
+      return { ...r, healthScore: health?.score ?? null, healthStatus: health?.status ?? null }
+    })
   res.json({ agencies: rows })
 })
 
@@ -144,6 +156,85 @@ opsRouter.post('/agencies/:id/credit-tokens', ...guard, (req: PlatformAdminReque
   res.json({ tokenBalance: agency.token_balance + amount })
 })
 
+opsRouter.delete('/agencies/:id', ...guard, (req: PlatformAdminRequest, res) => {
+  const confirmName = String(req.body?.confirmName ?? '').trim()
+  if (!confirmName) {
+    res.status(400).json({ error: 'confirmName required' })
+    return
+  }
+  try {
+    deleteAgency(req.params.id, confirmName)
+    writeOpsAudit(req.user!.id, 'delete_agency', 'agency', req.params.id, { confirmName })
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Delete failed' })
+  }
+})
+
+opsRouter.post('/agencies/:id/pause-pages', ...guard, (req: PlatformAdminRequest, res) => {
+  const count = pauseAllAgencyPages(req.params.id)
+  writeOpsAudit(req.user!.id, 'pause_all_pages', 'agency', req.params.id, { count })
+  res.json({ paused: count })
+})
+
+opsRouter.patch('/agencies/:id/parent', ...guard, (req: PlatformAdminRequest, res) => {
+  const parentAgencyId = req.body?.parentAgencyId as string | null | undefined
+  if (parentAgencyId === req.params.id) {
+    res.status(400).json({ error: 'Agency cannot be its own parent' })
+    return
+  }
+  if (parentAgencyId) {
+    const parent = db.prepare('SELECT id FROM agencies WHERE id = ?').get(parentAgencyId)
+    if (!parent) {
+      res.status(404).json({ error: 'Parent agency not found' })
+      return
+    }
+  }
+  db.prepare('UPDATE agencies SET parent_agency_id = ? WHERE id = ?').run(parentAgencyId ?? null, req.params.id)
+  writeOpsAudit(req.user!.id, 'set_parent_agency', 'agency', req.params.id, { parentAgencyId: parentAgencyId ?? null })
+  res.json({ ok: true })
+})
+
+opsRouter.patch('/agencies/:id/maintenance', ...guard, (req: PlatformAdminRequest, res) => {
+  const enabled = Boolean(req.body?.enabled)
+  setAgencyMaintenance(req.params.id, enabled)
+  writeOpsAudit(req.user!.id, 'agency_maintenance', 'agency', req.params.id, { enabled })
+  res.json({ maintenance: enabled })
+})
+
+opsRouter.post('/agencies/bulk-credit', ...guard, (req: PlatformAdminRequest, res) => {
+  const agencyIds = req.body?.agencyIds as string[] | undefined
+  const amount = Number(req.body?.amount)
+  if (!Array.isArray(agencyIds) || !agencyIds.length) {
+    res.status(400).json({ error: 'agencyIds required' })
+    return
+  }
+  if (!Number.isFinite(amount) || amount <= 0) {
+    res.status(400).json({ error: 'Invalid amount' })
+    return
+  }
+  let credited = 0
+  for (const agencyId of agencyIds.slice(0, 50)) {
+    const agency = db.prepare('SELECT id, token_balance FROM agencies WHERE id = ?').get(agencyId) as
+      | { id: string; token_balance: number }
+      | undefined
+    if (!agency) continue
+    db.prepare('UPDATE agencies SET token_balance = token_balance + ? WHERE id = ?').run(amount, agencyId)
+    const owner = db
+      .prepare("SELECT user_id FROM agency_members WHERE agency_id = ? AND role = 'owner' LIMIT 1")
+      .get(agencyId) as { user_id: string } | undefined
+    if (owner) {
+      db.prepare(`
+        INSERT INTO token_transactions (id, user_id, agency_id, amount, type, note)
+        VALUES (?, ?, ?, ?, 'purchase', ?)
+      `).run(uuid(), owner.user_id, agencyId, amount, `Ops bulk credit by ${req.user!.email}`)
+    }
+    credited++
+  }
+  writeOpsAudit(req.user!.id, 'bulk_credit_tokens', 'agency', agencyIds.join(','), { amount, credited })
+  res.json({ credited })
+})
+
 opsRouter.get('/pages', ...guard, (req, res) => {
   const { status, health } = req.query
   let sql = `
@@ -200,6 +291,45 @@ opsRouter.get('/jobs', ...guard, (req, res) => {
   res.json({ jobs: db.prepare(sql).all(...params) })
 })
 
+opsRouter.get('/jobs/error-groups', ...guard, (req, res) => {
+  const days = Math.min(30, Number(req.query.days) || 7)
+  res.json({ groups: getJobErrorGroups(days), days })
+})
+
+opsRouter.post('/jobs/bulk-retry', ...guard, (req: PlatformAdminRequest, res) => {
+  const errorMessage = req.body?.errorMessage as string | undefined
+  const jobIds = req.body?.jobIds as string[] | undefined
+  let ids: string[] = []
+
+  if (Array.isArray(jobIds) && jobIds.length) {
+    ids = jobIds.slice(0, 200)
+  } else if (errorMessage) {
+    ids = (
+      db
+        .prepare(`
+          SELECT id FROM reel_jobs
+          WHERE status = 'failed' AND error_message = ?
+          ORDER BY created_at DESC LIMIT 200
+        `)
+        .all(errorMessage) as { id: string }[]
+    ).map((r) => r.id)
+  } else {
+    res.status(400).json({ error: 'jobIds or errorMessage required' })
+    return
+  }
+
+  let retried = 0
+  for (const id of ids) {
+    db.prepare(`
+      UPDATE reel_jobs SET status = 'pending', error_message = NULL, completed_at = NULL WHERE id = ? AND status = 'failed'
+    `).run(id)
+    enqueueJob(id)
+    retried++
+  }
+  writeOpsAudit(req.user!.id, 'bulk_retry_jobs', 'job', ids[0] ?? '', { count: retried, errorMessage })
+  res.json({ retried })
+})
+
 opsRouter.get('/jobs/:id', ...guard, (req, res) => {
   const job = db
     .prepare(`
@@ -230,6 +360,15 @@ opsRouter.post('/jobs/:id/retry', ...guard, (req: PlatformAdminRequest, res) => 
   enqueueJob(req.params.id)
   writeOpsAudit(req.user!.id, 'retry_job', 'job', req.params.id)
   res.json({ ok: true })
+})
+
+opsRouter.get('/jobs/:id/explain', ...guard, (req, res) => {
+  const explanation = explainJobFailure(req.params.id)
+  if (!explanation) {
+    res.status(404).json({ error: 'Job not failed or not found' })
+    return
+  }
+  res.json({ explanation })
 })
 
 opsRouter.get('/analytics', ...guard, (req, res) => {
@@ -326,4 +465,132 @@ opsRouter.post('/impersonate/:agencyId', ...guard, (req: PlatformAdminRequest, r
   writeOpsAudit(req.user!.id, 'impersonate', 'agency', req.params.agencyId)
   setAgencyCookie(res, req.params.agencyId)
   res.json(buildSessionPayload(req.user!.id, req.params.agencyId))
+})
+
+opsRouter.get('/search', ...guard, (req, res) => {
+  const q = String(req.query.q ?? '')
+  res.json(globalOpsSearch(q))
+})
+
+opsRouter.get('/health', ...guard, (_req, res) => {
+  res.json({ agencies: getAgencyHealthScores() })
+})
+
+opsRouter.get('/settings', ...guard, (_req, res) => {
+  const alertConfig = db.prepare('SELECT * FROM ops_alert_config').all().map((row) => {
+    const r = row as Record<string, unknown>
+    return {
+      alertType: r.alert_type,
+      enabled: Boolean(r.enabled),
+      threshold: r.threshold,
+      webhookUrl: r.webhook_url,
+    }
+  })
+  res.json({ settings: getAllPlatformSettings(), alertConfig })
+})
+
+opsRouter.patch('/settings', ...guard, (req: PlatformAdminRequest, res) => {
+  const settings = req.body?.settings as Record<string, string> | undefined
+  if (settings) {
+    const allowed: PlatformFlag[] = [
+      'downloads_enabled',
+      'publishing_enabled',
+      'auto_retry_enabled',
+      'maintenance_mode',
+      'self_healing_enabled',
+    ]
+    for (const key of allowed) {
+      if (settings[key] !== undefined) setPlatformSetting(key, String(settings[key]))
+    }
+  }
+  const alertConfig = req.body?.alertConfig as
+    | { alertType: string; enabled?: boolean; threshold?: number; webhookUrl?: string }[]
+    | undefined
+  if (Array.isArray(alertConfig)) {
+    for (const row of alertConfig.slice(0, 20)) {
+      db.prepare(`
+        INSERT INTO ops_alert_config (alert_type, enabled, threshold, webhook_url, updated_at)
+        VALUES (?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(alert_type) DO UPDATE SET
+          enabled = excluded.enabled,
+          threshold = excluded.threshold,
+          webhook_url = excluded.webhook_url,
+          updated_at = excluded.updated_at
+      `).run(
+        row.alertType,
+        row.enabled === false ? 0 : 1,
+        row.threshold ?? null,
+        row.webhookUrl ?? null,
+      )
+    }
+  }
+  writeOpsAudit(req.user!.id, 'update_settings', 'platform', 'settings')
+  res.json({ settings: getAllPlatformSettings() })
+})
+
+opsRouter.get('/live/stream', ...guard, (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.flushHeaders?.()
+
+  let since = new Date(Date.now() - 60_000).toISOString()
+  res.write(`data: ${JSON.stringify({ type: 'connected', at: new Date().toISOString() })}\n\n`)
+
+  const interval = setInterval(() => {
+    try {
+      const events = pollLiveEvents(since)
+      if (events.length) {
+        since = events[0].at
+        for (const event of events.reverse()) {
+          res.write(`data: ${JSON.stringify(event)}\n\n`)
+        }
+      } else {
+        res.write(`: ping\n\n`)
+      }
+    } catch {
+      /* ignore poll errors */
+    }
+  }, 2000)
+
+  req.on('close', () => clearInterval(interval))
+})
+
+opsRouter.get('/export/jobs', ...guard, (req, res) => {
+  const status = String(req.query.status ?? 'failed')
+  const rows = db
+    .prepare(`
+      SELECT r.id, r.status, r.error_message, r.created_at, r.completed_at, r.retry_count,
+        a.name as agency_name, p.name as page_name, s.username as source_username
+      FROM reel_jobs r
+      LEFT JOIN agencies a ON a.id = r.agency_id
+      LEFT JOIN facebook_pages p ON p.id = r.target_page_id
+      LEFT JOIN source_accounts s ON s.id = r.source_account_id
+      WHERE r.status = ?
+      ORDER BY r.created_at DESC LIMIT 500
+    `)
+    .all(status) as Record<string, unknown>[]
+
+  const header = 'id,status,agency,page,source,error,created_at,completed_at,retry_count\n'
+  const csv =
+    header +
+    rows
+      .map((r) =>
+        [
+          r.id,
+          r.status,
+          r.agency_name,
+          r.page_name,
+          r.source_username,
+          JSON.stringify(String(r.error_message ?? '')),
+          r.created_at,
+          r.completed_at,
+          r.retry_count,
+        ].join(','),
+      )
+      .join('\n')
+
+  res.setHeader('Content-Type', 'text/csv')
+  res.setHeader('Content-Disposition', `attachment; filename="jobs-${status}.csv"`)
+  res.send(csv)
 })

@@ -387,6 +387,28 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ amount }),
       }),
+    deleteAgency: (id: string, confirmName: string) =>
+      request<{ ok: boolean }>(`/ops/agencies/${id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ confirmName }),
+      }),
+    pauseAllPages: (id: string) =>
+      request<{ paused: number }>(`/ops/agencies/${id}/pause-pages`, { method: 'POST' }),
+    setParentAgency: (id: string, parentAgencyId: string | null) =>
+      request<{ ok: boolean }>(`/ops/agencies/${id}/parent`, {
+        method: 'PATCH',
+        body: JSON.stringify({ parentAgencyId }),
+      }),
+    setAgencyMaintenance: (id: string, enabled: boolean) =>
+      request<{ maintenance: boolean }>(`/ops/agencies/${id}/maintenance`, {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled }),
+      }),
+    bulkCredit: (agencyIds: string[], amount: number) =>
+      request<{ credited: number }>('/ops/agencies/bulk-credit', {
+        method: 'POST',
+        body: JSON.stringify({ agencyIds, amount }),
+      }),
     addNote: (id: string, note: string) =>
       request<{ id: string; note: string }>(`/ops/agencies/${id}/notes`, {
         method: 'POST',
@@ -411,6 +433,11 @@ export const api = {
     },
     job: (id: string) => request<{ job: OpsJob; logs: OpsJobLog[] }>(`/ops/jobs/${id}`),
     retryJob: (id: string) => request<{ ok: boolean }>(`/ops/jobs/${id}/retry`, { method: 'POST' }),
+    errorGroups: (days?: number) =>
+      request<{ groups: OpsErrorGroup[]; days: number }>(`/ops/jobs/error-groups${days ? `?days=${days}` : ''}`),
+    bulkRetry: (body: { errorMessage?: string; jobIds?: string[] }) =>
+      request<{ retried: number }>('/ops/jobs/bulk-retry', { method: 'POST', body: JSON.stringify(body) }),
+    explainJob: (id: string) => request<{ explanation: JobExplanation }>(`/ops/jobs/${id}/explain`),
     analytics: (days?: number) =>
       request<OpsAnalytics>(`/ops/analytics${days ? `?days=${days}` : ''}`),
     audit: (limit?: number) =>
@@ -421,6 +448,16 @@ export const api = {
     system: () => request<OpsSystemInfo>('/ops/system'),
     impersonate: (agencyId: string) =>
       request<SessionResponse>(`/ops/impersonate/${agencyId}`, { method: 'POST' }),
+    search: (q: string) => request<OpsSearchResults>(`/ops/search?q=${encodeURIComponent(q)}`),
+    health: () => request<{ agencies: AgencyHealth[] }>('/ops/health'),
+    settings: () => request<{ settings: Record<string, string>; alertConfig: OpsAlertConfig[] }>('/ops/settings'),
+    updateSettings: (body: { settings?: Record<string, string>; alertConfig?: OpsAlertConfig[] }) =>
+      request<{ settings: Record<string, string> }>('/ops/settings', {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
+    exportJobsUrl: (status = 'failed') => `/api/ops/export/jobs?status=${encodeURIComponent(status)}`,
+    liveStreamUrl: () => '/api/ops/live/stream',
   },
 }
 
@@ -587,6 +624,11 @@ export type OpsAgency = {
   page_count?: number
   member_count?: number
   owner_email?: string
+  parent_agency_id?: string | null
+  parent_name?: string | null
+  maintenance_mode?: number
+  healthScore?: number | null
+  healthStatus?: 'healthy' | 'warning' | 'critical' | null
 }
 
 export type OpsMember = { email: string; full_name: string; role: string; created_at: string }
@@ -659,4 +701,53 @@ export type OpsSystemInfo = {
   oldestPendingJob: { id: string; created_at: string } | null
   nodeVersion: string
   uptimeSec: number
+}
+
+export type OpsErrorGroup = { errorMessage: string; count: number; jobIds: string[] }
+
+export type JobExplanation = {
+  summary: string
+  category: string
+  likelyCause: string
+  suggestedActions: string[]
+  confidence: 'high' | 'medium' | 'low'
+}
+
+export type AgencyHealth = {
+  agencyId: string
+  name: string
+  score: number
+  status: 'healthy' | 'warning' | 'critical'
+  reasons: string[]
+  tokenBalance: number
+  failed7d: number
+  published7d: number
+  activePages: number
+}
+
+export type OpsSearchResults = {
+  query: string
+  agencies: { id: string; name: string; token_balance: number; owner_email?: string }[]
+  pages: { id: string; name: string; status: string; agency_name: string }[]
+  jobs: { id: string; status: string; error_message: string | null; agency_name: string | null; page_name: string | null }[]
+}
+
+export type OpsAlertConfig = {
+  alertType: string
+  enabled?: boolean
+  threshold?: number
+  webhookUrl?: string
+}
+
+export type OpsLiveEvent = {
+  type: 'job' | 'log' | 'connected'
+  id: string
+  jobId?: string
+  status?: string
+  step?: string
+  message?: string
+  level?: string
+  agencyName?: string | null
+  pageName?: string | null
+  at: string
 }

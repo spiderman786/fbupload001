@@ -1,11 +1,13 @@
 import { db } from '../db.js'
 import { appendJobLog } from './jobLog.js'
+import { isPlatformFlagEnabled } from './platformSettings.js'
 
 const MAX_AUTO_RETRIES = Number(process.env.OPS_AUTO_RETRY_MAX ?? 3)
 
 const RETRYABLE = /download|proxy|yt-dlp|timeout|ECONN|429|403|blocked|rate/i
 
 export function maybeAutoRetryJob(jobId: string, errorMessage: string): boolean {
+  if (!isPlatformFlagEnabled('auto_retry_enabled')) return false
   if (process.env.OPS_AUTO_RETRY_ENABLED === 'false') return false
   if (!RETRYABLE.test(errorMessage)) return false
 
