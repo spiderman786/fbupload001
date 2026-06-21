@@ -20,6 +20,7 @@ import { DirectPostPage } from './pages/dashboard/DirectPostPage'
 import { BulkDeletePage } from './pages/dashboard/BulkDeletePage'
 import { InAppSchedulePage, DirectSchedulePage } from './pages/dashboard/InAppSchedulePage'
 import { FacebookByocPage } from './pages/dashboard/FacebookByocPage'
+import { ProxyPoolPage } from './pages/dashboard/ProxyPoolPage'
 import { TokensPage } from './pages/dashboard/TokensPage'
 import { AcceptInvitePage } from './pages/AcceptInvitePage'
 import { TeamPage } from './pages/dashboard/TeamPage'
@@ -91,6 +92,8 @@ function App() {
             <Route path="/agency/settings/team" element={<TeamPage />} />
             <Route path="/settings/facebook-byoc" element={<FacebookByocPage />} />
             <Route path="/agency/settings/facebook-byoc" element={<FacebookByocPage />} />
+            <Route path="/settings/proxy-pool" element={<ProxyPoolPage />} />
+            <Route path="/agency/settings/proxy-pool" element={<ProxyPoolPage />} />
             <Route path="/settings/youtube-byoc" element={<RoutedFeaturePage />} />
             <Route path="/agency/settings/youtube-byoc" element={<RoutedFeaturePage />} />
             <Route path="/settings/instagram-byoc" element={<RoutedFeaturePage />} />

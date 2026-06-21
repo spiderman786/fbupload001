@@ -57,9 +57,9 @@ async function downloadWithYtDlp(url: string, outPath: string): Promise<void> {
   cleanupPartialRawFiles(dir)
 
   const baseArgs = [url, '-f', 'best[ext=mp4]/best', '--no-playlist', '-o', template, '--no-warnings']
-  const { usedProxy } = await execYtDlpWithProxyFallback(baseArgs, { timeout: 180_000 })
+  const { usedProxy, proxyLabel } = await execYtDlpWithProxyFallback(baseArgs, { timeout: 180_000 })
 
-  if (usedProxy) console.log('[downloader] downloaded via proxy fallback')
+  if (usedProxy) console.log(`[downloader] downloaded via proxy ${proxyLabel ?? 'pool'}`)
 
   const files = fs.readdirSync(dir).filter((f) => f.startsWith('raw.'))
   if (!files.length) throw new Error('yt-dlp did not produce a file')

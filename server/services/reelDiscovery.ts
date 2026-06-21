@@ -41,12 +41,12 @@ async function listCandidateReels(feedUrl: string, limit = 20): Promise<{ id: st
     '--no-warnings',
   ]
 
-  const { stdout, usedProxy } = await execYtDlpWithProxyFallback(baseArgs, {
+  const { stdout, usedProxy, proxyLabel } = await execYtDlpWithProxyFallback(baseArgs, {
     timeout: 90_000,
     maxBuffer: 2 * 1024 * 1024,
   })
 
-  if (usedProxy) console.log('[discovery] listed reels via proxy fallback')
+  if (usedProxy) console.log(`[discovery] listed reels via proxy ${proxyLabel ?? 'pool'}`)
 
   const lines = stdout.trim().split('\n').filter(Boolean)
   const results: { id: string; url: string }[] = []

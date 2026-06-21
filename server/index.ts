@@ -17,12 +17,15 @@ import { dashboardRouter } from './routes/dashboard.js'
 import { automationRouter } from './routes/automation.js'
 import { byocRouter } from './routes/byoc.js'
 import { agenciesRouter } from './routes/agencies.js'
+import { initProxyPool, getProxyPoolStats } from './services/proxyPool.js'
+import { proxyPoolRouter } from './routes/proxyPool.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const dataDir = path.join(__dirname, '..', 'data')
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
 
 initDb()
+initProxyPool()
 
 const app = express()
 const PORT = Number(process.env.PORT ?? 3001)
@@ -56,6 +59,7 @@ app.use('/api/dashboard', dashboardRouter)
 app.use('/api/automation', automationRouter)
 app.use('/api/byoc', byocRouter)
 app.use('/api/agencies', agenciesRouter)
+app.use('/api/proxy-pool', proxyPoolRouter)
 
 // Serve frontend in production
 const distPath = path.join(__dirname, '..', 'dist')
@@ -69,5 +73,5 @@ if (fs.existsSync(distPath)) {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[server] Running on http://0.0.0.0:${PORT}`)
   console.log(`[server] Facebook OAuth: ${process.env.FACEBOOK_APP_ID ? 'configured' : 'mock mode'}`)
-  console.log(`[server] API only — run "npm run worker" for queue + scheduler`)
+  console.log(`[server] Proxy pool: ${getProxyPoolStats().poolSize} proxies loaded`)
 })

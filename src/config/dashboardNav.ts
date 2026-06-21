@@ -11,6 +11,7 @@ import {
   Send,
   Settings,
   Share2,
+  Server,
   Trash2,
   Upload,
   Users,
@@ -65,6 +66,7 @@ export const DASHBOARD_NAV: NavSection[] = [
     items: [
       { to: '/settings/team', label: 'Team', icon: Users },
       { to: '/settings/facebook-byoc', label: 'Facebook BYOC', icon: Settings },
+      { to: '/settings/proxy-pool', label: 'Download Proxies', icon: Server },
       { to: '/settings/youtube-byoc', label: 'YouTube BYOC', icon: Settings },
       { to: '/settings/instagram-byoc', label: 'Instagram BYOC', icon: Settings },
     ],
@@ -102,6 +104,7 @@ export const FEATURE_META: Record<string, { title: string; description: string }
   '/instagram/direct-schedule': { title: 'Instagram Direct Schedule', description: 'Schedule Instagram posts.' },
   '/instagram/inapp-schedule': { title: 'Instagram InApp Schedule', description: 'Queue Instagram content for publishing.' },
   '/settings/facebook-byoc': { title: 'Facebook BYOC', description: 'Configure your own Facebook app credentials (Bring Your Own Connection).' },
+  '/settings/proxy-pool': { title: 'Download Proxies', description: 'Monitor residential proxy pool used for Instagram/TikTok/YouTube reel downloads.' },
   '/settings/youtube-byoc': { title: 'YouTube BYOC', description: 'Configure YouTube API credentials.' },
   '/settings/instagram-byoc': { title: 'Instagram BYOC', description: 'Configure Instagram API credentials.' },
 }

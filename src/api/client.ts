@@ -261,6 +261,26 @@ export const api = {
     remove: (platform: string) =>
       request<{ message: string }>(`/byoc/${platform}`, { method: 'DELETE' }),
   },
+  proxyPool: {
+    stats: () =>
+      request<{
+        enabled: boolean
+        poolSize: number
+        availableNow: number
+        directFirst: boolean
+        maxAttemptsPerJob: number
+        cooldownMs: number
+        proxies: {
+          id: string
+          label: string
+          failures: number
+          successes: number
+          available: boolean
+          cooldownUntil: string | null
+          lastUsedAt: string | null
+        }[]
+      }>('/proxy-pool/stats'),
+  },
   agencies: {
     switch: (agencyId: string) =>
       request<SessionResponse>('/agencies/switch', { method: 'POST', body: JSON.stringify({ agencyId }) }),

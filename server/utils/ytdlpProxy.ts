@@ -1,14 +1,18 @@
 /**
- * Webshare / rotating proxy for yt-dlp (reel discovery + download).
- * Used as fallback after a direct request fails — see ytdlpRunner.ts.
+ * Legacy single-proxy config (Webshare) — also folded into proxy pool when set.
  */
 
-export function isProxyConfigured(): boolean {
+export function isLegacyProxyConfigured(): boolean {
   if (process.env.WEBSHARE_PROXY_ENABLED === 'false') return false
-  return getYtDlpProxyUrl() !== null
+  return getLegacySingleProxyUrl() !== null
 }
 
-export function getYtDlpProxyUrl(): string | null {
+/** @deprecated use proxy pool — kept for backwards compatibility */
+export function isProxyConfigured(): boolean {
+  return isLegacyProxyConfigured()
+}
+
+export function getLegacySingleProxyUrl(): string | null {
   const direct = process.env.DOWNLOAD_PROXY_URL?.trim() || process.env.WEBSHARE_PROXY_URL?.trim()
   if (direct) return direct
 
@@ -24,7 +28,12 @@ export function getYtDlpProxyUrl(): string | null {
   return `http://${encodedUser}:${encodedPass}@${host}:${port}`
 }
 
-export function getYtDlpProxyArgs(): string[] {
-  const url = getYtDlpProxyUrl()
+export function proxyArgsForUrl(url: string): string[] {
   return url ? ['--proxy', url] : []
+}
+
+/** @deprecated */
+export function getYtDlpProxyArgs(): string[] {
+  const url = getLegacySingleProxyUrl()
+  return proxyArgsForUrl(url ?? '')
 }
