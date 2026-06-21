@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ChevronDown } from 'lucide-react'
 import { AuthLayout } from '../components/AuthLayout'
@@ -12,6 +12,16 @@ const COUNTRY_CODES = [
   { code: '+971', label: 'UAE (+971)' },
 ]
 
+function previewSubdomain(fullName: string): string | null {
+  const slug = fullName
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-')
+    .slice(0, 40)
+  return slug || null
+}
+
 export function SignupPage() {
   const navigate = useNavigate()
   const [fullName, setFullName] = useState('')
@@ -22,6 +32,7 @@ export function SignupPage() {
   const [agencyName, setAgencyName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const workspacePreview = useMemo(() => previewSubdomain(fullName), [fullName])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -57,6 +68,14 @@ export function SignupPage() {
         <div className="space-y-2">
           <label htmlFor="full-name" className="text-sm font-medium">Full name</label>
           <input id="full-name" type="text" required placeholder="John Doe" value={fullName} onChange={(e) => setFullName(e.target.value)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm shadow-xs outline-none focus:border-primary focus:ring-[3px] focus:ring-primary/20" />
+          {workspacePreview && (
+            <p className="text-xs text-muted-foreground">
+              Your workspace:{' '}
+              <span className="font-medium text-foreground">
+                https://{workspacePreview}.fbuploadplus.com/agency
+              </span>
+            </p>
+          )}
         </div>
 
         <div className="space-y-2">

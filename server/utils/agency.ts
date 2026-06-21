@@ -72,7 +72,7 @@ export function getMemberships(userId: string): AgencyMembership[] {
   }))
 }
 
-function normalizeSubdomain(input: string): string {
+export function normalizeSubdomain(input: string): string {
   return input
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, '-')
@@ -80,11 +80,18 @@ function normalizeSubdomain(input: string): string {
     .replace(/-{2,}/g, '-')
 }
 
-function makeSubdomainBase(name: string, email?: string): string {
+/** Subdomain from signup full name, e.g. "Ahmed Khan" → "ahmed-khan", "Beeni Bangash" → "beeni-bangash". */
+export function subdomainFromSignupName(fullName: string, email?: string): string {
+  const fromName = normalizeSubdomain(fullName.trim())
+  if (fromName) return fromName.slice(0, 40)
   const emailLocal = email?.split('@')[0] ?? ''
-  const candidate = normalizeSubdomain(emailLocal) || normalizeSubdomain(name) || 'agency'
-  const trimmed = candidate.slice(0, 40)
-  return trimmed || 'agency'
+  const fromEmail = normalizeSubdomain(emailLocal)
+  return (fromEmail || 'agency').slice(0, 40)
+}
+
+function makeSubdomainBase(name: string, email?: string): string {
+  const candidate = subdomainFromSignupName(name, email)
+  return candidate || 'agency'
 }
 
 function ensureUniqueSubdomain(base: string): string {

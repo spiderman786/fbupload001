@@ -20,6 +20,7 @@ import {
   getAgencySubdomainUrl,
   resolveAgency,
   setAgencyCookie,
+  subdomainFromSignupName,
 } from '../utils/agency.js'
 
 export const authRouter = Router()
@@ -96,7 +97,7 @@ authRouter.post('/signup', async (req, res) => {
     id,
     (agencyName?.trim() || `${fullName}'s Agency`),
     0,
-    email.toLowerCase().split('@')[0],
+    subdomainFromSignupName(fullName, email),
   )
 
   try {
