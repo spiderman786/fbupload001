@@ -233,3 +233,16 @@ export async function sendVerificationEmail(email: string, code: string): Promis
   const body = `Your verification code is: ${code}\n\nThis code will expire in 15 minutes.`
   await sendViaSmtp(smtp, email, subject, body)
 }
+
+export async function sendOpsAlertEmail(recipients: string[], alertType: string, message: string): Promise<void> {
+  const smtp = getSmtpConfig()
+  const subject = `[FBupload Plus Ops] ${alertType}`
+  const body = `${message}\n\nTime: ${new Date().toISOString()}\n`
+  if (!smtp) {
+    console.log(`\n[OPS ALERT] ${subject}\n${body}`)
+    return
+  }
+  for (const to of recipients) {
+    await sendViaSmtp(smtp, to, subject, body)
+  }
+}

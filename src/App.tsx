@@ -26,6 +26,14 @@ import { TokensPage } from './pages/dashboard/TokensPage'
 import { AcceptInvitePage } from './pages/AcceptInvitePage'
 import { TeamPage } from './pages/dashboard/TeamPage'
 import { RoutedFeaturePage } from './pages/dashboard/RoutedFeaturePage'
+import { OpsLayout, OpsGate } from './pages/ops/OpsLayout'
+import { OpsOverviewPage } from './pages/ops/OpsOverviewPage'
+import { OpsAgenciesPage, OpsAgencyDetailPage } from './pages/ops/OpsAgenciesPage'
+import { OpsJobsPage } from './pages/ops/OpsJobsPage'
+import { OpsPagesPage } from './pages/ops/OpsPagesPage'
+import { OpsAnalyticsPage } from './pages/ops/OpsAnalyticsPage'
+import { OpsAuditPage } from './pages/ops/OpsAuditPage'
+import { OpsSystemPage } from './pages/ops/OpsSystemPage'
 
 function App() {
   return (
@@ -107,6 +115,25 @@ function App() {
             <Route path="/agency/tokens" element={<TokensPage />} />
             <Route path="/add-tokens" element={<AddTokensPage />} />
             <Route path="/agency/add-tokens" element={<AddTokensPage />} />
+          </Route>
+
+          <Route
+            element={
+              <ProtectedRoute>
+                <OpsGate>
+                  <OpsLayout />
+                </OpsGate>
+              </ProtectedRoute>
+            }
+          >
+            <Route path="/ops" element={<OpsOverviewPage />} />
+            <Route path="/ops/agencies" element={<OpsAgenciesPage />} />
+            <Route path="/ops/agencies/:id" element={<OpsAgencyDetailPage />} />
+            <Route path="/ops/pages" element={<OpsPagesPage />} />
+            <Route path="/ops/jobs" element={<OpsJobsPage />} />
+            <Route path="/ops/analytics" element={<OpsAnalyticsPage />} />
+            <Route path="/ops/system" element={<OpsSystemPage />} />
+            <Route path="/ops/audit" element={<OpsAuditPage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

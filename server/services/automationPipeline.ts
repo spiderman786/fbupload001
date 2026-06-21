@@ -8,10 +8,14 @@ import { isFacebookConfiguredForAgency } from './byoc.js'
 import { discoverNextReel } from './reelDiscovery.js'
 import { recordPostedReel } from './dedup.js'
 import { canPagePostToday } from './pageQuota.js'
+import { appendJobLog } from './jobLog.js'
+import { maybeAutoRetryJob } from './autoRetry.js'
 
 export type JobType = 'direct' | 'inapp' | 'scheduled'
 
 export async function runAutomationJob(jobId: string): Promise<void> {
+  appendJobLog(jobId, 'start', 'Job started')
+
   const job = db.prepare('SELECT * FROM reel_jobs WHERE id = ?').get(jobId) as Record<string, unknown> | undefined
   if (!job) throw new Error('Job not found')
 
@@ -47,6 +51,7 @@ export async function runAutomationJob(jobId: string): Promise<void> {
   if (agency.token_balance < tokenCost) throw new Error('Insufficient token balance')
 
   db.prepare("UPDATE reel_jobs SET status = 'downloading' WHERE id = ?").run(jobId)
+  appendJobLog(jobId, 'discover', `Finding reel from ${source.username} (${source.platform})`)
 
   const discovered = await discoverNextReel({
     pageId,
@@ -56,7 +61,9 @@ export async function runAutomationJob(jobId: string): Promise<void> {
   })
 
   db.prepare('UPDATE reel_jobs SET source_reel_id = ? WHERE id = ?').run(discovered.reelId, jobId)
+  appendJobLog(jobId, 'discover', `Found reel ${discovered.reelId}`, 'info', { url: discovered.sourceUrl, mock: discovered.mock })
 
+  appendJobLog(jobId, 'download', 'Downloading video')
   const download = await downloadReelFromUrl(
     agencyId,
     jobId,
@@ -64,6 +71,7 @@ export async function runAutomationJob(jobId: string): Promise<void> {
     discovered.reelId,
     discovered.mock,
   )
+  appendJobLog(jobId, 'download', 'Download complete', 'info', { mock: download.mock })
 
   db.prepare('UPDATE reel_jobs SET source_url = ?, local_file_path = ? WHERE id = ?').run(
     download.sourceUrl,
@@ -72,7 +80,10 @@ export async function runAutomationJob(jobId: string): Promise<void> {
   )
 
   const cleanedPath = path.join(path.dirname(download.filePath), 'clean.mp4')
+  appendJobLog(jobId, 'ffmpeg', 'Stripping metadata')
   const { stripped } = await stripVideoMetadata(download.filePath, cleanedPath)
+  appendJobLog(jobId, 'ffmpeg', stripped ? 'Metadata stripped' : 'Metadata strip skipped (copy fallback)')
+
   db.prepare('UPDATE reel_jobs SET cleaned_file_path = ?, metadata_stripped = ? WHERE id = ?').run(
     cleanedPath,
     stripped ? 1 : 0,
@@ -86,6 +97,7 @@ export async function runAutomationJob(jobId: string): Promise<void> {
   }
 
   db.prepare("UPDATE reel_jobs SET status = 'publishing' WHERE id = ?").run(jobId)
+  appendJobLog(jobId, 'publish', 'Uploading to Facebook')
 
   const account = page.facebook_account_id
     ? (db.prepare('SELECT access_token FROM facebook_accounts WHERE id = ?').get(page.facebook_account_id) as
@@ -103,6 +115,7 @@ export async function runAutomationJob(jobId: string): Promise<void> {
   if (mockMode || !pageToken) {
     await new Promise((r) => setTimeout(r, 400))
     postId = `mock_reel_${Date.now()}`
+    appendJobLog(jobId, 'publish', 'Mock publish (no FB token)', 'warn')
   } else {
     const result = await publishReelVideo(
       page.meta_page_id as string,
@@ -111,6 +124,7 @@ export async function runAutomationJob(jobId: string): Promise<void> {
       `Reel from ${source.username}`,
     )
     postId = result.postId
+    appendJobLog(jobId, 'publish', `Published ${postId}`)
   }
 
   db.transaction(() => {
@@ -143,10 +157,14 @@ export async function runAutomationJob(jobId: string): Promise<void> {
     })
   })()
 
+  appendJobLog(jobId, 'complete', 'Job finished successfully')
   cleanupJobFiles(agencyId, jobId)
 }
 
 export function failAutomationJob(jobId: string, message: string) {
+  appendJobLog(jobId, 'failed', message, 'error')
+  if (maybeAutoRetryJob(jobId, message)) return
+
   const job = db.prepare('SELECT user_id, agency_id FROM reel_jobs WHERE id = ?').get(jobId) as
     | { user_id: string; agency_id: string | null }
     | undefined

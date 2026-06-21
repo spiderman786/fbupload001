@@ -1,11 +1,16 @@
 import { db } from '../db.js'
 import { runAutomationJob, failAutomationJob } from './automationPipeline.js'
+import { touchWorkerHeartbeat } from './workerHeartbeat.js'
 
 const CONCURRENCY = Number(process.env.WORKER_CONCURRENCY ?? 20)
 const POLL_MS = Number(process.env.WORKER_POLL_MS ?? 1000)
 
 let activeCount = 0
 let pollTimer: ReturnType<typeof setInterval> | null = null
+
+export function getActiveJobCount() {
+  return activeCount
+}
 
 function claimNextJobId(): string | null {
   return db.transaction(() => {
@@ -31,16 +36,19 @@ function claimNextJobId(): string | null {
 
 async function runJob(jobId: string) {
   activeCount++
+  touchWorkerHeartbeat(activeCount)
   try {
     await runAutomationJob(jobId)
   } catch (err) {
     failAutomationJob(jobId, err instanceof Error ? err.message : 'Unknown error')
   } finally {
     activeCount--
+    touchWorkerHeartbeat(activeCount)
   }
 }
 
 function pollQueue() {
+  touchWorkerHeartbeat(activeCount)
   while (activeCount < CONCURRENCY) {
     const jobId = claimNextJobId()
     if (!jobId) break
@@ -57,6 +65,7 @@ export function startJobQueue() {
   if (pollTimer) return
   pollTimer = setInterval(pollQueue, POLL_MS)
   pollQueue()
+  touchWorkerHeartbeat(0)
   console.log(`[queue] Worker pool started (concurrency=${CONCURRENCY}, poll=${POLL_MS}ms)`)
 }
 

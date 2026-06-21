@@ -343,6 +343,56 @@ function migrate() {
 
   migrateAgencies()
   migrateMultiByoc()
+  migrateOps()
+}
+
+function migrateOps() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS job_logs (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL REFERENCES reel_jobs(id) ON DELETE CASCADE,
+      step TEXT NOT NULL,
+      level TEXT NOT NULL DEFAULT 'info' CHECK(level IN ('info', 'warn', 'error')),
+      message TEXT NOT NULL,
+      meta TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS ops_audit_log (
+      id TEXT PRIMARY KEY,
+      admin_user_id TEXT NOT NULL REFERENCES users(id),
+      action TEXT NOT NULL,
+      target_type TEXT,
+      target_id TEXT,
+      details TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS agency_ops_notes (
+      id TEXT PRIMARY KEY,
+      agency_id TEXT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      admin_user_id TEXT NOT NULL REFERENCES users(id),
+      note TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS ops_alert_log (
+      id TEXT PRIMARY KEY,
+      alert_type TEXT NOT NULL,
+      message TEXT NOT NULL,
+      sent_to TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_job_logs_job ON job_logs(job_id);
+    CREATE INDEX IF NOT EXISTS idx_ops_audit_created ON ops_audit_log(created_at);
+    CREATE INDEX IF NOT EXISTS idx_ops_alerts_type ON ops_alert_log(alert_type, created_at);
+  `)
+
+  const jobCols = db.prepare('PRAGMA table_info(reel_jobs)').all() as { name: string }[]
+  if (!jobCols.some((c) => c.name === 'retry_count')) {
+    db.exec(`ALTER TABLE reel_jobs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`)
+  }
 }
 
 function migrateMultiByoc() {

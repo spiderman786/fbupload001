@@ -374,6 +374,54 @@ export const api = {
     acceptInvite: (token: string) =>
       request<SessionResponse>('/agencies/invites/accept', { method: 'POST', body: JSON.stringify({ token }) }),
   },
+  ops: {
+    me: () => request<{ platformAdmin: boolean }>('/ops/me'),
+    overview: () => request<OpsOverview>('/ops/overview'),
+    agencies: () => request<{ agencies: OpsAgency[] }>('/ops/agencies'),
+    agency: (id: string) =>
+      request<{ agency: OpsAgency; pages: unknown[]; sources: unknown[]; members: OpsMember[]; notes: OpsNote[] }>(
+        `/ops/agencies/${id}`,
+      ),
+    creditTokens: (id: string, amount: number) =>
+      request<{ tokenBalance: number }>(`/ops/agencies/${id}/credit-tokens`, {
+        method: 'POST',
+        body: JSON.stringify({ amount }),
+      }),
+    addNote: (id: string, note: string) =>
+      request<{ id: string; note: string }>(`/ops/agencies/${id}/notes`, {
+        method: 'POST',
+        body: JSON.stringify({ note }),
+      }),
+    pages: (params?: { status?: string; health?: string }) => {
+      const q = new URLSearchParams()
+      if (params?.status) q.set('status', params.status)
+      if (params?.health) q.set('health', params.health)
+      const qs = q.toString()
+      return request<{ pages: OpsPage[] }>(`/ops/pages${qs ? `?${qs}` : ''}`)
+    },
+    updatePage: (id: string, status: 'active' | 'paused') =>
+      request<{ ok: boolean }>(`/ops/pages/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+    jobs: (params?: { status?: string; agencyId?: string; limit?: number }) => {
+      const q = new URLSearchParams()
+      if (params?.status) q.set('status', params.status)
+      if (params?.agencyId) q.set('agencyId', params.agencyId)
+      if (params?.limit) q.set('limit', String(params.limit))
+      const qs = q.toString()
+      return request<{ jobs: OpsJob[] }>(`/ops/jobs${qs ? `?${qs}` : ''}`)
+    },
+    job: (id: string) => request<{ job: OpsJob; logs: OpsJobLog[] }>(`/ops/jobs/${id}`),
+    retryJob: (id: string) => request<{ ok: boolean }>(`/ops/jobs/${id}/retry`, { method: 'POST' }),
+    analytics: (days?: number) =>
+      request<OpsAnalytics>(`/ops/analytics${days ? `?days=${days}` : ''}`),
+    audit: (limit?: number) =>
+      request<{ audit: OpsAuditEntry[] }>(`/ops/audit${limit ? `?limit=${limit}` : ''}`),
+    alerts: () => request<{ alerts: OpsAlert[] }>('/ops/alerts'),
+    runAlertChecks: () =>
+      request<{ ok: boolean; alerts: OpsAlert[] }>('/ops/alerts/run-checks', { method: 'POST' }),
+    system: () => request<OpsSystemInfo>('/ops/system'),
+    impersonate: (agencyId: string) =>
+      request<SessionResponse>(`/ops/impersonate/${agencyId}`, { method: 'POST' }),
+  },
 }
 
 export type ByocApp = {
@@ -511,4 +559,104 @@ export type ReelJob = {
   jobType?: string
   sourceReelId?: string | null
   metadataStripped?: boolean
+}
+
+export type OpsOverview = {
+  agencies: number
+  users: number
+  pages: number
+  activePages: number
+  pendingJobs: number
+  publishedToday: number
+  failedToday: number
+  tokensSold: number
+  tokensUsed: number
+  proxy: {
+    enabled: boolean
+    poolSize: number
+    availableNow: number
+  }
+  worker: { lastBeat: string; stale: boolean; activeJobs?: number; pid?: number } | null
+}
+
+export type OpsAgency = {
+  id: string
+  name: string
+  token_balance: number
+  created_at: string
+  page_count?: number
+  member_count?: number
+  owner_email?: string
+}
+
+export type OpsMember = { email: string; full_name: string; role: string; created_at: string }
+export type OpsNote = { id: string; note: string; admin_email: string; created_at: string }
+
+export type OpsPage = {
+  id: string
+  name: string
+  agency_name: string
+  status: string
+  health_status: string | null
+  followers: string
+  last_published_at: string | null
+}
+
+export type OpsJob = {
+  id: string
+  status: string
+  error_message: string | null
+  agency_name: string | null
+  page_name: string | null
+  source_username: string | null
+  source_url: string | null
+  retry_count?: number
+  created_at: string
+  completed_at: string | null
+}
+
+export type OpsJobLog = {
+  id: string
+  step: string
+  message: string
+  level: string
+  meta: Record<string, unknown> | null
+  createdAt: string
+}
+
+export type OpsAnalytics = {
+  daily: { day: string; published: number; failed: number }[]
+  byPlatform: { platform: string; jobs: number; published: number; failed: number }[]
+  topErrors: { error_message: string; count: number }[]
+  agencyActivity: { name: string; token_balance: number; published_7d: number }[]
+  days: number
+}
+
+export type OpsAuditEntry = {
+  id: string
+  action: string
+  targetType: string | null
+  targetId: string | null
+  details: Record<string, unknown> | null
+  adminEmail: string
+  adminName?: string
+  createdAt: string
+}
+
+export type OpsAlert = {
+  id: string
+  alertType: string
+  message: string
+  sentTo: string
+  createdAt: string
+}
+
+export type OpsSystemInfo = {
+  worker: OpsOverview['worker']
+  proxy: OpsOverview['proxy'] & Record<string, unknown>
+  dbPath: string
+  dbSizeBytes: number
+  oldestPendingJob: { id: string; created_at: string } | null
+  nodeVersion: string
+  uptimeSec: number
 }
