@@ -207,8 +207,8 @@ export const api = {
   agencies: {
     switch: (agencyId: string) =>
       request<SessionResponse>('/agencies/switch', { method: 'POST', body: JSON.stringify({ agencyId }) }),
-    updateName: (name: string) =>
-      request<SessionResponse>('/agencies/current', { method: 'PATCH', body: JSON.stringify({ name }) }),
+    updateSettings: (body: { name?: string; whatsappNumber?: string }) =>
+      request<SessionResponse>('/agencies/current', { method: 'PATCH', body: JSON.stringify(body) }),
     members: () =>
       request<{
         members: { id: string; email: string; fullName: string; role: AgencyRole; joinedAt: string }[]
@@ -244,6 +244,7 @@ export type AgencyInfo = {
   name: string
   role: AgencyRole
   tokenBalance: number
+  whatsappNumber: string | null
 }
 
 export type SessionResponse = {

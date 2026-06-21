@@ -42,7 +42,7 @@ tokensRouter.post('/request', requireRole('owner', 'admin'), (req: AgencyRequest
 
   const user = req.user!
   const totalPkr = amount * TOKEN_COST_PKR
-  const whatsapp = (process.env.WHATSAPP_NUMBER ?? '923080752936').replace(/\D+/g, '')
+  const whatsapp = (req.agency?.whatsappNumber ?? process.env.WHATSAPP_NUMBER ?? '923080752936').replace(/\D+/g, '')
   const message = encodeURIComponent(
     `Hi, I'd like to purchase ${amount} tokens (Rs ${totalPkr}) for agency "${req.agency!.name}" (${user.email}). ${note ?? ''}`,
   )

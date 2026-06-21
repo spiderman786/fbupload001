@@ -10,6 +10,7 @@ export type AgencySession = {
   name: string
   role: AgencyRole
   tokenBalance: number
+  whatsappNumber: string | null
 }
 
 export type AgencyMembership = AgencySession
@@ -45,19 +46,20 @@ export function canRunAutomation(role: AgencyRole): boolean {
 export function getMemberships(userId: string): AgencyMembership[] {
   const rows = db
     .prepare(`
-      SELECT a.id, a.name, a.token_balance, m.role
+      SELECT a.id, a.name, a.token_balance, a.whatsapp_number, m.role
       FROM agency_members m
       JOIN agencies a ON a.id = m.agency_id
       WHERE m.user_id = ?
       ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, a.name
     `)
-    .all(userId) as { id: string; name: string; token_balance: number; role: AgencyRole }[]
+    .all(userId) as { id: string; name: string; token_balance: number; whatsapp_number: string | null; role: AgencyRole }[]
 
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
     role: r.role,
     tokenBalance: r.token_balance,
+    whatsappNumber: r.whatsapp_number,
   }))
 }
 
@@ -75,7 +77,12 @@ export function resolveAgency(userId: string, agencyIdHint?: string | null): Age
 
 export function createAgencyForUser(userId: string, name: string, initialTokens = 0): string {
   const agencyId = uuid()
-  db.prepare('INSERT INTO agencies (id, name, token_balance) VALUES (?, ?, ?)').run(agencyId, name, initialTokens)
+  db.prepare('INSERT INTO agencies (id, name, token_balance, whatsapp_number) VALUES (?, ?, ?, ?)').run(
+    agencyId,
+    name,
+    initialTokens,
+    null,
+  )
   db.prepare('INSERT INTO agency_members (id, agency_id, user_id, role) VALUES (?, ?, ?, ?)').run(
     uuid(),
     agencyId,
@@ -108,12 +115,14 @@ export function clearAgencyCookie(res: Response) {
 export function assertAgencyMember(userId: string, agencyId: string): AgencySession | null {
   const row = db
     .prepare(`
-      SELECT a.id, a.name, a.token_balance, m.role
+      SELECT a.id, a.name, a.token_balance, a.whatsapp_number, m.role
       FROM agency_members m
       JOIN agencies a ON a.id = m.agency_id
       WHERE m.user_id = ? AND m.agency_id = ?
     `)
-    .get(userId, agencyId) as { id: string; name: string; token_balance: number; role: AgencyRole } | undefined
+    .get(userId, agencyId) as
+    | { id: string; name: string; token_balance: number; whatsapp_number: string | null; role: AgencyRole }
+    | undefined
 
   if (!row) return null
 
@@ -122,6 +131,7 @@ export function assertAgencyMember(userId: string, agencyId: string): AgencySess
     name: row.name,
     role: row.role,
     tokenBalance: row.token_balance,
+    whatsappNumber: row.whatsapp_number,
   }
 }
 

@@ -7,7 +7,7 @@ import { getApiError } from '../../lib/apiError'
 
 export function TeamPage() {
   const toast = useToast()
-  const { agency, user } = useAuth()
+  const { agency, user, setSession } = useAuth()
   const { isOwner, isAdmin } = useAgencyRole()
   const [members, setMembers] = useState<Awaited<ReturnType<typeof api.agencies.members>>['members']>([])
   const [invites, setInvites] = useState<Awaited<ReturnType<typeof api.agencies.invites>>['invites']>([])
@@ -16,6 +16,8 @@ export function TeamPage() {
   const [inviteRole, setInviteRole] = useState<'admin' | 'staff'>('staff')
   const [inviting, setInviting] = useState(false)
   const [lastAcceptUrl, setLastAcceptUrl] = useState('')
+  const [whatsappNumber, setWhatsappNumber] = useState('')
+  const [settingsSaving, setSettingsSaving] = useState(false)
 
   async function load() {
     setLoading(true)
@@ -33,6 +35,10 @@ export function TeamPage() {
   useEffect(() => {
     load()
   }, [])
+
+  useEffect(() => {
+    setWhatsappNumber(agency?.whatsappNumber ?? '')
+  }, [agency?.whatsappNumber])
 
   async function handleInvite(e: FormEvent) {
     e.preventDefault()
@@ -82,6 +88,20 @@ export function TeamPage() {
     }
   }
 
+  async function handleSaveAgencySettings(e: FormEvent) {
+    e.preventDefault()
+    setSettingsSaving(true)
+    try {
+      const session = await api.agencies.updateSettings({ whatsappNumber })
+      setSession(session)
+      toast.success('Token request WhatsApp number updated')
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to update agency settings'))
+    } finally {
+      setSettingsSaving(false)
+    }
+  }
+
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div>
@@ -102,6 +122,28 @@ export function TeamPage() {
           <li><span className="font-medium text-foreground">Staff</span> — run automation, view jobs & dashboard</li>
         </ul>
       </div>
+
+      {isAdmin && (
+        <form onSubmit={handleSaveAgencySettings} className="rounded-xl border border-border bg-card p-4 text-sm space-y-3">
+          <p className="font-medium">Tokenization settings</p>
+          <p className="text-xs text-muted-foreground">
+            Set your agency WhatsApp number for token purchase requests. Leave blank to use platform default.
+          </p>
+          <input
+            value={whatsappNumber}
+            onChange={(e) => setWhatsappNumber(e.target.value)}
+            placeholder="+923001234567"
+            className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+          />
+          <button
+            type="submit"
+            disabled={settingsSaving}
+            className="inline-flex h-10 items-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {settingsSaving ? 'Saving...' : 'Save WhatsApp number'}
+          </button>
+        </form>
+      )}
 
       {isAdmin && (
         <form onSubmit={handleInvite} className="marketing-card space-y-4">

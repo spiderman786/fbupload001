@@ -10,6 +10,7 @@ export function AddTokensPage() {
   const { isAdmin } = useAgencyRole()
   const toast = useToast()
   const [amount, setAmount] = useState(100)
+  const [memberAmount, setMemberAmount] = useState(100)
   const [note, setNote] = useState('')
   const [memberEmail, setMemberEmail] = useState('')
   const [whatsappUrl, setWhatsappUrl] = useState('')
@@ -58,7 +59,7 @@ export function AddTokensPage() {
     e.preventDefault()
     setMemberLoading(true)
     try {
-      const res = await api.tokens.creditMember({ amount, memberEmail, note })
+      const res = await api.tokens.creditMember({ amount: memberAmount, memberEmail, note })
       setMessage(`${res.message}. New agency balance: ${res.balance}`)
       setMemberEmail('')
       await refreshUser()
@@ -148,6 +149,14 @@ export function AddTokensPage() {
           <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Owner/Admin</p>
           <p className="text-sm text-muted-foreground">Credit tokens directly to an agency member by email.</p>
           <input
+            type="number"
+            min={1}
+            value={memberAmount}
+            onChange={(e) => setMemberAmount(Math.max(1, Number(e.target.value)))}
+            placeholder="Tokens"
+            className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+          />
+          <input
             type="email"
             required
             value={memberEmail}
@@ -160,7 +169,7 @@ export function AddTokensPage() {
             disabled={memberLoading}
             className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
           >
-            {memberLoading ? 'Crediting member...' : `Credit ${amount} tokens to member`}
+            {memberLoading ? 'Crediting member...' : `Credit ${memberAmount} tokens to member`}
           </button>
         </form>
       )}

@@ -131,6 +131,7 @@ function migrateAgencies() {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       token_balance INTEGER NOT NULL DEFAULT 0,
+      whatsapp_number TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -158,6 +159,11 @@ function migrateAgencies() {
     CREATE INDEX IF NOT EXISTS idx_agency_members_agency ON agency_members(agency_id);
     CREATE INDEX IF NOT EXISTS idx_agency_invites_token ON agency_invites(token);
   `)
+
+  const agencyCols = db.prepare('PRAGMA table_info(agencies)').all() as { name: string }[]
+  if (!agencyCols.some((c) => c.name === 'whatsapp_number')) {
+    db.exec(`ALTER TABLE agencies ADD COLUMN whatsapp_number TEXT`)
+  }
 
   for (const table of [
     'facebook_accounts',
@@ -190,10 +196,11 @@ function migrateAgencies() {
     let agencyId = member?.agency_id
     if (!agencyId) {
       agencyId = uuid()
-      db.prepare('INSERT INTO agencies (id, name, token_balance) VALUES (?, ?, ?)').run(
+      db.prepare('INSERT INTO agencies (id, name, token_balance, whatsapp_number) VALUES (?, ?, ?, ?)').run(
         agencyId,
         `${user.full_name}'s Agency`,
         user.token_balance,
+        null,
       )
       db.prepare('INSERT INTO agency_members (id, agency_id, user_id, role) VALUES (?, ?, ?, ?)').run(
         uuid(),

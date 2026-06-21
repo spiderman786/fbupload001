@@ -117,13 +117,37 @@ agenciesRouter.post('/switch', (req: AgencyRequest, res) => {
 })
 
 agenciesRouter.patch('/current', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
-  const { name } = req.body ?? {}
-  if (!name?.trim()) {
-    res.status(400).json({ error: 'Agency name is required' })
+  const { name, whatsappNumber } = req.body ?? {}
+  const updates: string[] = []
+  const params: unknown[] = []
+
+  if (typeof name === 'string') {
+    const trimmed = name.trim()
+    if (!trimmed) {
+      res.status(400).json({ error: 'Agency name cannot be empty' })
+      return
+    }
+    updates.push('name = ?')
+    params.push(trimmed)
+  }
+
+  if (typeof whatsappNumber === 'string') {
+    const normalized = whatsappNumber.replace(/[^\d+]/g, '').replace(/(?!^)\+/g, '')
+    if (normalized && !/^\+?\d{8,15}$/.test(normalized)) {
+      res.status(400).json({ error: 'Enter a valid WhatsApp number (8-15 digits, optional +)' })
+      return
+    }
+    updates.push('whatsapp_number = ?')
+    params.push(normalized || null)
+  }
+
+  if (!updates.length) {
+    res.status(400).json({ error: 'Provide name and/or WhatsApp number' })
     return
   }
 
-  db.prepare('UPDATE agencies SET name = ? WHERE id = ?').run(name.trim(), req.agency!.id)
+  params.push(req.agency!.id)
+  db.prepare(`UPDATE agencies SET ${updates.join(', ')} WHERE id = ?`).run(...params)
   res.json(buildSessionPayload(req.user!.id, req.agency!.id))
 })
 
