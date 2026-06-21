@@ -103,7 +103,7 @@ export function PagesPage() {
         <div>
           <h1 className="font-display text-2xl font-bold">Facebook Pages</h1>
           <p className="text-sm text-muted-foreground">
-            Connect Facebook accounts to this agency. Use multiple BYOC apps to bypass the ~50 test-user limit per app.
+            Connect Facebook accounts to this agency. Add as many BYOC apps as you need — each supports ~50 test users in Development mode.
             {mockMode && ' (Demo mode — add BYOC apps in Settings for real OAuth)'}
           </p>
         </div>

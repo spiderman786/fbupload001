@@ -82,8 +82,7 @@ export function FacebookByocPage() {
         </div>
         <h1 className="font-display text-2xl font-bold">Facebook BYOC</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Add multiple Meta Developer apps to this agency. Each app supports ~50 test users in Development mode — add
-          App 2, App 3, etc. All pages and tokens stay on one account.
+          Add unlimited Meta Developer apps to this agency. Each app supports ~50 test users in Development mode — keep adding App 4, App 5, and so on. All pages and tokens stay on one account.
         </p>
       </div>
 
