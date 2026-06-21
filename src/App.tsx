@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import { ToastProvider } from './context/ToastContext'
 import { ProtectedRoute } from './components/ProtectedRoute'
+import { OwnerRoute } from './components/OwnerRoute'
 import { DashboardLayout } from './components/DashboardLayout'
 import { LandingPage } from './pages/LandingPage'
 import { LoginPage } from './pages/LoginPage'
@@ -92,8 +93,8 @@ function App() {
             <Route path="/agency/settings/team" element={<TeamPage />} />
             <Route path="/settings/facebook-byoc" element={<FacebookByocPage />} />
             <Route path="/agency/settings/facebook-byoc" element={<FacebookByocPage />} />
-            <Route path="/settings/proxy-pool" element={<ProxyPoolPage />} />
-            <Route path="/agency/settings/proxy-pool" element={<ProxyPoolPage />} />
+            <Route path="/settings/proxy-pool" element={<OwnerRoute><ProxyPoolPage /></OwnerRoute>} />
+            <Route path="/agency/settings/proxy-pool" element={<OwnerRoute><ProxyPoolPage /></OwnerRoute>} />
             <Route path="/settings/youtube-byoc" element={<RoutedFeaturePage />} />
             <Route path="/agency/settings/youtube-byoc" element={<RoutedFeaturePage />} />
             <Route path="/settings/instagram-byoc" element={<RoutedFeaturePage />} />

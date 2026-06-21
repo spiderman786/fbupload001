@@ -18,12 +18,25 @@ import {
   Video,
 } from 'lucide-react'
 
-export type NavItem = { to: string; label: string; icon?: LucideIcon }
+export type NavItem = { to: string; label: string; icon?: LucideIcon; ownerOnly?: boolean }
 export type NavSection = { title?: string; items: NavItem[]; collapsible?: boolean; platform?: string }
 
 export const DASHBOARD_NAV: NavSection[] = [
   {
     items: [{ to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }],
+  },
+  {
+    title: 'SETTINGS',
+    collapsible: true,
+    platform: 'settings',
+    items: [
+      { to: '/settings', label: 'Account', icon: Settings },
+      { to: '/settings/team', label: 'Team', icon: Users },
+      { to: '/settings/facebook-byoc', label: 'Facebook BYOC', icon: Settings },
+      { to: '/settings/proxy-pool', label: 'Download Proxies', icon: Server, ownerOnly: true },
+      { to: '/settings/youtube-byoc', label: 'YouTube BYOC', icon: Settings },
+      { to: '/settings/instagram-byoc', label: 'Instagram BYOC', icon: Settings },
+    ],
   },
   {
     title: 'PLATFORM',
@@ -61,22 +74,13 @@ export const DASHBOARD_NAV: NavSection[] = [
       { to: '/instagram/inapp-schedule', label: 'InApp Schedule', icon: CalendarClock },
     ],
   },
-  {
-    title: 'SETTINGS',
-    items: [
-      { to: '/settings/team', label: 'Team', icon: Users },
-      { to: '/settings/facebook-byoc', label: 'Facebook BYOC', icon: Settings },
-      { to: '/settings/proxy-pool', label: 'Download Proxies', icon: Server },
-      { to: '/settings/youtube-byoc', label: 'YouTube BYOC', icon: Settings },
-      { to: '/settings/instagram-byoc', label: 'Instagram BYOC', icon: Settings },
-    ],
-  },
 ]
 
 export const PLATFORM_ICONS: Record<string, LucideIcon> = {
   facebook: Share2,
   youtube: Video,
   instagram: Globe,
+  settings: Settings,
 }
 
 export const QUICK_LINKS = [
@@ -86,6 +90,7 @@ export const QUICK_LINKS = [
   { to: '/facebook/direct-post', label: 'Direct Post', desc: 'Publish now', icon: Send },
   { to: '/facebook/inapp-schedule', label: 'InApp Schedule', desc: 'In-app queue', icon: CalendarClock },
   { to: '/facebook/bulk-delete', label: 'Bulk Delete', desc: 'Remove posts', icon: Trash2 },
+  { to: '/settings/proxy-pool', label: 'Download Proxies', desc: 'Upload proxy IPs', icon: Server, ownerOnly: true },
   { to: '/settings/facebook-byoc', label: 'FB BYOC Settings', desc: 'App credentials', icon: Settings },
 ]
 

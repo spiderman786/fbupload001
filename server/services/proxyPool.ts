@@ -1,4 +1,5 @@
 import fs from 'fs'
+import path from 'path'
 import { getLegacySingleProxyUrl } from '../utils/ytdlpProxy.js'
 
 export type ProxyPoolEntry = {
@@ -18,6 +19,9 @@ export type ProxyPoolStats = {
   directFirst: boolean
   maxAttemptsPerJob: number
   cooldownMs: number
+  filePath: string
+  fileExists: boolean
+  fileLastModified: string | null
   proxies: {
     id: string
     label: string
@@ -29,15 +33,106 @@ export type ProxyPoolStats = {
   }[]
 }
 
+export type ProxyPoolFileInfo = {
+  filePath: string
+  exists: boolean
+  proxyCount: number
+  invalidLines: number
+  lastModified: string | null
+  fileSize: number
+}
+
+export type ProxyUploadResult = {
+  count: number
+  invalid: number
+  duplicates: number
+  filePath: string
+  stats: ProxyPoolStats
+}
+
 const entries: ProxyPoolEntry[] = []
 let roundRobinIndex = 0
 let initialized = false
+let loadedFileMtime = 0
 
-function parseProxyList(raw: string): string[] {
+/** Default on-disk pool (same folder as DATABASE_PATH). */
+export function getManagedProxyPoolPath(): string {
+  const configured = process.env.PROXY_POOL_FILE?.trim()
+  if (configured) return configured
+
+  const dbPath = process.env.DATABASE_PATH ?? path.join(process.cwd(), 'data', 'fbuploadpro.db')
+  return path.join(path.dirname(dbPath), 'proxy-pool.txt')
+}
+
+function splitProxyLines(raw: string): string[] {
   return raw
-    .split(/[\n,]+/)
+    .split(/\r?\n/)
+    .flatMap((line) => line.split(','))
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith('#'))
+}
+
+/** Accept full URLs, user:pass@host:port, or host:port:user:pass (Webshare export). */
+export function normalizeProxyLine(line: string): string | null {
+  const trimmed = line.trim()
+  if (!trimmed || trimmed.startsWith('#')) return null
+
+  if (/^(https?|socks5):\/\//i.test(trimmed)) {
+    try {
+      new URL(trimmed)
+      return trimmed
+    } catch {
+      return null
+    }
+  }
+
+  if (trimmed.includes('@')) {
+    const withScheme = trimmed.includes('://') ? trimmed : `http://${trimmed}`
+    try {
+      new URL(withScheme)
+      return withScheme
+    } catch {
+      return null
+    }
+  }
+
+  const parts = trimmed.split(':')
+  if (parts.length >= 4) {
+    const host = parts[0]?.trim()
+    const port = parts[1]?.trim()
+    const user = parts[2]?.trim()
+    const pass = parts.slice(3).join(':').trim()
+    if (!host || !port || !user || !pass) return null
+    return `http://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${host}:${port}`
+  }
+
+  return null
+}
+
+export function parseAndNormalizeProxyContent(raw: string): { urls: string[]; invalid: number; duplicates: number } {
+  const seen = new Set<string>()
+  const urls: string[] = []
+  let invalid = 0
+
+  for (const line of splitProxyLines(raw)) {
+    const normalized = normalizeProxyLine(line)
+    if (!normalized) {
+      invalid++
+      continue
+    }
+    if (seen.has(normalized)) continue
+    seen.add(normalized)
+    urls.push(normalized)
+  }
+
+  const rawLineCount = splitProxyLines(raw).length
+  const duplicates = Math.max(0, rawLineCount - invalid - urls.length)
+
+  return { urls, invalid, duplicates }
+}
+
+function parseProxyList(raw: string): string[] {
+  return parseAndNormalizeProxyContent(raw).urls
 }
 
 function loadProxyUrlsFromEnv(): string[] {
@@ -48,8 +143,8 @@ function loadProxyUrlsFromEnv(): string[] {
     for (const url of parseProxyList(pool)) urls.add(url)
   }
 
-  const filePath = process.env.PROXY_POOL_FILE?.trim()
-  if (filePath && fs.existsSync(filePath)) {
+  const filePath = getManagedProxyPoolPath()
+  if (fs.existsSync(filePath)) {
     const content = fs.readFileSync(filePath, 'utf8')
     for (const url of parseProxyList(content)) urls.add(url)
   }
@@ -94,9 +189,30 @@ export function maxAttemptsPerJob(): number {
   return Math.min(Math.max(1, configured), entries.length)
 }
 
+function readManagedFileMtime(): number {
+  const filePath = getManagedProxyPoolPath()
+  if (!fs.existsSync(filePath)) return 0
+  return fs.statSync(filePath).mtimeMs
+}
+
+/** Reload when proxy-pool.txt changes (Web + Worker share volume on Railway). */
+export function reloadProxyPoolIfNeeded(): void {
+  const mtime = readManagedFileMtime()
+  if (mtime !== loadedFileMtime) {
+    reloadProxyPool()
+  }
+}
+
+export function reloadProxyPool(): void {
+  initialized = false
+  roundRobinIndex = 0
+  initProxyPool()
+}
+
 export function initProxyPool(): void {
   if (initialized) return
   initialized = true
+  loadedFileMtime = readManagedFileMtime()
 
   const urls = loadProxyUrlsFromEnv()
   entries.length = 0
@@ -114,7 +230,57 @@ export function initProxyPool(): void {
   })
 
   if (entries.length) {
-    console.log(`[proxy-pool] loaded ${entries.length} proxy/proxies`)
+    console.log(`[proxy-pool] loaded ${entries.length} proxy/proxies from ${getManagedProxyPoolPath()}`)
+  }
+}
+
+export function saveProxyPoolFromUpload(rawContent: string): ProxyUploadResult {
+  const { urls, invalid, duplicates } = parseAndNormalizeProxyContent(rawContent)
+  if (!urls.length) {
+    throw new Error('No valid proxy lines found. Use http://user:pass@host:port or host:port:user:pass per line.')
+  }
+
+  const filePath = getManagedProxyPoolPath()
+  fs.mkdirSync(path.dirname(filePath), { recursive: true })
+  fs.writeFileSync(`${filePath}`, `${urls.join('\n')}\n`, 'utf8')
+  process.env.PROXY_POOL_FILE = filePath
+
+  reloadProxyPool()
+
+  return {
+    count: urls.length,
+    invalid,
+    duplicates,
+    filePath,
+    stats: getProxyPoolStats(),
+  }
+}
+
+export function getProxyPoolFileInfo(): ProxyPoolFileInfo {
+  reloadProxyPoolIfNeeded()
+  const filePath = getManagedProxyPoolPath()
+  if (!fs.existsSync(filePath)) {
+    return {
+      filePath,
+      exists: false,
+      proxyCount: entries.length,
+      invalidLines: 0,
+      lastModified: null,
+      fileSize: 0,
+    }
+  }
+
+  const stat = fs.statSync(filePath)
+  const content = fs.readFileSync(filePath, 'utf8')
+  const parsed = parseAndNormalizeProxyContent(content)
+
+  return {
+    filePath,
+    exists: true,
+    proxyCount: parsed.urls.length,
+    invalidLines: parsed.invalid,
+    lastModified: stat.mtime.toISOString(),
+    fileSize: stat.size,
   }
 }
 
@@ -124,6 +290,7 @@ function isAvailable(entry: ProxyPoolEntry, now: number): boolean {
 
 /** Round-robin list of proxies to try for one yt-dlp job. */
 export function getProxiesForJob(limit = maxAttemptsPerJob()): ProxyPoolEntry[] {
+  reloadProxyPoolIfNeeded()
   initProxyPool()
   if (!entries.length || limit <= 0) return []
 
@@ -168,9 +335,13 @@ export function markProxyFailure(entryId: string): void {
 }
 
 export function getProxyPoolStats(): ProxyPoolStats {
+  reloadProxyPoolIfNeeded()
   initProxyPool()
   const now = Date.now()
   const availableNow = entries.filter((e) => isAvailable(e, now)).length
+  const filePath = getManagedProxyPoolPath()
+  const fileExists = fs.existsSync(filePath)
+  const fileLastModified = fileExists ? fs.statSync(filePath).mtime.toISOString() : null
 
   return {
     enabled: entries.length > 0 && process.env.PROXY_POOL_ENABLED !== 'false',
@@ -179,6 +350,9 @@ export function getProxyPoolStats(): ProxyPoolStats {
     directFirst: isDirectFirst(),
     maxAttemptsPerJob: maxAttemptsPerJob(),
     cooldownMs: cooldownMs(),
+    filePath,
+    fileExists,
+    fileLastModified,
     proxies: entries.map((e) => ({
       id: e.id,
       label: e.label,

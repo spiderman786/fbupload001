@@ -1,21 +1,27 @@
 import { useState } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { ChevronDown, ChevronRight, Coins, LogOut, Menu, X } from 'lucide-react'
-import { DASHBOARD_NAV, PLATFORM_ICONS } from '../config/dashboardNav'
-import { useAuth } from '../context/AuthContext'
+import { DASHBOARD_NAV, PLATFORM_ICONS, type NavItem } from '../config/dashboardNav'
+import { useAuth, useAgencyRole } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { getApiError } from '../lib/apiError'
 
 export function DashboardLayout() {
   const { user, agency, agencies, role, logout, switchAgency } = useAuth()
+  const { isOwner } = useAgencyRole()
   const toast = useToast()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
+    settings: true,
     facebook: true,
     youtube: false,
     instagram: false,
   })
+
+  function visibleNavItems(items: NavItem[]) {
+    return items.filter((item) => !item.ownerOnly || isOwner)
+  }
 
   async function handleLogout() {
     try {
@@ -70,11 +76,11 @@ export function DashboardLayout() {
                       const Icon = PLATFORM_ICONS[section.platform!]
                       return Icon ? <Icon className="h-4 w-4 text-primary" /> : null
                     })()}
-                    {section.platform}
+                    {section.platform === 'settings' ? 'Settings' : section.platform}
                   </button>
                   {expanded[section.platform] && (
                     <div className="ml-2 space-y-0.5 border-l border-border pl-2">
-                      {section.items.map((item) => (
+                      {visibleNavItems(section.items).map((item) => (
                         <NavLink
                           key={item.to}
                           to={item.to}
@@ -93,7 +99,7 @@ export function DashboardLayout() {
                 </div>
               ) : (
                 <div className="space-y-0.5">
-                  {section.items.map((item) => (
+                  {visibleNavItems(section.items).map((item) => (
                     <NavLink
                       key={item.to}
                       to={item.to}

@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { RefreshCw, Server } from 'lucide-react'
+import { ProxyPoolUploadPanel } from '../../components/ProxyPoolUploadPanel'
 import { api } from '../../api/client'
-import { useAgencyRole } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
 import { getApiError } from '../../lib/apiError'
 
+type ProxyStats = Awaited<ReturnType<typeof api.proxyPool.stats>>
+
 export function ProxyPoolPage() {
   const toast = useToast()
-  const { isAdmin } = useAgencyRole()
-  const [stats, setStats] = useState<Awaited<ReturnType<typeof api.proxyPool.stats>> | null>(null)
+  const [stats, setStats] = useState<ProxyStats | null>(null)
   const [loading, setLoading] = useState(true)
 
   async function load() {
@@ -23,23 +25,19 @@ export function ProxyPoolPage() {
   }
 
   useEffect(() => {
-    if (isAdmin) load()
-  }, [isAdmin])
-
-  if (!isAdmin) {
-    return <p className="text-sm text-muted-foreground">Only owners and admins can view proxy pool status.</p>
-  }
+    load()
+  }, [])
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="mb-2 inline-flex rounded-lg border border-primary/15 bg-primary/5 p-2">
             <Server className="h-5 w-5 text-primary" />
           </div>
           <h1 className="font-display text-2xl font-bold">Download Proxy Pool</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Residential static proxies rotate per reel download so Instagram/TikTok/YouTube do not block your server IP.
+            Upload proxies for Instagram/TikTok/YouTube reel downloads.
           </p>
         </div>
         <button
@@ -51,6 +49,11 @@ export function ProxyPoolPage() {
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </button>
+      </div>
+
+      <div className="rounded-xl border-2 border-primary/25 bg-primary/5 p-5">
+        <h2 className="mb-3 text-lg font-semibold">Step 1 — Upload your proxy list</h2>
+        <ProxyPoolUploadPanel onUploaded={load} />
       </div>
 
       {loading && !stats ? (
@@ -72,25 +75,23 @@ export function ProxyPoolPage() {
             ))}
           </div>
 
-          <div className="rounded-xl border border-border bg-card p-4 text-sm">
+          <div className="rounded-xl border border-border bg-card p-4 text-sm space-y-1">
             <p>
               <span className="text-muted-foreground">Status:</span>{' '}
-              {stats.enabled ? 'Enabled' : 'Not configured — add proxies on Railway'}
+              {stats.enabled ? 'Enabled' : 'Waiting for upload — use the blue button above'}
             </p>
-            <p className="mt-1">
-              <span className="text-muted-foreground">Direct-first:</span> {stats.directFirst ? 'Yes (try server IP, then proxies)' : 'No (always use proxies)'}
-            </p>
-            <p className="mt-1">
-              <span className="text-muted-foreground">Cooldown after failures:</span> {Math.round(stats.cooldownMs / 60000)} min
+            <p>
+              <span className="text-muted-foreground">Saved to:</span>{' '}
+              <code className="rounded bg-muted px-1 text-xs">{stats.filePath}</code>
             </p>
           </div>
 
-          {stats.proxies.length ? (
+          {stats.proxies.length > 0 && (
             <div className="overflow-hidden rounded-xl border border-border">
               <table className="w-full text-sm">
                 <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
-                    <th className="px-4 py-3">Proxy</th>
+                    <th className="px-4 py-3">Proxy IP</th>
                     <th className="px-4 py-3">OK</th>
                     <th className="px-4 py-3">Fails</th>
                     <th className="px-4 py-3">Status</th>
@@ -102,35 +103,19 @@ export function ProxyPoolPage() {
                       <td className="px-4 py-2 font-mono text-xs">{p.label}</td>
                       <td className="px-4 py-2">{p.successes}</td>
                       <td className="px-4 py-2">{p.failures}</td>
-                      <td className="px-4 py-2">
-                        {p.available ? (
-                          <span className="text-primary">Ready</span>
-                        ) : (
-                          <span className="text-orange-600">Cooldown</span>
-                        )}
-                      </td>
+                      <td className="px-4 py-2">{p.available ? 'Ready' : 'Cooldown'}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          ) : (
-            <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-              No proxies loaded. Set <code className="rounded bg-muted px-1">DOWNLOAD_PROXY_POOL</code> or{' '}
-              <code className="rounded bg-muted px-1">PROXY_POOL_FILE</code> on Railway (Web + Worker services).
-            </div>
           )}
-
-          <div className="rounded-lg border border-border bg-muted/20 p-4 text-xs text-muted-foreground space-y-2">
-            <p className="font-semibold text-foreground">Railway setup (50 proxies example)</p>
-            <p>Option A — env var (comma or newline separated):</p>
-            <pre className="overflow-x-auto rounded bg-background p-2 font-mono">{`DOWNLOAD_PROXY_POOL=http://user:pass@1.2.3.4:8080,http://user:pass@5.6.7.8:8080,...`}</pre>
-            <p>Option B — mount a file:</p>
-            <pre className="overflow-x-auto rounded bg-background p-2 font-mono">{`PROXY_POOL_FILE=/app/data/proxy-pool.txt\nPROXY_DIRECT_FIRST=false`}</pre>
-            <p>Set on both <strong>Web</strong> and <strong>Worker</strong> services. Redeploy after changing.</p>
-          </div>
         </>
       ) : null}
+
+      <p className="text-sm text-muted-foreground">
+        Also on <Link to="/dashboard" className="text-primary hover:underline">Dashboard home</Link> (top card).
+      </p>
     </div>
   )
 }

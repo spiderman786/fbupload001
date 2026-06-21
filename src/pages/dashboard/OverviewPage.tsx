@@ -7,13 +7,15 @@ import {
   Globe,
   Plus,
   RefreshCw,
+  Server,
   TrendingUp,
   Users,
 } from 'lucide-react'
 import { api } from '../../api/client'
 import { QUICK_LINKS } from '../../config/dashboardNav'
 import { HealthStatusBadge } from '../../components/HealthStatusBadge'
-import { useAuth } from '../../context/AuthContext'
+import { ProxyPoolUploadPanel } from '../../components/ProxyPoolUploadPanel'
+import { useAuth, useAgencyRole } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
 import { getApiError } from '../../lib/apiError'
 
@@ -38,6 +40,7 @@ type AttentionPage = {
 
 export function OverviewPage() {
   const { user } = useAuth()
+  const { isOwner } = useAgencyRole()
   const toast = useToast()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [attention, setAttention] = useState<AttentionPage[]>([])
@@ -103,6 +106,22 @@ export function OverviewPage() {
 
       {loadError && (
         <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{loadError}</p>
+      )}
+
+      {isOwner && (
+        <section className="rounded-xl border-2 border-primary/25 bg-primary/5 p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <Server className="h-5 w-5 text-primary" />
+            <h2 className="font-semibold">Download proxies</h2>
+          </div>
+          <p className="mb-4 text-sm text-muted-foreground">
+            Upload your Webshare (or other) proxy list here — one IP per line. Required for Instagram/TikTok downloads at scale.
+          </p>
+          <ProxyPoolUploadPanel />
+          <Link to="/settings/proxy-pool" className="mt-3 inline-block text-sm text-primary hover:underline">
+            View full proxy pool status →
+          </Link>
+        </section>
       )}
 
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -217,7 +236,7 @@ export function OverviewPage() {
       <section>
         <h2 className="mb-4 text-xs font-semibold tracking-[0.12em] text-muted-foreground uppercase">Quick Links</h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {QUICK_LINKS.map((link) => (
+          {QUICK_LINKS.filter((link) => !('ownerOnly' in link && link.ownerOnly) || isOwner).map((link) => (
             <Link
               key={link.to}
               to={link.to}

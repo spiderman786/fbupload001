@@ -270,6 +270,9 @@ export const api = {
         directFirst: boolean
         maxAttemptsPerJob: number
         cooldownMs: number
+        filePath: string
+        fileExists: boolean
+        fileLastModified: string | null
         proxies: {
           id: string
           label: string
@@ -280,6 +283,65 @@ export const api = {
           lastUsedAt: string | null
         }[]
       }>('/proxy-pool/stats'),
+    fileInfo: () =>
+      request<{
+        filePath: string
+        exists: boolean
+        proxyCount: number
+        invalidLines: number
+        lastModified: string | null
+        fileSize: number
+      }>('/proxy-pool/file-info'),
+    upload: (content: string) =>
+      request<{
+        count: number
+        invalid: number
+        duplicates: number
+        filePath: string
+        stats: {
+          enabled: boolean
+          poolSize: number
+          availableNow: number
+          directFirst: boolean
+          maxAttemptsPerJob: number
+          cooldownMs: number
+          filePath: string
+          fileExists: boolean
+          fileLastModified: string | null
+          proxies: {
+            id: string
+            label: string
+            failures: number
+            successes: number
+            available: boolean
+            cooldownUntil: string | null
+            lastUsedAt: string | null
+          }[]
+        }
+      }>('/proxy-pool/upload', { method: 'POST', body: JSON.stringify({ content }) }),
+    reload: () =>
+      request<{
+        stats: {
+          enabled: boolean
+          poolSize: number
+          availableNow: number
+          directFirst: boolean
+          maxAttemptsPerJob: number
+          cooldownMs: number
+          filePath: string
+          fileExists: boolean
+          fileLastModified: string | null
+          proxies: {
+            id: string
+            label: string
+            failures: number
+            successes: number
+            available: boolean
+            cooldownUntil: string | null
+            lastUsedAt: string | null
+          }[]
+        }
+      }>('/proxy-pool/reload', { method: 'POST' }),
   },
   agencies: {
     switch: (agencyId: string) =>
