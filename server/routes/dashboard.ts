@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { db } from '../db.js'
 import { authMiddleware, requireVerified } from '../middleware/auth.js'
 import { agencyMiddleware } from '../middleware/agency.js'
+import { isFacebookConfiguredForAgency } from '../services/byoc.js'
 import type { AgencyRequest } from '../utils/agency.js'
 
 export const dashboardRouter = Router()
@@ -48,6 +49,36 @@ dashboardRouter.get('/stats', (req: AgencyRequest, res) => {
     needsAttention: needsAttention.count,
     updatedAt: new Date().toISOString(),
   })
+})
+
+dashboardRouter.get('/onboarding', (req: AgencyRequest, res) => {
+  const agencyId = req.agency!.id
+
+  const agency = db.prepare('SELECT token_balance FROM agencies WHERE id = ?').get(agencyId) as {
+    token_balance: number
+  }
+
+  const facebookPages = (
+    db.prepare('SELECT COUNT(*) as count FROM facebook_pages WHERE agency_id = ?').get(agencyId) as { count: number }
+  ).count
+
+  const aduPages = (
+    db
+      .prepare('SELECT COUNT(*) as count FROM page_source_assignments WHERE agency_id = ?')
+      .get(agencyId) as { count: number }
+  ).count
+
+  const steps = {
+    tokenBalanceReady: agency.token_balance > 0,
+    byocConnected: isFacebookConfiguredForAgency(agencyId),
+    facebookAccountAdded: facebookPages > 0,
+    aduPageAdded: aduPages > 0,
+  }
+
+  const completedCount = Object.values(steps).filter(Boolean).length
+  const complete = completedCount === 4
+
+  res.json({ steps, complete, completedCount, totalSteps: 4 })
 })
 
 dashboardRouter.get('/attention', (req: AgencyRequest, res) => {

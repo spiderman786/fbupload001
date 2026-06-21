@@ -14,6 +14,7 @@ import {
 import { api } from '../../api/client'
 import { QUICK_LINKS } from '../../config/dashboardNav'
 import { HealthStatusBadge } from '../../components/HealthStatusBadge'
+import { GetStartedPanel, type OnboardingSteps } from '../../components/GetStartedPanel'
 import { ProxyPoolUploadPanel } from '../../components/ProxyPoolUploadPanel'
 import { useAuth, useAgencyRole } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
@@ -48,17 +49,20 @@ export function OverviewPage() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [onboarding, setOnboarding] = useState<OnboardingSteps | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     setLoadError('')
     try {
-      const [s, a] = await Promise.all([
+      const [s, a, o] = await Promise.all([
         api.dashboard.stats(),
         api.dashboard.attention({ filter: filter === 'all' ? undefined : filter, search: search || undefined }),
+        api.dashboard.onboarding(),
       ])
       setStats(s)
       setAttention(a.pages)
+      setOnboarding(o.steps)
     } catch (err) {
       const msg = getApiError(err, 'Failed to load dashboard')
       setLoadError(msg)
@@ -106,6 +110,13 @@ export function OverviewPage() {
 
       {loadError && (
         <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{loadError}</p>
+      )}
+
+      {onboarding && (
+        <GetStartedPanel
+          steps={onboarding}
+          loading={loading && !onboarding.aduPageAdded}
+        />
       )}
 
       {isOwner && (

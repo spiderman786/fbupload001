@@ -197,6 +197,18 @@ export const api = {
       const qs = q.toString()
       return request<{ pages: AttentionPage[] }>(`/dashboard/attention${qs ? `?${qs}` : ''}`)
     },
+    onboarding: () =>
+      request<{
+        steps: {
+          tokenBalanceReady: boolean
+          byocConnected: boolean
+          facebookAccountAdded: boolean
+          aduPageAdded: boolean
+        }
+        complete: boolean
+        completedCount: number
+        totalSteps: number
+      }>('/dashboard/onboarding'),
   },
   automation: {
     assignments: () =>
