@@ -11,6 +11,7 @@ export type AgencySession = {
   role: AgencyRole
   tokenBalance: number
   whatsappNumber: string | null
+  subdomain: string | null
 }
 
 export type AgencyMembership = AgencySession
@@ -46,13 +47,20 @@ export function canRunAutomation(role: AgencyRole): boolean {
 export function getMemberships(userId: string): AgencyMembership[] {
   const rows = db
     .prepare(`
-      SELECT a.id, a.name, a.token_balance, a.whatsapp_number, m.role
+      SELECT a.id, a.name, a.token_balance, a.whatsapp_number, a.subdomain, m.role
       FROM agency_members m
       JOIN agencies a ON a.id = m.agency_id
       WHERE m.user_id = ?
       ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, a.name
     `)
-    .all(userId) as { id: string; name: string; token_balance: number; whatsapp_number: string | null; role: AgencyRole }[]
+    .all(userId) as {
+    id: string
+    name: string
+    token_balance: number
+    whatsapp_number: string | null
+    subdomain: string | null
+    role: AgencyRole
+  }[]
 
   return rows.map((r) => ({
     id: r.id,
@@ -60,7 +68,35 @@ export function getMemberships(userId: string): AgencyMembership[] {
     role: r.role,
     tokenBalance: r.token_balance,
     whatsappNumber: r.whatsapp_number,
+    subdomain: r.subdomain,
   }))
+}
+
+function normalizeSubdomain(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-')
+}
+
+function makeSubdomainBase(name: string, email?: string): string {
+  const emailLocal = email?.split('@')[0] ?? ''
+  const candidate = normalizeSubdomain(emailLocal) || normalizeSubdomain(name) || 'agency'
+  const trimmed = candidate.slice(0, 40)
+  return trimmed || 'agency'
+}
+
+function ensureUniqueSubdomain(base: string): string {
+  const normalizedBase = normalizeSubdomain(base) || 'agency'
+  let attempt = normalizedBase
+  let i = 2
+  while (true) {
+    const exists = db.prepare('SELECT id FROM agencies WHERE subdomain = ? LIMIT 1').get(attempt) as { id: string } | undefined
+    if (!exists) return attempt
+    attempt = `${normalizedBase}-${i}`.slice(0, 50)
+    i += 1
+  }
 }
 
 export function resolveAgency(userId: string, agencyIdHint?: string | null): AgencySession | null {
@@ -75,13 +111,20 @@ export function resolveAgency(userId: string, agencyIdHint?: string | null): Age
   return memberships[0]!
 }
 
-export function createAgencyForUser(userId: string, name: string, initialTokens = 0): string {
+export function createAgencyForUser(
+  userId: string,
+  name: string,
+  initialTokens = 0,
+  preferredSubdomain?: string,
+): { agencyId: string; subdomain: string } {
   const agencyId = uuid()
-  db.prepare('INSERT INTO agencies (id, name, token_balance, whatsapp_number) VALUES (?, ?, ?, ?)').run(
+  const subdomain = ensureUniqueSubdomain(preferredSubdomain ?? makeSubdomainBase(name))
+  db.prepare('INSERT INTO agencies (id, name, token_balance, whatsapp_number, subdomain) VALUES (?, ?, ?, ?, ?)').run(
     agencyId,
     name,
     initialTokens,
     null,
+    subdomain,
   )
   db.prepare('INSERT INTO agency_members (id, agency_id, user_id, role) VALUES (?, ?, ?, ?)').run(
     uuid(),
@@ -89,7 +132,14 @@ export function createAgencyForUser(userId: string, name: string, initialTokens 
     userId,
     'owner',
   )
-  return agencyId
+  return { agencyId, subdomain }
+}
+
+export function getAgencySubdomainUrl(subdomain: string): string | null {
+  const baseDomain = process.env.APP_BASE_DOMAIN?.trim() || process.env.PUBLIC_APP_BASE_DOMAIN?.trim()
+  if (!baseDomain) return null
+  const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http'
+  return `${protocol}://${subdomain}.${baseDomain}/agency`
 }
 
 export function buildSessionPayload(userId: string, agencyIdHint?: string | null) {
@@ -115,13 +165,13 @@ export function clearAgencyCookie(res: Response) {
 export function assertAgencyMember(userId: string, agencyId: string): AgencySession | null {
   const row = db
     .prepare(`
-      SELECT a.id, a.name, a.token_balance, a.whatsapp_number, m.role
+      SELECT a.id, a.name, a.token_balance, a.whatsapp_number, a.subdomain, m.role
       FROM agency_members m
       JOIN agencies a ON a.id = m.agency_id
       WHERE m.user_id = ? AND m.agency_id = ?
     `)
     .get(userId, agencyId) as
-    | { id: string; name: string; token_balance: number; whatsapp_number: string | null; role: AgencyRole }
+    | { id: string; name: string; token_balance: number; whatsapp_number: string | null; subdomain: string | null; role: AgencyRole }
     | undefined
 
   if (!row) return null
@@ -132,6 +182,31 @@ export function assertAgencyMember(userId: string, agencyId: string): AgencySess
     role: row.role,
     tokenBalance: row.token_balance,
     whatsappNumber: row.whatsapp_number,
+    subdomain: row.subdomain,
+  }
+}
+
+export function assertAgencySubdomainMember(userId: string, subdomain: string): AgencySession | null {
+  const row = db
+    .prepare(`
+      SELECT a.id, a.name, a.token_balance, a.whatsapp_number, a.subdomain, m.role
+      FROM agency_members m
+      JOIN agencies a ON a.id = m.agency_id
+      WHERE m.user_id = ? AND lower(a.subdomain) = lower(?)
+      LIMIT 1
+    `)
+    .get(userId, subdomain) as
+    | { id: string; name: string; token_balance: number; whatsapp_number: string | null; subdomain: string | null; role: AgencyRole }
+    | undefined
+
+  if (!row) return null
+  return {
+    id: row.id,
+    name: row.name,
+    role: row.role,
+    tokenBalance: row.token_balance,
+    whatsappNumber: row.whatsapp_number,
+    subdomain: row.subdomain,
   }
 }
 
@@ -146,7 +221,7 @@ export function backfillAgencyForUser(userId: string): string {
     token_balance: number
   }
 
-  const agencyId = createAgencyForUser(userId, `${user.full_name}'s Agency`, user.token_balance)
+  const agencyId = createAgencyForUser(userId, `${user.full_name}'s Agency`, user.token_balance).agencyId
 
   const tables = [
     'facebook_accounts',

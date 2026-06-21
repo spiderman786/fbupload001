@@ -24,7 +24,10 @@ export const api = {
   auth: {
     session: () => request<SessionResponse>('/auth/session'),
     signup: (body: SignupBody) =>
-      request<{ message: string; userId: string }>('/auth/signup', { method: 'POST', body: JSON.stringify(body) }),
+      request<{ message: string; userId: string; agencySubdomain?: string; agencyUrl?: string | null }>('/auth/signup', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
     verify: (body: { email: string; code: string }) =>
       request<SessionResponse & { message: string }>('/auth/verify', { method: 'POST', body: JSON.stringify(body) }),
     resendVerification: (email: string) =>
@@ -245,6 +248,7 @@ export type AgencyInfo = {
   role: AgencyRole
   tokenBalance: number
   whatsappNumber: string | null
+  subdomain: string | null
 }
 
 export type SessionResponse = {

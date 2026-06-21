@@ -131,6 +131,7 @@ function migrateAgencies() {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       token_balance INTEGER NOT NULL DEFAULT 0,
+      subdomain TEXT,
       whatsapp_number TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -164,6 +165,10 @@ function migrateAgencies() {
   if (!agencyCols.some((c) => c.name === 'whatsapp_number')) {
     db.exec(`ALTER TABLE agencies ADD COLUMN whatsapp_number TEXT`)
   }
+  if (!agencyCols.some((c) => c.name === 'subdomain')) {
+    db.exec(`ALTER TABLE agencies ADD COLUMN subdomain TEXT`)
+  }
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_agencies_subdomain_unique ON agencies(subdomain) WHERE subdomain IS NOT NULL`)
 
   for (const table of [
     'facebook_accounts',
@@ -196,10 +201,11 @@ function migrateAgencies() {
     let agencyId = member?.agency_id
     if (!agencyId) {
       agencyId = uuid()
-      db.prepare('INSERT INTO agencies (id, name, token_balance, whatsapp_number) VALUES (?, ?, ?, ?)').run(
+      db.prepare('INSERT INTO agencies (id, name, token_balance, whatsapp_number, subdomain) VALUES (?, ?, ?, ?, ?)').run(
         agencyId,
         `${user.full_name}'s Agency`,
         user.token_balance,
+        null,
         null,
       )
       db.prepare('INSERT INTO agency_members (id, agency_id, user_id, role) VALUES (?, ?, ?, ?)').run(

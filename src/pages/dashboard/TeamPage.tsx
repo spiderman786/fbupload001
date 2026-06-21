@@ -126,6 +126,11 @@ export function TeamPage() {
       {isAdmin && (
         <form onSubmit={handleSaveAgencySettings} className="rounded-xl border border-border bg-card p-4 text-sm space-y-3">
           <p className="font-medium">Tokenization settings</p>
+          {agency?.subdomain && (
+            <p className="text-xs text-muted-foreground">
+              Workspace URL: <span className="font-medium text-foreground">{`${agency.subdomain}.${window.location.hostname.replace(/^([^.]*)\./, '')}/agency`}</span>
+            </p>
+          )}
           <p className="text-xs text-muted-foreground">
             Set your agency WhatsApp number for token purchase requests. Leave blank to use platform default.
           </p>

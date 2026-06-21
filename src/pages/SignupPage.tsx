@@ -28,7 +28,7 @@ export function SignupPage() {
     setLoading(true)
     setError('')
     try {
-      await api.auth.signup({
+      const res = await api.auth.signup({
         fullName,
         email,
         password,
@@ -36,7 +36,9 @@ export function SignupPage() {
         phoneNumber: phone,
         agencyName: agencyName.trim() || undefined,
       })
-      navigate('/verify-email', { state: { email } })
+      navigate('/verify-email', {
+        state: { email, agencySubdomain: res.agencySubdomain, agencyUrl: res.agencyUrl ?? undefined },
+      })
     } catch (err) {
       setError((err as { error?: string }).error ?? 'Signup failed')
     } finally {

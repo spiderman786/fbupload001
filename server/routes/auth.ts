@@ -14,15 +14,48 @@ import { generateVerificationCode, isGmail } from '../utils/helpers.js'
 import { sendVerificationEmail } from '../services/email.js'
 import {
   buildSessionPayload,
+  assertAgencySubdomainMember,
   clearAgencyCookie,
   createAgencyForUser,
+  getAgencySubdomainUrl,
   resolveAgency,
   setAgencyCookie,
 } from '../utils/agency.js'
 
 export const authRouter = Router()
 
+function getRequestSubdomainHost(req: { headers: Record<string, unknown> & { host?: string } }): string | null {
+  const forwarded = req.headers['x-forwarded-host'] as string | string[] | undefined
+  const hostHeader = Array.isArray(forwarded) ? forwarded[0] : forwarded
+  const raw = (hostHeader ?? (req.headers.host as string | undefined) ?? '').split(',')[0]!.trim().toLowerCase()
+  const host = raw.replace(/:\d+$/, '')
+  if (!host || host === 'localhost' || /^[\d.]+$/.test(host)) return null
+
+  const baseDomain = process.env.APP_BASE_DOMAIN?.trim().toLowerCase()
+  if (baseDomain) {
+    if (host === baseDomain) return null
+    const suffix = `.${baseDomain}`
+    if (host.endsWith(suffix)) {
+      const sub = host.slice(0, -suffix.length).trim()
+      return sub && !['www', 'app'].includes(sub) ? sub : null
+    }
+    return null
+  }
+
+  const parts = host.split('.')
+  if (parts.length < 3) return null
+  const sub = parts[0]!
+  return ['www', 'app'].includes(sub) ? null : sub
+}
+
 authRouter.get('/session', authMiddleware, (req: AuthRequest, res) => {
+  const subdomain = getRequestSubdomainHost(req)
+  const fromSubdomain = subdomain ? assertAgencySubdomainMember(req.user!.id, subdomain) : null
+  if (fromSubdomain) {
+    setAgencyCookie(res, fromSubdomain.id)
+    res.json(buildSessionPayload(req.user!.id, fromSubdomain.id))
+    return
+  }
   const agencyId = req.cookies?.agency_id as string | undefined
   res.json(buildSessionPayload(req.user!.id, agencyId))
 })
@@ -59,7 +92,12 @@ authRouter.post('/signup', async (req, res) => {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, email.toLowerCase(), fullName, hash, phoneCountryCode ?? '+92', phoneNumber, code, expires)
 
-  createAgencyForUser(id, (agencyName?.trim() || `${fullName}'s Agency`))
+  const createdAgency = createAgencyForUser(
+    id,
+    (agencyName?.trim() || `${fullName}'s Agency`),
+    0,
+    email.toLowerCase().split('@')[0],
+  )
 
   try {
     await sendVerificationEmail(email, code)
@@ -74,7 +112,12 @@ authRouter.post('/signup', async (req, res) => {
     return
   }
 
-  res.status(201).json({ message: 'Verification code sent to your Gmail', userId: id })
+  res.status(201).json({
+    message: 'Verification code sent to your Gmail',
+    userId: id,
+    agencySubdomain: createdAgency.subdomain,
+    agencyUrl: getAgencySubdomainUrl(createdAgency.subdomain),
+  })
 })
 
 authRouter.post('/verify', (req, res) => {
@@ -186,7 +229,8 @@ authRouter.post('/login', async (req, res) => {
 
   const token = signToken(user.id)
   res.cookie('token', token, COOKIE_OPTIONS)
-  const agency = resolveAgency(user.id, req.cookies?.agency_id)
+  const subdomain = getRequestSubdomainHost(req)
+  const agency = (subdomain ? assertAgencySubdomainMember(user.id, subdomain) : null) ?? resolveAgency(user.id, req.cookies?.agency_id)
   if (agency) setAgencyCookie(res, agency.id)
   res.json(buildSessionPayload(user.id, agency?.id))
 })

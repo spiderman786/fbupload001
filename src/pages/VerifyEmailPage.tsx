@@ -8,7 +8,9 @@ export function VerifyEmailPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const { setSession } = useAuth()
-  const email = (location.state as { email?: string })?.email ?? ''
+  const state = (location.state as { email?: string; agencySubdomain?: string; agencyUrl?: string } | null) ?? null
+  const email = state?.email ?? ''
+  const agencyUrl = state?.agencyUrl
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -21,7 +23,7 @@ export function VerifyEmailPage() {
     try {
       const session = await api.auth.verify({ email, code })
       setSession(session)
-      navigate('/dashboard')
+      navigate('/agency')
     } catch (err) {
       setError((err as { error?: string }).error ?? 'Verification failed')
     } finally {
@@ -55,6 +57,11 @@ export function VerifyEmailPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           Enter the 6-digit code sent to <strong>{email}</strong>
         </p>
+        {agencyUrl && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Your agency workspace: <span className="font-medium text-foreground">{agencyUrl}</span>
+          </p>
+        )}
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
