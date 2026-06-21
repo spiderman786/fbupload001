@@ -56,9 +56,19 @@ export async function exchangeCodeForToken(agencyId: string, code: string): Prom
   return { accessToken: tokenData.access_token, metaUserId: meData.id }
 }
 
-export async function fetchUserPages(agencyId: string, accessToken: string): Promise<
-  { id: string; name: string; followers?: string; fanCount: number; accessToken?: string }[]
-> {
+type FbPageRow = { id: string; name: string; followers?: string; fanCount: number; accessToken?: string }
+
+function mapGraphPage(p: { id: string; name: string; fan_count?: number; access_token?: string }): FbPageRow {
+  return {
+    id: p.id,
+    name: p.name,
+    fanCount: p.fan_count ?? 0,
+    followers: p.fan_count ? formatFollowers(p.fan_count) : '0',
+    accessToken: p.access_token,
+  }
+}
+
+export async function fetchUserPages(agencyId: string, accessToken: string): Promise<FbPageRow[]> {
   if (!isFacebookConfigured(agencyId) && accessToken === 'mock_token') {
     return [
       { id: 'mock_page_1', name: 'Adam Sullivan', followers: '12.4K', fanCount: 12_400, accessToken: 'mock_page_token_1' },
@@ -67,23 +77,63 @@ export async function fetchUserPages(agencyId: string, accessToken: string): Pro
     ]
   }
 
-  const res = await fetch(
-    `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,fan_count,access_token&access_token=${accessToken}`,
-  )
-  const data = (await res.json()) as {
-    data?: { id: string; name: string; fan_count?: number; access_token?: string }[]
-    error?: { message: string }
+  const pages: FbPageRow[] = []
+  let url: string | null =
+    `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,fan_count,access_token&limit=100&access_token=${encodeURIComponent(accessToken)}`
+
+  while (url) {
+    const res = await fetch(url)
+    const data = (await res.json()) as {
+      data?: { id: string; name: string; fan_count?: number; access_token?: string }[]
+      paging?: { next?: string }
+      error?: { message: string }
+    }
+
+    if (data.error) throw new Error(data.error.message)
+    for (const p of data.data ?? []) pages.push(mapGraphPage(p))
+    url = data.paging?.next ?? null
   }
 
-  if (data.error) throw new Error(data.error.message)
+  return pages
+}
 
-  return (data.data ?? []).map((p) => ({
-    id: p.id,
-    name: p.name,
-    fanCount: p.fan_count ?? 0,
-    followers: p.fan_count ? formatFollowers(p.fan_count) : '0',
-    accessToken: p.access_token,
-  }))
+/** Resolve Meta page IDs to page records (supports bulk CSV connect beyond first Graph page batch). */
+export async function fetchPagesByMetaIds(
+  agencyId: string,
+  accessToken: string,
+  metaPageIds: string[],
+): Promise<FbPageRow[]> {
+  if (!metaPageIds.length) return []
+
+  if (!isFacebookConfigured(agencyId) && accessToken === 'mock_token') {
+    const all = await fetchUserPages(agencyId, accessToken)
+    const wanted = new Set(metaPageIds)
+    return all.filter((p) => wanted.has(p.id))
+  }
+
+  const results: FbPageRow[] = []
+  const chunkSize = 50
+
+  for (let i = 0; i < metaPageIds.length; i += chunkSize) {
+    const chunk = metaPageIds.slice(i, i + chunkSize)
+    const res = await fetch(
+      `https://graph.facebook.com/v21.0/?ids=${chunk.join(',')}&fields=id,name,fan_count,access_token&access_token=${encodeURIComponent(accessToken)}`,
+    )
+    const data = (await res.json()) as Record<
+      string,
+      { id: string; name: string; fan_count?: number; access_token?: string; error?: { message: string } }
+    > & { error?: { message: string } }
+
+    if (data.error) throw new Error(data.error.message)
+
+    for (const id of chunk) {
+      const page = data[id]
+      if (!page || page.error) continue
+      results.push(mapGraphPage(page))
+    }
+  }
+
+  return results
 }
 
 function formatFollowers(n: number): string {
@@ -128,12 +178,17 @@ export async function connectSpecificPagesForAgency(
   accountId: string,
   accessToken: string,
   pageIds: string[],
+  options?: { skipFollowerSync?: boolean },
 ) {
-  const wanted = new Set(pageIds.map((p) => String(p).trim()).filter(Boolean))
+  const wanted = [...new Set(pageIds.map((p) => String(p).trim()).filter(Boolean))]
   if (!wanted.size) return []
-  const pages = await fetchUserPages(agencyId, accessToken)
-  const filtered = pages.filter((p) => wanted.has(p.id))
-  return upsertPagesForAgency(agencyId, userId, accountId, filtered)
+
+  const fromGraph = await fetchPagesByMetaIds(agencyId, accessToken, wanted)
+  if (fromGraph.length === 0) {
+    throw new Error('None of the page IDs are accessible with this Facebook account')
+  }
+
+  return upsertPagesForAgency(agencyId, userId, accountId, fromGraph, options)
 }
 
 async function upsertPagesForAgency(
@@ -141,6 +196,7 @@ async function upsertPagesForAgency(
   userId: string,
   accountId: string,
   pages: { id: string; name: string; followers?: string; fanCount: number; accessToken?: string }[],
+  options?: { skipFollowerSync?: boolean },
 ) {
   const connected: string[] = []
 
@@ -157,20 +213,22 @@ async function upsertPagesForAgency(
           existing.id,
         )
       }
-      const row = db.prepare(`
-        SELECT id, user_id, meta_page_id, page_access_token, followers_count, followers
-        FROM facebook_pages WHERE id = ?
-      `).get(existing.id) as {
-        id: string
-        user_id: string
-        meta_page_id: string
-        page_access_token: string | null
-        followers_count: number | null
-        followers: string
-      }
-      if (row) {
-        row.page_access_token = page.accessToken ?? row.page_access_token
-        await syncPageFollowers(row)
+      if (!options?.skipFollowerSync) {
+        const row = db.prepare(`
+          SELECT id, user_id, meta_page_id, page_access_token, followers_count, followers
+          FROM facebook_pages WHERE id = ?
+        `).get(existing.id) as {
+          id: string
+          user_id: string
+          meta_page_id: string
+          page_access_token: string | null
+          followers_count: number | null
+          followers: string
+        }
+        if (row) {
+          row.page_access_token = page.accessToken ?? row.page_access_token
+          await syncPageFollowers(row)
+        }
       }
       connected.push(existing.id)
       continue

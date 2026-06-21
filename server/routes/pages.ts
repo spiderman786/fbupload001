@@ -5,6 +5,7 @@ import { authMiddleware, requireVerified } from '../middleware/auth.js'
 import { agencyMiddleware, requireRole } from '../middleware/agency.js'
 import { formatFollowersTotal, parseFollowers } from '../utils/followers.js'
 import { seedFollowerBaseline, syncAgencyFollowers } from '../services/followerSync.js'
+import { parsePagination } from '../utils/pagination.js'
 import type { AgencyRequest } from '../utils/agency.js'
 
 export const pagesRouter = Router()
@@ -42,8 +43,39 @@ pagesRouter.get('/hub', (req: AgencyRequest, res) => {
   const search = typeof req.query.search === 'string' ? req.query.search.trim() : ''
   const statusFilter = typeof req.query.status === 'string' ? req.query.status : 'all'
   const sort = typeof req.query.sort === 'string' ? req.query.sort : 'newest'
+  const { page, perPage, offset } = parsePagination(req.query as Record<string, unknown>)
 
-  let query = `
+  let where = 'WHERE p.agency_id = ?'
+  const params: unknown[] = [agencyId]
+
+  if (search) {
+    where += ' AND (p.name LIKE ? OR p.meta_page_id LIKE ?)'
+    params.push(`%${search}%`, `%${search}%`)
+  }
+
+  if (statusFilter === 'active') {
+    where += " AND p.status = 'active' AND p.health_status = 'completed'"
+  } else if (statusFilter === 'inactive') {
+    where += " AND p.status = 'paused'"
+  } else if (statusFilter !== 'all') {
+    where += ' AND p.health_status = ?'
+    params.push(statusFilter)
+  }
+
+  const orderBy: Record<string, string> = {
+    newest: 'p.created_at DESC',
+    oldest: 'p.created_at ASC',
+    name: 'p.name ASC',
+    gained: 'p.followers_gained DESC',
+    followers: 'p.followers_count DESC',
+  }
+  const orderClause = orderBy[sort] ?? orderBy.newest
+
+  const countRow = db
+    .prepare(`SELECT COUNT(*) as count FROM facebook_pages p ${where}`)
+    .get(...params) as { count: number }
+
+  const query = `
     SELECT p.*,
       COALESCE(
         (SELECT s.username FROM page_source_assignments a
@@ -56,34 +88,11 @@ pagesRouter.get('/hub', (req: AgencyRequest, res) => {
       ) AS source_username,
       (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id) AS reels_started
     FROM facebook_pages p
-    WHERE p.agency_id = ?
+    ${where}
+    ORDER BY ${orderClause}
+    LIMIT ? OFFSET ?
   `
-  const params: unknown[] = [agencyId]
-
-  if (search) {
-    query += ' AND (p.name LIKE ? OR p.meta_page_id LIKE ?)'
-    params.push(`%${search}%`, `%${search}%`)
-  }
-
-  if (statusFilter === 'active') {
-    query += " AND p.status = 'active' AND p.health_status = 'completed'"
-  } else if (statusFilter === 'inactive') {
-    query += " AND p.status = 'paused'"
-  } else if (statusFilter !== 'all') {
-    query += ' AND p.health_status = ?'
-    params.push(statusFilter)
-  }
-
-  const orderBy: Record<string, string> = {
-    newest: 'p.created_at DESC',
-    oldest: 'p.created_at ASC',
-    name: 'p.name ASC',
-    gained: 'p.followers_gained DESC',
-    followers: 'p.followers_count DESC',
-  }
-  query += ` ORDER BY ${orderBy[sort] ?? orderBy.newest}`
-
-  const rows = db.prepare(query).all(...params) as Record<string, unknown>[]
+  const rows = db.prepare(query).all(...params, perPage, offset) as Record<string, unknown>[]
 
   let pages = rows.map((row) => ({
     ...mapPage(row),
@@ -96,35 +105,42 @@ pagesRouter.get('/hub', (req: AgencyRequest, res) => {
     pages = pages.sort((a, b) => b.followersNumeric - a.followersNumeric)
   }
 
-  const allPages = db
-    .prepare('SELECT followers_count, followers, followers_gained, last_followers_sync_at FROM facebook_pages WHERE agency_id = ?')
-    .all(agencyId) as {
-      followers_count: number | null
-      followers: string
+  const statsRow = db
+    .prepare(`
+      SELECT
+        COUNT(*) as total_pages,
+        COALESCE(SUM(followers_count), 0) as total_followers_raw,
+        COALESCE(SUM(followers_gained), 0) as followers_gained,
+        MAX(last_followers_sync_at) as last_followers_sync_at
+      FROM facebook_pages WHERE agency_id = ?
+    `)
+    .get(agencyId) as {
+      total_pages: number
+      total_followers_raw: number
       followers_gained: number
       last_followers_sync_at: string | null
-    }[]
+    }
 
-  const totalFollowers = allPages.reduce(
-    (sum, p) => sum + (p.followers_count ?? parseFollowers(p.followers)),
-    0,
-  )
-  const followersGained = allPages.reduce((sum, p) => sum + (p.followers_gained ?? 0), 0)
-  const lastFollowersSyncAt = allPages.reduce<string | null>((latest, p) => {
-    if (!p.last_followers_sync_at) return latest
-    if (!latest || p.last_followers_sync_at > latest) return p.last_followers_sync_at
-    return latest
-  }, null)
+  const totalFollowers = Number(statsRow.total_followers_raw)
+
+  const totalCount = Number(countRow.count)
+  const totalPages = Math.max(1, Math.ceil(totalCount / perPage))
 
   res.json({
     stats: {
-      totalPages: allPages.length,
-      followersGained,
+      totalPages: statsRow.total_pages,
+      followersGained: statsRow.followers_gained,
       totalFollowers,
       totalFollowersLabel: formatFollowersTotal(totalFollowers),
-      lastFollowersSyncAt,
+      lastFollowersSyncAt: statsRow.last_followers_sync_at,
     },
     pages,
+    pagination: {
+      page,
+      perPage,
+      totalCount,
+      totalPages,
+    },
   })
 })
 

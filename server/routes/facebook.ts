@@ -12,6 +12,7 @@ import {
   saveFacebookAccount,
 } from '../services/facebook.js'
 import { isFacebookConfiguredForAgency } from '../services/byoc.js'
+import { CONNECT_PAGES_BATCH_SIZE, assertOwnerUnlimitedPages } from '../utils/pagination.js'
 import type { AgencyRequest } from '../utils/agency.js'
 
 export const facebookRouter = Router()
@@ -118,21 +119,44 @@ facebookRouter.post(
       return
     }
 
-    const pageIds = Array.isArray(req.body?.pageIds) ? req.body.pageIds : []
+    const pageIds = Array.isArray(req.body?.pageIds)
+      ? req.body.pageIds.map((id: unknown) => String(id).trim()).filter(Boolean)
+      : []
     if (!pageIds.length) {
       res.status(400).json({ error: 'Select at least one page' })
       return
     }
 
+    const currentCount = db
+      .prepare('SELECT COUNT(*) as count FROM facebook_pages WHERE agency_id = ?')
+      .get(req.agency!.id) as { count: number }
+    assertOwnerUnlimitedPages(req.agency!.role, currentCount.count, pageIds.length)
+
     try {
-      const connected = await connectSpecificPagesForAgency(
-        req.agency!.id,
-        req.user!.id,
-        account.id,
-        account.access_token,
-        pageIds,
-      )
-      res.json({ message: 'Pages added to automation', pagesConnected: connected.length, ids: connected })
+      const connected: string[] = []
+      let skipped = 0
+      const bulkConnect = pageIds.length > 50
+
+      for (let i = 0; i < pageIds.length; i += CONNECT_PAGES_BATCH_SIZE) {
+        const batch = pageIds.slice(i, i + CONNECT_PAGES_BATCH_SIZE)
+        const ids = await connectSpecificPagesForAgency(
+          req.agency!.id,
+          req.user!.id,
+          account.id,
+          account.access_token,
+          batch,
+          { skipFollowerSync: bulkConnect },
+        )
+        connected.push(...ids)
+        skipped += batch.length - ids.length
+      }
+
+      res.json({
+        message: 'Pages added to automation',
+        pagesConnected: connected.length,
+        skipped,
+        ids: connected,
+      })
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to add pages' })
     }

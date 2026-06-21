@@ -41,11 +41,13 @@ export const api = {
   },
   pages: {
     list: () => request<{ pages: FacebookPage[] }>('/pages'),
-    hub: (params?: { search?: string; status?: string; sort?: string }) => {
+    hub: (params?: { search?: string; status?: string; sort?: string; page?: number; perPage?: number }) => {
       const q = new URLSearchParams()
       if (params?.search) q.set('search', params.search)
       if (params?.status) q.set('status', params.status)
       if (params?.sort) q.set('sort', params.sort)
+      if (params?.page) q.set('page', String(params.page))
+      if (params?.perPage) q.set('perPage', String(params.perPage))
       const qs = q.toString()
       return request<{
         stats: {
@@ -56,6 +58,7 @@ export const api = {
           lastFollowersSyncAt: string | null
         }
         pages: AutomationPage[]
+        pagination: { page: number; perPage: number; totalCount: number; totalPages: number }
       }>(`/pages/hub${qs ? `?${qs}` : ''}`)
     },
     syncFollowers: () =>
@@ -141,7 +144,7 @@ export const api = {
         `/facebook/accounts/${accountId}/pages`,
       ),
     connectPages: (accountId: string, pageIds: string[]) =>
-      request<{ message: string; pagesConnected: number; ids: string[] }>(
+      request<{ message: string; pagesConnected: number; skipped?: number; ids: string[] }>(
         `/facebook/accounts/${accountId}/connect-pages`,
         {
           method: 'POST',

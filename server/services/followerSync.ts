@@ -77,13 +77,24 @@ export async function syncPageFollowers(page: PageRow): Promise<{ ok: boolean; e
   }
 }
 
-export async function syncAgencyFollowers(agencyId: string) {
+import { FOLLOWER_SYNC_BATCH_SIZE } from '../utils/pagination.js'
+
+export async function syncAgencyFollowers(agencyId: string, options?: { limit?: number; offset?: number }) {
+  const limit = options?.limit ?? FOLLOWER_SYNC_BATCH_SIZE
+  const offset = options?.offset ?? 0
+
   const pages = db
     .prepare(`
       SELECT id, user_id, agency_id, meta_page_id, page_access_token, followers_count, followers
       FROM facebook_pages WHERE agency_id = ?
+      ORDER BY id
+      LIMIT ? OFFSET ?
     `)
-    .all(agencyId) as PageRow[]
+    .all(agencyId, limit, offset) as PageRow[]
+
+  const total = db
+    .prepare('SELECT COUNT(*) as count FROM facebook_pages WHERE agency_id = ?')
+    .get(agencyId) as { count: number }
 
   let synced = 0
   let failed = 0
@@ -102,7 +113,15 @@ export async function syncAgencyFollowers(agencyId: string) {
     .prepare('SELECT MAX(last_followers_sync_at) as t FROM facebook_pages WHERE agency_id = ?')
     .get(agencyId) as { t: string | null }
 
-  return { synced, failed, errors, lastFollowersSyncAt: lastSync?.t ?? null }
+  return {
+    synced,
+    failed,
+    errors,
+    lastFollowersSyncAt: lastSync?.t ?? null,
+    totalPages: total.count,
+    batchOffset: offset,
+    hasMore: offset + pages.length < total.count,
+  }
 }
 
 /** @deprecated */

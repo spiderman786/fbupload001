@@ -4,6 +4,7 @@ import { api, type AutomationPage, type SourceAccount } from '../../api/client'
 import { AutomationPageCard } from '../../components/AutomationPageCard'
 import { SourcesPage } from './SourcesPage'
 import { useToast } from '../../context/ToastContext'
+import { useAgencyRole } from '../../context/AuthContext'
 import { getApiError } from '../../lib/apiError'
 import {
   PAGE_SORT_OPTIONS,
@@ -18,6 +19,9 @@ type FbAccount = { id: string; meta_user_id: string; connected_at: string }
 type FbPage = { id: string; name: string; followers?: string; fanCount: number }
 
 const SYNC_STALE_MS = 60 * 60 * 1000
+const HUB_PAGE_SIZE = 50
+const CONNECT_BATCH_SIZE = 500
+const AUTO_SYNC_MAX_PAGES = 500
 
 function formatSyncLabel(iso: string | null | undefined): string {
   if (!iso) return 'Never synced from Facebook'
@@ -26,6 +30,7 @@ function formatSyncLabel(iso: string | null | undefined): string {
 
 export function AutoDownloadUploadPage() {
   const toast = useToast()
+  const { isOwner } = useAgencyRole()
   const autoSynced = useRef(false)
   const [tab, setTab] = useState<Tab>('pages')
   const [pages, setPages] = useState<AutomationPage[]>([])
@@ -38,6 +43,8 @@ export function AutoDownloadUploadPage() {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState<PageStatusFilter>('all')
   const [sort, setSort] = useState<PageSort>('newest')
+  const [hubPage, setHubPage] = useState(1)
+  const [pagination, setPagination] = useState({ page: 1, perPage: HUB_PAGE_SIZE, totalCount: 0, totalPages: 1 })
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [loadError, setLoadError] = useState('')
@@ -61,12 +68,13 @@ export function AutoDownloadUploadPage() {
     setLoadError('')
     try {
       const [data, src, asn] = await Promise.all([
-        api.pages.hub({ search: search || undefined, status, sort }),
+        api.pages.hub({ search: search || undefined, status, sort, page: hubPage, perPage: HUB_PAGE_SIZE }),
         api.sources.list(),
         api.automation.assignments(),
       ])
       setPages(data.pages)
       setStats(data.stats)
+      setPagination(data.pagination)
       setSources(src.sources.filter((s) => s.isActive))
       const map: Record<string, string> = {}
       for (const a of asn.assignments) map[a.pageId] = a.sourceId
@@ -78,7 +86,11 @@ export function AutoDownloadUploadPage() {
     } finally {
       setLoading(false)
     }
-  }, [search, status, sort, toast])
+  }, [search, status, sort, hubPage, toast])
+
+  useEffect(() => {
+    setHubPage(1)
+  }, [search, status, sort])
 
   const syncFromFacebook = useCallback(
     async (silent = false) => {
@@ -104,6 +116,7 @@ export function AutoDownloadUploadPage() {
 
   useEffect(() => {
     if (autoSynced.current || tab !== 'pages' || loading || stats.totalPages === 0) return
+    if (stats.totalPages > AUTO_SYNC_MAX_PAGES) return
 
     const stale =
       !stats.lastFollowersSyncAt ||
@@ -214,11 +227,10 @@ export function AutoDownloadUploadPage() {
     if (!selectedAccountId) return
     let pageIds = selectedPageIds
     if (addMode === 'csv') {
-      const ids = csvPageIds
+      pageIds = csvPageIds
         .split(/[\s,]+/)
         .map((id) => id.trim())
         .filter(Boolean)
-      pageIds = accountPages.filter((p) => ids.includes(p.id)).map((p) => p.id)
     }
     if (!pageIds.length) {
       toast.error('Select at least one page')
@@ -227,9 +239,18 @@ export function AutoDownloadUploadPage() {
 
     setAddSaving(true)
     try {
-      const res = await api.facebook.connectPages(selectedAccountId, pageIds)
-      toast.success(`Added ${res.pagesConnected} page(s) to automation`)
+      let totalConnected = 0
+      let totalSkipped = 0
+      for (let i = 0; i < pageIds.length; i += CONNECT_BATCH_SIZE) {
+        const batch = pageIds.slice(i, i + CONNECT_BATCH_SIZE)
+        const res = await api.facebook.connectPages(selectedAccountId, batch)
+        totalConnected += res.pagesConnected
+        totalSkipped += res.skipped ?? 0
+      }
+      const skippedNote = totalSkipped > 0 ? ` (${totalSkipped} ID(s) not accessible)` : ''
+      toast.success(`Added ${totalConnected} page(s) to automation${skippedNote}`)
       setAddOpen(false)
+      setHubPage(1)
       await load()
     } catch (err) {
       toast.error(getApiError(err, 'Failed to add pages'))
@@ -248,6 +269,11 @@ export function AutoDownloadUploadPage() {
           <h1 className="font-display text-2xl font-bold">Auto Download/Upload</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Connected Facebook pages for automated reel download and posting.
+            {isOwner && (
+              <span className="block text-xs text-primary/90">
+                Owner account: no page limit — connect any number via Single, Bulk, or CSV.
+              </span>
+            )}
           </p>
         </div>
         {tab === 'pages' && (
@@ -387,21 +413,53 @@ export function AutoDownloadUploadPage() {
                 </p>
               </div>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {pages.map((page) => (
-                  <AutomationPageCard
-                    key={page.id}
-                    page={page}
-                    onDelete={handleDelete}
-                    deleting={deletingId === page.id}
-                    sources={sources.map((s) => ({ id: s.id, username: s.username, platform: s.platform }))}
-                    assignedSourceId={assignments[page.id]}
-                    onAssignSource={handleAssignSource}
-                    onDailyLimitChange={handleDailyLimitChange}
-                    savingLimit={savingLimitId === page.id}
-                  />
-                ))}
-              </div>
+              <>
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {pages.map((page) => (
+                    <AutomationPageCard
+                      key={page.id}
+                      page={page}
+                      onDelete={handleDelete}
+                      deleting={deletingId === page.id}
+                      sources={sources.map((s) => ({ id: s.id, username: s.username, platform: s.platform }))}
+                      assignedSourceId={assignments[page.id]}
+                      onAssignSource={handleAssignSource}
+                      onDailyLimitChange={handleDailyLimitChange}
+                      savingLimit={savingLimitId === page.id}
+                    />
+                  ))}
+                </div>
+                {pagination.totalPages > 1 && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                    <p className="text-xs text-muted-foreground">
+                      Showing {(pagination.page - 1) * pagination.perPage + 1}–
+                      {Math.min(pagination.page * pagination.perPage, pagination.totalCount)} of{' '}
+                      {pagination.totalCount.toLocaleString()} pages
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={pagination.page <= 1 || loading}
+                        onClick={() => setHubPage((p) => Math.max(1, p - 1))}
+                        className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-50"
+                      >
+                        Previous
+                      </button>
+                      <span className="text-sm text-muted-foreground">
+                        Page {pagination.page} of {pagination.totalPages}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={pagination.page >= pagination.totalPages || loading}
+                        onClick={() => setHubPage((p) => p + 1)}
+                        className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-50"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </section>
         </>

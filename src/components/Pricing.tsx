@@ -5,7 +5,8 @@ import { Calculator } from './Calculator'
 const features = [
   'Non-expiring tokens - Use them whenever you need',
   "Tokens are only used for published reels; failed reels or other issues don't cost you tokens",
-  'No minimum limit on the number of pages you can manage or the tokens you can have',
+  'Agency owners: unlimited pages — connect and automate any number of Facebook pages',
+  'No minimum limit on tokens you can purchase or hold',
   'Direct founder support via WhatsApp',
 ]
 

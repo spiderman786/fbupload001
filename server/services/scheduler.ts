@@ -7,6 +7,9 @@ import { syncAllUsersFollowers } from './followerSync.js'
 import { resetAllDailyQuotas } from './pageQuota.js'
 import { runMaintenance } from './cleanup.js'
 import { DEFAULT_SCHEDULE_TIMEZONE, getCurrentTimeHHMM } from '../utils/timezone.js'
+import { SCHEDULER_PAGES_BATCH_SIZE } from '../utils/pagination.js'
+
+const scheduleOffsets = new Map<string, number>()
 
 let scheduling = false
 
@@ -53,8 +56,22 @@ function processScheduledSlots(mode: 'direct' | 'inapp') {
       .prepare(`
         SELECT id FROM facebook_pages
         WHERE agency_id = ? AND status = 'active' AND health_status = 'completed'
+        ORDER BY id
+        LIMIT ? OFFSET ?
       `)
-      .all(slot.agency_id as string) as { id: string }[]
+      .all(slot.agency_id as string, SCHEDULER_PAGES_BATCH_SIZE, scheduleOffsets.get(slot.agency_id as string) ?? 0) as {
+        id: string
+      }[]
+
+    const agencyKey = slot.agency_id as string
+    const totalActive = db
+      .prepare(`
+        SELECT COUNT(*) as count FROM facebook_pages
+        WHERE agency_id = ? AND status = 'active' AND health_status = 'completed'
+      `)
+      .get(agencyKey) as { count: number }
+    const nextOffset = (scheduleOffsets.get(agencyKey) ?? 0) + SCHEDULER_PAGES_BATCH_SIZE
+    scheduleOffsets.set(agencyKey, nextOffset >= totalActive.count ? 0 : nextOffset)
 
     const targets = pageIds.length ? activePages.filter((p) => pageIds.includes(p.id)) : activePages
 
