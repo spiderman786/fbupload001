@@ -16,6 +16,7 @@ import { PagesPage } from './pages/dashboard/PagesPage'
 import { AddTokensPage } from './pages/dashboard/AddTokensPage'
 import { SettingsPage } from './pages/dashboard/SettingsPage'
 import { AutoDownloadUploadPage } from './pages/dashboard/AutoDownloadUploadPage'
+import { AduPageDetailPage } from './pages/dashboard/AduPageDetailPage'
 import { ReelsPage } from './pages/dashboard/ReelsPage'
 import { DirectPostPage } from './pages/dashboard/DirectPostPage'
 import { BulkDeletePage } from './pages/dashboard/BulkDeletePage'
@@ -60,7 +61,9 @@ function App() {
             <Route path="/facebook/accounts" element={<PagesPage />} />
             <Route path="/agency/facebook/accounts" element={<PagesPage />} />
             <Route path="/facebook/auto-download-upload" element={<AutoDownloadUploadPage />} />
+            <Route path="/facebook/auto-download-upload/:pageId" element={<AduPageDetailPage />} />
             <Route path="/agency/facebook/auto-download-upload" element={<AutoDownloadUploadPage />} />
+            <Route path="/agency/facebook/auto-download-upload/:pageId" element={<AduPageDetailPage />} />
             <Route path="/facebook/jobs" element={<ReelsPage />} />
             <Route path="/agency/facebook/jobs" element={<ReelsPage />} />
             <Route path="/facebook/direct-schedule" element={<DirectSchedulePage />} />

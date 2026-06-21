@@ -7,6 +7,16 @@ import { formatFollowersTotal, parseFollowers } from '../utils/followers.js'
 import { seedFollowerBaseline, syncAgencyFollowers } from '../services/followerSync.js'
 import { parsePagination } from '../utils/pagination.js'
 import type { AgencyRequest } from '../utils/agency.js'
+import {
+  getPageDetail,
+  getPageQueue,
+  getPageFailedPosts,
+  getPageFailedReasons,
+  getPageReelsHistory,
+  getAgencyPage,
+} from '../services/pageDetail.js'
+import { getPageInsights } from '../services/pageInsights.js'
+import { upsertPageAutomationSettings, getPageAutomationSettings } from '../services/pageAutomationSettings.js'
 
 export const pagesRouter = Router()
 pagesRouter.use(authMiddleware, requireVerified, agencyMiddleware)
@@ -150,6 +160,78 @@ pagesRouter.post('/sync-followers', requireRole('owner', 'admin'), async (req: A
     message: `Synced ${result.synced} page${result.synced !== 1 ? 's' : ''}${result.failed ? `, ${result.failed} failed` : ''}`,
     ...result,
   })
+})
+
+function requirePage(req: AgencyRequest, pageId: string) {
+  const page = getAgencyPage(pageId, req.agency!.id)
+  if (!page) return null
+  return page
+}
+
+pagesRouter.get('/:id/detail', (req: AgencyRequest, res) => {
+  const detail = getPageDetail(req.params.id, req.agency!.id)
+  if (!detail) {
+    res.status(404).json({ error: 'Page not found' })
+    return
+  }
+  res.json(detail)
+})
+
+pagesRouter.get('/:id/insights', async (req: AgencyRequest, res) => {
+  if (!requirePage(req, req.params.id)) {
+    res.status(404).json({ error: 'Page not found' })
+    return
+  }
+  const days = Math.min(90, Math.max(7, Number(req.query.days) || 28))
+  const settings = getPageAutomationSettings(req.params.id)
+  const insights = await getPageInsights(req.params.id, days, settings.hashtags)
+  res.json({ insights })
+})
+
+pagesRouter.get('/:id/queue', (req: AgencyRequest, res) => {
+  if (!requirePage(req, req.params.id)) {
+    res.status(404).json({ error: 'Page not found' })
+    return
+  }
+  res.json({ queue: getPageQueue(req.params.id) })
+})
+
+pagesRouter.get('/:id/failed-posts', (req: AgencyRequest, res) => {
+  if (!requirePage(req, req.params.id)) {
+    res.status(404).json({ error: 'Page not found' })
+    return
+  }
+  res.json({
+    posts: getPageFailedPosts(req.params.id),
+    reasons: getPageFailedReasons(req.params.id),
+  })
+})
+
+pagesRouter.get('/:id/reels', (req: AgencyRequest, res) => {
+  if (!requirePage(req, req.params.id)) {
+    res.status(404).json({ error: 'Page not found' })
+    return
+  }
+  res.json({
+    queue: getPageQueue(req.params.id),
+    history: getPageReelsHistory(req.params.id),
+  })
+})
+
+pagesRouter.patch('/:id/automation-settings', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
+  if (!requirePage(req, req.params.id)) {
+    res.status(404).json({ error: 'Page not found' })
+    return
+  }
+  const { postsPerDay, postingLogic, timezone, scheduleTimes, hashtags } = req.body ?? {}
+  const settings = upsertPageAutomationSettings(req.params.id, {
+    postsPerDay: postsPerDay !== undefined ? Number(postsPerDay) : undefined,
+    postingLogic: postingLogic !== undefined ? String(postingLogic) : undefined,
+    timezone: timezone !== undefined ? String(timezone) : undefined,
+    scheduleTimes: Array.isArray(scheduleTimes) ? scheduleTimes.map(String) : undefined,
+    hashtags: Array.isArray(hashtags) ? hashtags.map(String) : undefined,
+  })
+  res.json({ settings })
 })
 
 pagesRouter.patch('/:id', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {

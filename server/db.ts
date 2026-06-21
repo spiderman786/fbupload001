@@ -426,6 +426,16 @@ function migrateOps() {
       webhook_url TEXT,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS page_automation_settings (
+      page_id TEXT PRIMARY KEY REFERENCES facebook_pages(id) ON DELETE CASCADE,
+      posts_per_day INTEGER NOT NULL DEFAULT 3,
+      posting_logic TEXT NOT NULL DEFAULT 'dailyrandom',
+      timezone TEXT NOT NULL DEFAULT 'America/New_York',
+      schedule_times TEXT NOT NULL DEFAULT '["03:14","09:43","16:23"]',
+      hashtags TEXT NOT NULL DEFAULT '["#reels","#viral","#trending","#foryou","#shorts"]',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `)
 }
 

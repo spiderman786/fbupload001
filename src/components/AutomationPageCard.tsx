@@ -1,4 +1,5 @@
-import { Share2, Trash2 } from 'lucide-react'
+import { ExternalLink, Share2, Trash2 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import type { AutomationPage } from '../api/client'
 import { AutomationStatusBadge } from './HealthStatusBadge'
 import { formatAddedDate, formatDurationSince } from '../lib/formatDuration'
@@ -34,7 +35,12 @@ export function AutomationPageCard({
     <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="truncate font-semibold">{page.name}</h3>
+          <Link
+            to={`/facebook/auto-download-upload/${page.id}`}
+            className="truncate font-semibold hover:text-primary hover:underline"
+          >
+            {page.name}
+          </Link>
           <p className="text-xs text-muted-foreground">{page.metaPageId}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -124,6 +130,13 @@ export function AutomationPageCard({
           <Share2 className="h-3 w-3 text-primary" />
           Facebook Page
         </span>
+        <Link
+          to={`/facebook/auto-download-upload/${page.id}`}
+          className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+        >
+          Open details
+          <ExternalLink className="h-3 w-3" />
+        </Link>
       </div>
     </div>
   )

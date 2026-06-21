@@ -73,6 +73,22 @@ export const api = {
       request<{ page: FacebookPage }>(`/pages/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     delete: (id: string) => request<{ message: string }>(`/pages/${id}`, { method: 'DELETE' }),
     connectDemo: () => request<{ page: FacebookPage }>('/pages/demo', { method: 'POST' }),
+    detail: (id: string) => request<PageDetail>(`/pages/${id}/detail`),
+    insights: (id: string, days = 28) =>
+      request<{ insights: PageInsightsPayload }>(`/pages/${id}/insights?days=${days}`),
+    queue: (id: string) => request<{ queue: PageQueueItem[] }>(`/pages/${id}/queue`),
+    failedPosts: (id: string) =>
+      request<{ posts: PageFailedPost[]; reasons: PageFailedReason[] }>(`/pages/${id}/failed-posts`),
+    reels: (id: string) =>
+      request<{ queue: PageQueueItem[]; history: PageReelHistoryItem[] }>(`/pages/${id}/reels`),
+    updateAutomationSettings: (
+      id: string,
+      body: { postsPerDay?: number; postingLogic?: string; timezone?: string; scheduleTimes?: string[]; hashtags?: string[] },
+    ) =>
+      request<{ settings: PageAutomationSettings }>(`/pages/${id}/automation-settings`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
   },
   sources: {
     list: () => request<{ sources: SourceAccount[] }>('/sources'),
@@ -539,6 +555,68 @@ export type AutomationPage = FacebookPage & {
   sourceUsername: string | null
   reelsStarted: number
   followersNumeric: number
+}
+
+export type PageAutomationSettings = {
+  postsPerDay: number
+  postingLogic: string
+  timezone: string
+  scheduleTimes: string[]
+  hashtags: string[]
+}
+
+export type PageDetail = {
+  page: AutomationPage
+  source: { id: string; username: string; platform: string; isActive: boolean } | null
+  facebookIdentity: { name: string; uid: string; connectedAt: string } | null
+  settings: PageAutomationSettings
+  stats: {
+    total: { reelsReady: number; successfulAutomations: number; requireAttention: number; netGrowth: number }
+    today: { remainingScheduled: number; publishedToday: number; errorsToday: number }
+  }
+}
+
+export type PageInsightsPayload = {
+  source: 'graph' | 'estimated'
+  days: number
+  summary: { totalAudience: number; pageReach: number; totalEngagements: number; videoViews3s: number }
+  demographics: {
+    countries: { name: string; count: number; pct: number }[]
+    cities: { name: string; count: number; pct: number }[]
+  }
+  reachSeries: { day: string; profileViews: number; uniqueReach: number }[]
+  followerGrowth: { day: string; gained: number; lost: number }[]
+  videoPerformance: { day: string; views3s: number; views30s: number }[]
+  engagementBreakdown: { day: string; likes: number; loves: number; hahas: number; wows: number; sads: number; angers: number }[]
+  hashtags: string[]
+}
+
+export type PageQueueItem = {
+  id: string
+  status: string
+  sourceUrl: string | null
+  sourceUsername: string | null
+  createdAt: string
+}
+
+export type PageFailedPost = {
+  id: string
+  errorMessage: string | null
+  completedAt: string | null
+  retryCount: number
+}
+
+export type PageFailedReason = {
+  errorMessage: string
+  count: number
+  lastAt: string
+}
+
+export type PageReelHistoryItem = {
+  id: string
+  status: string
+  sourceUrl: string | null
+  completedAt: string | null
 }
 
 export type AttentionPage = {

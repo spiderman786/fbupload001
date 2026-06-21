@@ -1,0 +1,487 @@
+import React, { useCallback, useEffect, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import {
+  Activity,
+  AlertTriangle,
+  ArrowLeft,
+  BarChart3,
+  Calendar,
+  Film,
+  Link2,
+  Settings2,
+  User,
+} from 'lucide-react'
+import { api, type PageDetail, type PageInsightsPayload } from '../../api/client'
+import { AutomationStatusBadge } from '../../components/HealthStatusBadge'
+import { formatAddedDate, formatDurationSince } from '../../lib/formatDuration'
+import { useToast } from '../../context/ToastContext'
+import { getApiError } from '../../lib/apiError'
+
+type MainTab = 'overview' | 'insights' | 'reels' | 'failed' | 'settings'
+type SettingsTab = 'automation' | 'connections' | 'source' | 'identity'
+
+function MiniBarChart({ data, keys, colors }: { data: Record<string, number | string>[]; keys: string[]; colors: string[] }) {
+  const max = Math.max(...data.flatMap((d) => keys.map((k) => Number(d[k] ?? 0))), 1)
+  return (
+    <div className="flex h-40 items-end gap-0.5">
+      {data.map((d, i) => (
+        <div key={i} className="flex flex-1 flex-col justify-end gap-0.5" title={String(d.day)}>
+          {keys.map((k, ki) => (
+            <div
+              key={k}
+              className="w-full rounded-t"
+              style={{ height: `${(Number(d[k] ?? 0) / max) * 100}%`, minHeight: Number(d[k]) ? 2 : 0, background: colors[ki] }}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export function AduPageDetailPage() {
+  const { pageId } = useParams<{ pageId: string }>()
+  const toast = useToast()
+  const [tab, setTab] = useState<MainTab>('overview')
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('automation')
+  const [detail, setDetail] = useState<PageDetail | null>(null)
+  const [insights, setInsights] = useState<PageInsightsPayload | null>(null)
+  const [insightDays, setInsightDays] = useState(28)
+  const [queue, setQueue] = useState<{ id: string; status: string; sourceUrl: string | null; sourceUsername: string | null; createdAt: string }[]>([])
+  const [failed, setFailed] = useState<{ id: string; errorMessage: string | null; completedAt: string | null; retryCount: number }[]>([])
+  const [reasons, setReasons] = useState<{ errorMessage: string; count: number; lastAt: string }[]>([])
+  const [reelHistory, setReelHistory] = useState<{ id: string; status: string; sourceUrl: string | null; completedAt: string | null }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [editSettings, setEditSettings] = useState(false)
+  const [form, setForm] = useState({ postsPerDay: 3, postingLogic: 'dailyrandom', timezone: 'America/New_York', scheduleTimes: '' })
+
+  const loadDetail = useCallback(async () => {
+    if (!pageId) return
+    setLoading(true)
+    try {
+      const d = await api.pages.detail(pageId)
+      setDetail(d)
+      setForm({
+        postsPerDay: d.settings.postsPerDay,
+        postingLogic: d.settings.postingLogic,
+        timezone: d.settings.timezone,
+        scheduleTimes: d.settings.scheduleTimes.join(', '),
+      })
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to load page'))
+    } finally {
+      setLoading(false)
+    }
+  }, [pageId, toast])
+
+  useEffect(() => {
+    loadDetail()
+  }, [loadDetail])
+
+  useEffect(() => {
+    if (!pageId) return
+    if (tab === 'insights') {
+      api.pages.insights(pageId, insightDays).then((r) => setInsights(r.insights)).catch(() => {})
+    }
+    if (tab === 'overview' || tab === 'reels') {
+      api.pages.reels(pageId).then((r) => {
+        setQueue(r.queue)
+        setReelHistory(r.history)
+      }).catch(() => {})
+    }
+    if (tab === 'failed' || tab === 'overview') {
+      api.pages.failedPosts(pageId).then((r) => {
+        setFailed(r.posts)
+        setReasons(r.reasons)
+      }).catch(() => {})
+    }
+  }, [pageId, tab, insightDays])
+
+  async function toggleAutomation() {
+    if (!pageId || !detail) return
+    const next = detail.page.status === 'active' ? 'paused' : 'active'
+    try {
+      await api.pages.update(pageId, { status: next })
+      toast.success(next === 'active' ? 'Automation enabled' : 'Automation paused')
+      loadDetail()
+    } catch (err) {
+      toast.error(getApiError(err, 'Update failed'))
+    }
+  }
+
+  async function saveSettings() {
+    if (!pageId) return
+    try {
+      await api.pages.updateAutomationSettings(pageId, {
+        postsPerDay: form.postsPerDay,
+        postingLogic: form.postingLogic,
+        timezone: form.timezone,
+        scheduleTimes: form.scheduleTimes.split(/[,;\s]+/).filter(Boolean),
+      })
+      toast.success('Settings saved')
+      setEditSettings(false)
+      loadDetail()
+    } catch (err) {
+      toast.error(getApiError(err, 'Save failed'))
+    }
+  }
+
+  if (loading && !detail) {
+    return <div className="flex h-48 items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>
+  }
+  if (!detail || !pageId) {
+    return <p className="text-muted-foreground">Page not found. <Link to="/facebook/auto-download-upload" className="text-primary">Back to hub</Link></p>
+  }
+
+  const { page, stats, settings, source, facebookIdentity } = detail
+  const mainTabs: { id: MainTab; label: string; icon: React.ElementType }[] = [
+    { id: 'overview', label: 'Overview', icon: Activity },
+    { id: 'insights', label: 'Insights', icon: BarChart3 },
+    { id: 'reels', label: 'Reels', icon: Film },
+    { id: 'failed', label: 'Failed Posts Reasons', icon: AlertTriangle },
+    { id: 'settings', label: 'Settings', icon: Settings2 },
+  ]
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <Link to="/facebook/auto-download-upload" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="h-4 w-4" /> Back to Hub
+          </Link>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <h1 className="font-display text-2xl font-bold">{page.name}</h1>
+            <AutomationStatusBadge status={page.status} healthStatus={page.healthStatus ?? 'completed'} />
+            <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+              {page.status === 'active' ? 'Active posting' : 'Paused'}
+            </span>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">Internal ID: {page.metaPageId}</p>
+          <p className="text-xs text-muted-foreground">
+            Starting {page.reelsStarted.toLocaleString()} · Added {formatAddedDate(page.createdAt)} · {formatDurationSince(page.createdAt)}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Automation</span>
+            <button
+              type="button"
+              onClick={toggleAutomation}
+              className={`relative h-6 w-11 rounded-full transition ${page.status === 'active' ? 'bg-primary' : 'bg-muted'}`}
+            >
+              <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${page.status === 'active' ? 'left-5' : 'left-0.5'}`} />
+            </button>
+          </label>
+        </div>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        {mainTabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-3 text-sm font-medium transition ${
+              tab === t.id ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-card hover:bg-muted/50'
+            } ${t.id === 'settings' ? 'sm:col-span-2 lg:col-span-1' : ''}`}
+          >
+            <t.icon className="h-4 w-4" />
+            <span className="truncate">{t.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {tab === 'overview' && (
+        <div className="space-y-6">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <section className="rounded-xl border border-border bg-card p-5">
+              <h2 className="font-semibold">Total Statistics</h2>
+              <div className="mt-4 grid grid-cols-2 gap-4">
+                {[
+                  { v: stats.total.reelsReady, l: 'Reels ready for posting' },
+                  { v: stats.total.successfulAutomations, l: 'Successful automations' },
+                  { v: stats.total.requireAttention, l: 'Require attention' },
+                  { v: `+${stats.total.netGrowth.toLocaleString()}`, l: 'Net growth since onboarding' },
+                ].map((s) => (
+                  <div key={s.l}>
+                    <p className="font-display text-2xl font-bold">{s.v}</p>
+                    <p className="text-xs text-muted-foreground">{s.l}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+            <section className="rounded-xl border border-border bg-card p-5">
+              <h2 className="font-semibold">Today&apos;s Statistics</h2>
+              <div className="mt-4 grid grid-cols-3 gap-4">
+                {[
+                  { v: stats.today.remainingScheduled, l: 'Remaining scheduled posts' },
+                  { v: stats.today.publishedToday, l: 'Published today' },
+                  { v: stats.today.errorsToday, l: 'Errors today' },
+                ].map((s) => (
+                  <div key={s.l}>
+                    <p className="font-display text-2xl font-bold">{s.v}</p>
+                    <p className="text-xs text-muted-foreground">{s.l}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+
+          <section className="rounded-xl border border-border bg-card p-5">
+            <h2 className="font-semibold">Downloaded Queue</h2>
+            <p className="text-sm text-muted-foreground">Reels waiting to publish for this page</p>
+            {queue.length ? (
+              <ul className="mt-4 space-y-2">
+                {queue.map((q) => (
+                  <li key={q.id} className="flex justify-between rounded-lg border border-border px-3 py-2 text-sm">
+                    <span>{q.sourceUsername ?? '—'} · {q.status}</span>
+                    <span className="text-xs text-muted-foreground">{new Date(q.createdAt).toLocaleString()}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-4 text-sm text-muted-foreground">Queue is empty</p>
+            )}
+          </section>
+
+          <section className="rounded-xl border border-border bg-card p-5">
+            <h2 className="font-semibold">Failed Posts</h2>
+            {failed.length ? (
+              <ul className="mt-4 space-y-2">
+                {failed.slice(0, 5).map((f) => (
+                  <li key={f.id} className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{f.errorMessage}</li>
+                ))}
+              </ul>
+            ) : (
+              <>
+                <h3 className="mt-4 font-medium">No Failed Posts Found</h3>
+                <p className="text-sm text-muted-foreground">All systems operating normally for this page.</p>
+              </>
+            )}
+          </section>
+        </div>
+      )}
+
+      {tab === 'insights' && insights && (
+        <div className="space-y-6">
+          <div className="flex gap-2">
+            {[7, 14, 28, 90].map((d) => (
+              <button key={d} type="button" onClick={() => setInsightDays(d)} className={`rounded-full px-3 py-1 text-xs ${insightDays === d ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
+                {d} Days
+              </button>
+            ))}
+            <span className="ml-auto text-xs text-muted-foreground">Source: {insights.source}</span>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              { label: 'Total Audience', value: insights.summary.totalAudience.toLocaleString(), sub: `${insights.summary.totalAudience} likes` },
+              { label: 'Page Reach', value: insights.summary.pageReach.toLocaleString(), sub: 'Unique views in period' },
+              { label: 'Total Engagements', value: insights.summary.totalEngagements.toLocaleString(), sub: 'Interactions in period' },
+              { label: 'Video Views (3S+)', value: insights.summary.videoViews3s.toLocaleString(), sub: 'Views in period' },
+            ].map((c) => (
+              <div key={c.label} className="rounded-xl border border-border bg-card p-4">
+                <p className="text-xs text-muted-foreground">{c.label}</p>
+                <p className="font-display text-2xl font-bold">{c.value}</p>
+                <p className="text-xs text-muted-foreground">{c.sub}</p>
+              </div>
+            ))}
+          </div>
+          <section className="rounded-xl border border-border bg-card p-5">
+            <h2 className="font-semibold">Audience Demographics</h2>
+            <div className="mt-4 grid gap-6 md:grid-cols-2">
+              <div>
+                <p className="mb-2 text-sm font-medium">Top Countries</p>
+                {insights.demographics.countries.map((c) => (
+                  <div key={c.name} className="mb-2">
+                    <div className="flex justify-between text-sm"><span>{c.name}</span><span>{c.count} ({c.pct}%)</span></div>
+                    <div className="h-2 rounded-full bg-muted"><div className="h-2 rounded-full bg-primary" style={{ width: `${c.pct}%` }} /></div>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <p className="mb-2 text-sm font-medium">Top Cities</p>
+                {insights.demographics.cities.map((c) => (
+                  <p key={c.name} className="text-sm text-muted-foreground">{c.name}: {c.count}</p>
+                ))}
+              </div>
+            </div>
+          </section>
+          <section className="rounded-xl border border-border bg-card p-5">
+            <h2 className="font-semibold">Reach &amp; Profile Views</h2>
+            <MiniBarChart data={insights.reachSeries} keys={['profileViews', 'uniqueReach']} colors={['#10b981', '#94a3b8']} />
+          </section>
+          <section className="rounded-xl border border-border bg-card p-5">
+            <h2 className="font-semibold">Follower Growth</h2>
+            <MiniBarChart data={insights.followerGrowth} keys={['gained', 'lost']} colors={['#10b981', '#ef4444']} />
+          </section>
+          <section className="rounded-xl border border-border bg-card p-5">
+            <h2 className="font-semibold">Video Performance</h2>
+            <MiniBarChart data={insights.videoPerformance} keys={['views3s', 'views30s']} colors={['#3b82f6', '#ec4899']} />
+          </section>
+          <section className="rounded-xl border border-border bg-card p-5">
+            <h2 className="font-semibold">Engagement &amp; Reactions Breakdown</h2>
+            <MiniBarChart data={insights.engagementBreakdown} keys={['likes', 'loves', 'hahas']} colors={['#3b82f6', '#ec4899', '#eab308']} />
+          </section>
+          <div className="flex flex-wrap gap-2">
+            {insights.hashtags.map((h) => (
+              <span key={h} className="rounded-full bg-muted px-3 py-1 text-xs">{h}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === 'reels' && (
+        <div className="space-y-4">
+          <section className="rounded-xl border border-border bg-card p-5">
+            <h2 className="font-semibold">Queue ({queue.length})</h2>
+            <ul className="mt-3 space-y-2">
+              {queue.map((q) => (
+                <li key={q.id} className="flex justify-between border-b border-border py-2 text-sm">
+                  <span>{q.status} · {q.sourceUsername}</span>
+                  <span className="text-muted-foreground">{new Date(q.createdAt).toLocaleString()}</span>
+                </li>
+              ))}
+              {!queue.length && <p className="text-sm text-muted-foreground">No queued reels</p>}
+            </ul>
+          </section>
+          <section className="rounded-xl border border-border bg-card p-5">
+            <h2 className="font-semibold">History</h2>
+            <ul className="mt-3 space-y-2">
+              {reelHistory.map((r) => (
+                <li key={r.id} className="flex justify-between border-b border-border py-2 text-sm">
+                  <span className={r.status === 'failed' ? 'text-red-600' : ''}>{r.status}</span>
+                  <span className="text-muted-foreground">{r.completedAt ? new Date(r.completedAt).toLocaleString() : '—'}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+      )}
+
+      {tab === 'failed' && (
+        <div className="space-y-4">
+          <section className="rounded-xl border border-border bg-card p-5">
+            <h2 className="font-semibold">Failure Reasons</h2>
+            <ul className="mt-3 space-y-3">
+              {reasons.map((r) => (
+                <li key={r.errorMessage} className="rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+                  <p className="font-medium text-red-800">{r.count}× {r.errorMessage}</p>
+                  <p className="text-xs text-red-600">Last: {r.lastAt ? new Date(r.lastAt).toLocaleString() : '—'}</p>
+                </li>
+              ))}
+              {!reasons.length && <p className="text-sm text-muted-foreground">No failure reasons recorded</p>}
+            </ul>
+          </section>
+          <section className="rounded-xl border border-border bg-card p-5">
+            <h2 className="font-semibold">Recent Failed Posts</h2>
+            <ul className="mt-3 space-y-2">
+              {failed.map((f) => (
+                <li key={f.id} className="text-sm">
+                  <p className="text-red-700">{f.errorMessage}</p>
+                  <p className="text-xs text-muted-foreground">Retries: {f.retryCount} · {f.completedAt ? new Date(f.completedAt).toLocaleString() : ''}</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+      )}
+
+      {tab === 'settings' && (
+        <div className="space-y-4">
+          <div className="flex gap-2 border-b border-border">
+            {([
+              ['automation', 'Automation', Calendar],
+              ['connections', 'Connections', Link2],
+              ['source', 'Source', Film],
+              ['identity', 'Identity', User],
+            ] as const).map(([id, label, Icon]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setSettingsTab(id)}
+                className={`flex items-center gap-2 border-b-2 px-4 py-2 text-sm ${settingsTab === id ? 'border-primary text-primary' : 'border-transparent text-muted-foreground'}`}
+              >
+                <Icon className="h-4 w-4" /> {label}
+              </button>
+            ))}
+          </div>
+
+          {settingsTab === 'automation' && (
+            <section className="rounded-xl border border-border bg-card p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="font-semibold">Posting Settings</h2>
+                  <p className="text-sm text-muted-foreground">Manage frequency and localized posting times</p>
+                </div>
+                <button type="button" onClick={() => setEditSettings((v) => !v)} className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-muted">
+                  {editSettings ? 'Cancel' : 'Edit'}
+                </button>
+              </div>
+              {editSettings ? (
+                <div className="mt-4 space-y-3">
+                  <label className="block text-sm">Posts per day<input type="number" className="mt-1 h-9 w-full rounded-md border px-3" value={form.postsPerDay} onChange={(e) => setForm({ ...form, postsPerDay: Number(e.target.value) })} /></label>
+                  <label className="block text-sm">Logic<input className="mt-1 h-9 w-full rounded-md border px-3" value={form.postingLogic} onChange={(e) => setForm({ ...form, postingLogic: e.target.value })} /></label>
+                  <label className="block text-sm">Timezone<input className="mt-1 h-9 w-full rounded-md border px-3" value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} /></label>
+                  <label className="block text-sm">Schedule times (comma separated)<input className="mt-1 h-9 w-full rounded-md border px-3" value={form.scheduleTimes} onChange={(e) => setForm({ ...form, scheduleTimes: e.target.value })} /></label>
+                  <button type="button" onClick={saveSettings} className="rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground">Save</button>
+                </div>
+              ) : (
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <div><p className="text-xs text-muted-foreground">POSTS PER DAY</p><p className="font-semibold">{settings.postsPerDay} Posts</p></div>
+                  <div><p className="text-xs text-muted-foreground">LOGIC</p><p className="font-semibold capitalize">{settings.postingLogic}</p></div>
+                  <div><p className="text-xs text-muted-foreground">TIMEZONE</p><p className="font-semibold">{settings.timezone}</p></div>
+                  <div className="sm:col-span-2">
+                    <p className="text-xs text-muted-foreground">SCHEDULED TIMES (LOCAL)</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {settings.scheduleTimes.map((t) => (
+                        <span key={t} className="rounded-full bg-primary/10 px-3 py-1 text-sm text-primary">{t}</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
+          {settingsTab === 'connections' && (
+            <section className="rounded-xl border border-border bg-card p-5">
+              <h2 className="font-semibold">Facebook Identity</h2>
+              <p className="text-sm text-muted-foreground">The Facebook account used to manage this page</p>
+              {facebookIdentity ? (
+                <div className="mt-4 rounded-lg border border-border p-4">
+                  <p className="font-medium">{facebookIdentity.name}</p>
+                  <p className="text-sm text-muted-foreground">UID: {facebookIdentity.uid}</p>
+                </div>
+              ) : (
+                <p className="mt-4 text-sm text-muted-foreground">No linked Facebook account — connect under Accounts</p>
+              )}
+            </section>
+          )}
+
+          {settingsTab === 'source' && (
+            <section className="rounded-xl border border-border bg-card p-5">
+              <h2 className="font-semibold">Current Source</h2>
+              {source ? (
+                <div className="mt-4">
+                  <p className="font-medium">{source.username}</p>
+                  <p className="text-sm text-muted-foreground">{source.platform} · {source.isActive ? 'Active' : 'Disabled'}</p>
+                </div>
+              ) : (
+                <p className="mt-4 text-sm text-muted-foreground">No source assigned — assign from the hub card or Sources tab</p>
+              )}
+            </section>
+          )}
+
+          {settingsTab === 'identity' && (
+            <section className="rounded-xl border border-border bg-card p-5">
+              <h2 className="font-semibold">Page Identity</h2>
+              <p className="mt-2 font-medium">{page.name}</p>
+              <p className="text-sm text-muted-foreground">Meta Page ID: {page.metaPageId}</p>
+              <p className="text-sm text-muted-foreground">Followers: {page.followers} · Gained: +{page.followersGained}</p>
+            </section>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
