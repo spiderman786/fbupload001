@@ -136,6 +136,18 @@ export const api = {
     connectMock: () =>
       request<{ message: string; pagesConnected: number }>('/facebook/connect-mock', { method: 'POST' }),
     accounts: () => request<{ accounts: { id: string; meta_user_id: string; connected_at: string }[] }>('/facebook/accounts'),
+    accountPages: (accountId: string) =>
+      request<{ pages: { id: string; name: string; followers?: string; fanCount: number }[] }>(
+        `/facebook/accounts/${accountId}/pages`,
+      ),
+    connectPages: (accountId: string, pageIds: string[]) =>
+      request<{ message: string; pagesConnected: number; ids: string[] }>(
+        `/facebook/accounts/${accountId}/connect-pages`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ pageIds }),
+        },
+      ),
   },
   reels: {
     list: () => request<{ jobs: ReelJob[] }>('/reels'),

@@ -119,6 +119,29 @@ export async function connectPagesForAgency(
   accessToken: string,
 ) {
   const pages = await fetchUserPages(agencyId, accessToken)
+  return upsertPagesForAgency(agencyId, userId, accountId, pages)
+}
+
+export async function connectSpecificPagesForAgency(
+  agencyId: string,
+  userId: string,
+  accountId: string,
+  accessToken: string,
+  pageIds: string[],
+) {
+  const wanted = new Set(pageIds.map((p) => String(p).trim()).filter(Boolean))
+  if (!wanted.size) return []
+  const pages = await fetchUserPages(agencyId, accessToken)
+  const filtered = pages.filter((p) => wanted.has(p.id))
+  return upsertPagesForAgency(agencyId, userId, accountId, filtered)
+}
+
+async function upsertPagesForAgency(
+  agencyId: string,
+  userId: string,
+  accountId: string,
+  pages: { id: string; name: string; followers?: string; fanCount: number; accessToken?: string }[],
+) {
   const connected: string[] = []
 
   for (const page of pages) {

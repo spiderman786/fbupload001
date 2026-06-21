@@ -5,6 +5,7 @@ import { authMiddleware, requireVerified } from '../middleware/auth.js'
 import { agencyMiddleware, requireRole } from '../middleware/agency.js'
 import {
   connectPagesForAgency,
+  connectSpecificPagesForAgency,
   exchangeCodeForToken,
   getOAuthUrl,
   isFacebookConfigured,
@@ -77,10 +78,66 @@ facebookRouter.post('/connect-mock', authMiddleware, requireVerified, agencyMidd
 
 facebookRouter.get('/accounts', authMiddleware, requireVerified, agencyMiddleware, (req: AgencyRequest, res) => {
   const accounts = db
-    .prepare('SELECT id, meta_user_id, connected_at FROM facebook_accounts WHERE agency_id = ?')
+    .prepare('SELECT id, meta_user_id, connected_at FROM facebook_accounts WHERE agency_id = ? ORDER BY connected_at DESC')
     .all(req.agency!.id)
   res.json({ accounts })
 })
+
+facebookRouter.get('/accounts/:accountId/pages', authMiddleware, requireVerified, agencyMiddleware, requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
+  const account = db
+    .prepare('SELECT id, access_token FROM facebook_accounts WHERE id = ? AND agency_id = ?')
+    .get(req.params.accountId, req.agency!.id) as { id: string; access_token: string } | undefined
+
+  if (!account) {
+    res.status(404).json({ error: 'Facebook account not found' })
+    return
+  }
+
+  try {
+    const { fetchUserPages } = await import('../services/facebook.js')
+    const pages = await fetchUserPages(req.agency!.id, account.access_token)
+    res.json({ pages })
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to fetch pages' })
+  }
+})
+
+facebookRouter.post(
+  '/accounts/:accountId/connect-pages',
+  authMiddleware,
+  requireVerified,
+  agencyMiddleware,
+  requireRole('owner', 'admin'),
+  async (req: AgencyRequest, res) => {
+    const account = db
+      .prepare('SELECT id, access_token FROM facebook_accounts WHERE id = ? AND agency_id = ?')
+      .get(req.params.accountId, req.agency!.id) as { id: string; access_token: string } | undefined
+
+    if (!account) {
+      res.status(404).json({ error: 'Facebook account not found' })
+      return
+    }
+
+    const pageIds = Array.isArray(req.body?.pageIds) ? req.body.pageIds : []
+    if (!pageIds.length) {
+      res.status(400).json({ error: 'Select at least one page' })
+      return
+    }
+
+    try {
+      const connected = await connectSpecificPagesForAgency(
+        req.agency!.id,
+        req.user!.id,
+        account.id,
+        account.access_token,
+        pageIds,
+      )
+      res.json({ message: 'Pages added to automation', pagesConnected: connected.length, ids: connected })
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to add pages' })
+    }
+  },
+)
 
 facebookRouter.get('/pages', authMiddleware, requireVerified, agencyMiddleware, async (req: AgencyRequest, res) => {
   const account = db
