@@ -85,6 +85,8 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
   const [sourceUsername, setSourceUsername] = useState('')
   const [csvText, setCsvText] = useState('')
   const [saving, setSaving] = useState(false)
+  const [existingSources, setExistingSources] = useState<{ id: string; username: string; platform: string }[]>([])
+  const [selectedSourceId, setSelectedSourceId] = useState('')
 
   const totalSteps = mode === 'single' ? 2 : 3
 
@@ -107,6 +109,7 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
     setPostsPerDay(3)
     setSourceUsername('')
     setCsvText('')
+    setSelectedSourceId('')
   }, [])
 
   const loadAccounts = useCallback(async () => {
@@ -114,6 +117,8 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
     try {
       const res = await api.facebook.accounts()
       setAccounts(res.accounts as FbAccount[])
+      const srcRes = await api.sources.list()
+      setExistingSources(srcRes.sources.filter((s) => s.isActive).map((s) => ({ id: s.id, username: s.username, platform: s.platform })))
       const first = res.accounts[0]?.id ?? ''
       setSelectedAccountId(first)
       if (first) {
@@ -268,15 +273,25 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
       .filter((r) => r.metaPageId && r.sourceUsername)
   }
 
+  function normalizeUsername(value: string) {
+    return value.replace(/^@/, '').trim().toLowerCase()
+  }
+
   async function ensureSource(platform: string, username: string) {
     const clean = username.replace(/^@/, '').trim()
     if (!clean) return null
     const existing = (await api.sources.list()).sources.find(
-      (s) => s.platform === platform && s.username.toLowerCase() === clean.toLowerCase(),
+      (s) => s.platform === platform && normalizeUsername(s.username) === normalizeUsername(clean),
     )
     if (existing) return existing.id
     const { source } = await api.sources.create({ platform, username: clean })
     return source.id
+  }
+
+  async function resolveSourceId(): Promise<string | null> {
+    if (selectedSourceId) return selectedSourceId
+    if (sourceUsername.trim()) return ensureSource(sourcePlatform, sourceUsername)
+    return null
   }
 
   async function finishAdd() {
@@ -307,12 +322,10 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
       }
 
       if (mode === 'single' || mode === 'bulk') {
-        if (sourceUsername.trim()) {
-          const sourceId = await ensureSource(sourcePlatform, sourceUsername)
-          if (sourceId) {
-            for (const pageId of connectedIds) {
-              await api.automation.assignSource(pageId, sourceId)
-            }
+        const sourceId = await resolveSourceId()
+        if (sourceId) {
+          for (const pageId of connectedIds) {
+            await api.automation.assignSource(pageId, sourceId)
           }
         }
       } else {
@@ -577,6 +590,41 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
               <span className="inline-flex rounded-full bg-muted px-3 py-1 text-xs font-medium">
                 {selectedPages.length} page selected
               </span>
+              <div>
+                <p className="mb-2 text-sm font-semibold">Source account</p>
+                {existingSources.length ? (
+                  <select
+                    value={selectedSourceId}
+                    onChange={(e) => setSelectedSourceId(e.target.value)}
+                    className="mb-3 h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                  >
+                    <option value="">Select existing source (optional)…</option>
+                    {existingSources.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.username} ({s.platform})
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+                <p className="mb-2 text-xs text-muted-foreground">Or add a new source username</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <select
+                    value={sourcePlatform}
+                    onChange={(e) => setSourcePlatform(e.target.value)}
+                    className="h-10 rounded-md border border-border bg-background px-3 text-sm"
+                  >
+                    {SOURCE_PLATFORMS.map((p) => (
+                      <option key={p.value} value={p.value}>{p.label}</option>
+                    ))}
+                  </select>
+                  <input
+                    value={sourceUsername}
+                    onChange={(e) => setSourceUsername(e.target.value)}
+                    placeholder="@username"
+                    className="h-10 rounded-md border border-border bg-background px-3 text-sm"
+                  />
+                </div>
+              </div>
               <PostsPerDayGrid value={postsPerDay} onChange={setPostsPerDay} />
               <div>
                 <p className="mb-2 text-sm font-semibold">Timezone</p>

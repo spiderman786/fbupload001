@@ -11,10 +11,11 @@ import {
   Settings2,
   User,
 } from 'lucide-react'
-import { api, type PageDetail, type PageInsightsPayload } from '../../api/client'
+import { api, type PageDetail, type PageInsightsPayload, type SourceAccount } from '../../api/client'
 import { AutomationStatusBadge } from '../../components/HealthStatusBadge'
 import { formatAddedDate, formatDurationSince } from '../../lib/formatDuration'
 import { useToast } from '../../context/ToastContext'
+import { useAgencyRole } from '../../context/AuthContext'
 import { getApiError } from '../../lib/apiError'
 
 type MainTab = 'overview' | 'insights' | 'reels' | 'failed' | 'settings'
@@ -42,6 +43,7 @@ function MiniBarChart({ data, keys, colors }: { data: Record<string, number | st
 export function AduPageDetailPage() {
   const { pageId } = useParams<{ pageId: string }>()
   const toast = useToast()
+  const { canWrite } = useAgencyRole()
   const [tab, setTab] = useState<MainTab>('overview')
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('automation')
   const [detail, setDetail] = useState<PageDetail | null>(null)
@@ -54,6 +56,8 @@ export function AduPageDetailPage() {
   const [loading, setLoading] = useState(true)
   const [editSettings, setEditSettings] = useState(false)
   const [form, setForm] = useState({ postsPerDay: 3, postingLogic: 'dailyrandom', timezone: 'America/New_York', scheduleTimes: '' })
+  const [availableSources, setAvailableSources] = useState<SourceAccount[]>([])
+  const [assigningSource, setAssigningSource] = useState(false)
 
   const loadDetail = useCallback(async () => {
     if (!pageId) return
@@ -77,6 +81,11 @@ export function AduPageDetailPage() {
   useEffect(() => {
     loadDetail()
   }, [loadDetail])
+
+  useEffect(() => {
+    if (!pageId || tab !== 'settings' || settingsTab !== 'source') return
+    api.sources.list().then((r) => setAvailableSources(r.sources.filter((s) => s.isActive))).catch(() => {})
+  }, [pageId, tab, settingsTab])
 
   useEffect(() => {
     if (!pageId) return
@@ -123,6 +132,20 @@ export function AduPageDetailPage() {
       loadDetail()
     } catch (err) {
       toast.error(getApiError(err, 'Save failed'))
+    }
+  }
+
+  async function handleAssignSource(sourceId: string) {
+    if (!pageId || !sourceId) return
+    setAssigningSource(true)
+    try {
+      await api.automation.assignSource(pageId, sourceId)
+      toast.success('Source assigned to page')
+      loadDetail()
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to assign source'))
+    } finally {
+      setAssigningSource(false)
     }
   }
 
@@ -461,13 +484,43 @@ export function AduPageDetailPage() {
           {settingsTab === 'source' && (
             <section className="rounded-xl border border-border bg-card p-5">
               <h2 className="font-semibold">Current Source</h2>
+              <p className="text-sm text-muted-foreground">Reels are downloaded from this account and posted to your page.</p>
               {source ? (
-                <div className="mt-4">
+                <div className="mt-4 rounded-lg border border-border p-4">
                   <p className="font-medium">{source.username}</p>
                   <p className="text-sm text-muted-foreground">{source.platform} · {source.isActive ? 'Active' : 'Disabled'}</p>
                 </div>
               ) : (
-                <p className="mt-4 text-sm text-muted-foreground">No source assigned — assign from the hub card or Sources tab</p>
+                <p className="mt-4 text-sm text-muted-foreground">No source assigned yet.</p>
+              )}
+              {canWrite && (
+                <div className="mt-4 space-y-2">
+                  <label className="text-sm font-medium">Assign source account</label>
+                  {availableSources.length ? (
+                    <select
+                      value={source?.id ?? ''}
+                      disabled={assigningSource}
+                      onChange={(e) => handleAssignSource(e.target.value)}
+                      className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm disabled:opacity-50"
+                    >
+                      <option value="" disabled>
+                        {source ? 'Change source…' : 'Select source…'}
+                      </option>
+                      {availableSources.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.username} ({s.platform})
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      No sources yet — add one under{' '}
+                      <Link to="/facebook/auto-download-upload" className="text-primary hover:underline">
+                        Auto Download/Upload → Source Accounts
+                      </Link>
+                    </p>
+                  )}
+                </div>
               )}
             </section>
           )}

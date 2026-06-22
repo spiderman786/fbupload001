@@ -27,7 +27,7 @@ function formatSyncLabel(iso: string | null | undefined): string {
 
 export function AutoDownloadUploadPage() {
   const toast = useToast()
-  const { isOwner } = useAgencyRole()
+  const { isOwner, canWrite } = useAgencyRole()
   const autoSynced = useRef(false)
   const [tab, setTab] = useState<Tab>('pages')
   const [pages, setPages] = useState<AutomationPage[]>([])
@@ -50,6 +50,15 @@ export function AutoDownloadUploadPage() {
   const [sources, setSources] = useState<SourceAccount[]>([])
   const [assignments, setAssignments] = useState<Record<string, string>>({})
   const [addOpen, setAddOpen] = useState(false)
+
+  const loadSources = useCallback(async () => {
+    try {
+      const { sources: s } = await api.sources.list()
+      setSources(s.filter((src) => src.isActive))
+    } catch {
+      /* hub still works without sources list */
+    }
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -75,6 +84,10 @@ export function AutoDownloadUploadPage() {
       setLoading(false)
     }
   }, [search, status, sort, hubPage, toast])
+
+  useEffect(() => {
+    if (tab === 'pages') loadSources()
+  }, [tab, loadSources])
 
   useEffect(() => {
     setHubPage(1)
@@ -239,7 +252,7 @@ export function AutoDownloadUploadPage() {
       </div>
 
       {tab === 'sources' ? (
-        <SourcesPage embedded />
+        <SourcesPage embedded onSourcesChanged={loadSources} />
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-3">
@@ -338,7 +351,7 @@ export function AutoDownloadUploadPage() {
                       deleting={deletingId === page.id}
                       sources={sources.map((s) => ({ id: s.id, username: s.username, platform: s.platform }))}
                       assignedSourceId={assignments[page.id]}
-                      onAssignSource={handleAssignSource}
+                      onAssignSource={canWrite ? handleAssignSource : undefined}
                       onDailyLimitChange={handleDailyLimitChange}
                       savingLimit={savingLimitId === page.id}
                     />

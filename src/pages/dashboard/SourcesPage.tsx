@@ -11,7 +11,7 @@ const PLATFORMS = [
   { value: 'facebook', label: 'Facebook', tokens: 2 },
 ]
 
-export function SourcesPage({ embedded = false }: { embedded?: boolean }) {
+export function SourcesPage({ embedded = false, onSourcesChanged }: { embedded?: boolean; onSourcesChanged?: () => void }) {
   const toast = useToast()
   const [sources, setSources] = useState<SourceAccount[]>([])
   const [loading, setLoading] = useState(true)
@@ -47,6 +47,7 @@ export function SourcesPage({ embedded = false }: { embedded?: boolean }) {
       setUsername('')
       setShowForm(false)
       toast.success('Source account added')
+      onSourcesChanged?.()
     } catch (err) {
       const msg = getApiError(err, 'Failed to add source')
       setError(msg)
@@ -60,6 +61,7 @@ export function SourcesPage({ embedded = false }: { embedded?: boolean }) {
       await api.sources.delete(id)
       setSources((prev) => prev.filter((s) => s.id !== id))
       toast.success('Source removed')
+      onSourcesChanged?.()
     } catch (err) {
       toast.error(getApiError(err, 'Failed to remove source'))
     }
@@ -70,6 +72,7 @@ export function SourcesPage({ embedded = false }: { embedded?: boolean }) {
       const { source: updated } = await api.sources.update(source.id, { isActive: !source.isActive })
       setSources((prev) => prev.map((s) => (s.id === source.id ? updated : s)))
       toast.success(updated.isActive ? 'Source enabled' : 'Source disabled')
+      onSourcesChanged?.()
     } catch (err) {
       toast.error(getApiError(err, 'Failed to update source'))
     }

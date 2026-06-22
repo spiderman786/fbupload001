@@ -33,6 +33,10 @@ automationRouter.get('/assignments', (req: AgencyRequest, res) => {
 
 automationRouter.put('/assignments/:pageId', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
   const { sourceId } = req.body ?? {}
+  if (!sourceId || typeof sourceId !== 'string') {
+    res.status(400).json({ error: 'sourceId is required' })
+    return
+  }
   const page = db
     .prepare('SELECT id FROM facebook_pages WHERE id = ? AND agency_id = ?')
     .get(req.params.pageId, req.agency!.id)
