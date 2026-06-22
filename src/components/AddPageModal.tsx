@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, Plus, Search, X } from 'lucide-react'
 import { api } from '../api/client'
 import { COMMON_TIMEZONES } from '../config/timezones'
+import { parseCsvSourceMappings } from '../lib/parseSourceUrl'
 import { useToast } from '../context/ToastContext'
 import { getApiError } from '../lib/apiError'
 
@@ -25,7 +26,7 @@ type FbPage = {
 
 type SelectedPage = { accountId: string; metaPageId: string; name: string; followers?: string }
 
-type CsvRow = { metaPageId: string; sourceUsername: string; platform: string }
+type CsvRow = { metaPageId: string; sourceUsername: string; platform: string; sourceUrl?: string }
 
 const MODAL_PAGE_SIZE = 10
 const CONNECT_BATCH_SIZE = 500
@@ -93,7 +94,7 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
   const stepTitle = useMemo(() => {
     if (mode === 'single') return wizardStep === 1 ? 'Select Page' : 'Configure Settings'
     if (wizardStep === 1) return mode === 'csv' ? 'Select Accounts & Pages' : 'Select Pages'
-    if (wizardStep === 2) return mode === 'csv' ? 'Upload CSV Mapping' : 'Configure Source & Settings'
+    if (wizardStep === 2) return mode === 'csv' ? 'Paste Source URLs' : 'Configure Source & Settings'
     return 'Review & Start'
   }, [mode, wizardStep])
 
@@ -257,20 +258,12 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
     })
   }
 
+  function getCsvMappings() {
+    return parseCsvSourceMappings(csvText, selectedPages, sourcePlatform)
+  }
+
   function parseCsvRows(): CsvRow[] {
-    return csvText
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const parts = line.split(/[,;\t]/).map((s) => s.trim())
-        return {
-          metaPageId: parts[0] ?? '',
-          sourceUsername: (parts[1] ?? '').replace(/^@/, ''),
-          platform: (parts[2] ?? sourcePlatform).toLowerCase(),
-        }
-      })
-      .filter((r) => r.metaPageId && r.sourceUsername)
+    return getCsvMappings().rows
   }
 
   function normalizeUsername(value: string) {
@@ -336,12 +329,6 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
           const sourceId = await ensureSource(row.platform, row.sourceUsername)
           if (sourceId) await api.automation.assignSource(pageId, sourceId)
         }
-        if (!csvRows.length && sourceUsername.trim()) {
-          const sourceId = await ensureSource(sourcePlatform, sourceUsername)
-          if (sourceId) {
-            for (const pageId of connectedIds) await api.automation.assignSource(pageId, sourceId)
-          }
-        }
       }
 
       toast.success(`Started automation for ${connectedIds.length} page(s)`)
@@ -361,7 +348,10 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
   }
 
   function canProceedStep2() {
-    if (mode === 'csv') return parseCsvRows().length > 0 || sourceUsername.trim().length > 0
+    if (mode === 'csv') {
+      const { rows, errors } = getCsvMappings()
+      return rows.length > 0 && rows.length <= selectedPages.length && errors.length === 0
+    }
     if (mode === 'bulk') return sourceUsername.trim().length > 0
     return true
   }
@@ -372,7 +362,13 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
       return
     }
     if (wizardStep === 2 && mode !== 'single' && !canProceedStep2()) {
-      toast.error(mode === 'csv' ? 'Add CSV rows or a default source username' : 'Enter a source username')
+      const { errors } = mode === 'csv' ? getCsvMappings() : { errors: [] as string[] }
+      toast.error(
+        errors[0] ??
+          (mode === 'csv'
+            ? 'Paste one source URL per line (or page_id, source_url rows) for each selected page'
+            : 'Enter a source username'),
+      )
       return
     }
     if (wizardStep >= totalSteps) {
@@ -383,6 +379,8 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
   }
 
   if (!open) return null
+
+  const csvPreview = mode === 'csv' ? getCsvMappings() : { rows: [] as CsvRow[], errors: [] as string[] }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
@@ -650,19 +648,43 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
               </span>
               {mode === 'csv' && (
                 <div>
-                  <p className="mb-2 text-sm font-semibold">CSV Mapping</p>
+                  <p className="mb-2 text-sm font-semibold">Source URLs</p>
                   <p className="mb-2 text-xs text-muted-foreground">
-                    One row per page: page_id, source_username, platform (optional). Example: 1085756071292311, creatorname, instagram
+                    Paste one profile URL per line — username and platform are detected automatically. URLs are matched to
+                    selected pages in order. Or use CSV: page_id, source_url
                   </p>
                   <textarea
                     value={csvText}
                     onChange={(e) => setCsvText(e.target.value)}
-                    placeholder="page_id,source_username,platform"
-                    className="h-36 w-full rounded-md border border-border bg-background p-3 font-mono text-xs"
+                    placeholder={`https://instagram.com/creator/reels\nhttps://tiktok.com/@creator2\n1085756071292311,https://youtube.com/@creator3`}
+                    className="h-40 w-full rounded-md border border-border bg-background p-3 font-mono text-xs"
                   />
-                  <p className="mt-1 text-xs text-muted-foreground">{parseCsvRows().length} CSV row(s) parsed</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {csvPreview.rows.length} source mapping(s) parsed
+                    {csvPreview.errors.length ? ` · ${csvPreview.errors.length} error(s)` : ''}
+                  </p>
+                  {csvPreview.rows.length > 0 && (
+                    <ul className="mt-3 max-h-36 space-y-1 overflow-y-auto rounded-lg border border-border bg-muted/20 p-3 text-xs">
+                      {csvPreview.rows.map((row) => (
+                        <li key={row.metaPageId}>
+                          <span className="font-medium">{row.metaPageId}</span>
+                          {' → '}
+                          <span className="text-primary">@{row.sourceUsername.replace(/^@/, '')}</span>
+                          <span className="text-muted-foreground"> ({row.platform})</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {csvPreview.errors.length > 0 && (
+                    <ul className="mt-2 space-y-1 text-xs text-red-600">
+                      {csvPreview.errors.map((err) => (
+                        <li key={err}>{err}</li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
+              {mode === 'bulk' && (
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <p className="mb-2 text-sm font-semibold">Platform</p>
@@ -686,11 +708,9 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
                     placeholder="@username"
                     className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
                   />
-                  {mode === 'csv' && (
-                    <p className="mt-1 text-xs text-muted-foreground">Default source if CSV row omits username</p>
-                  )}
                 </div>
               </div>
+              )}
               <PostsPerDayGrid value={postsPerDay} onChange={setPostsPerDay} />
               <div>
                 <p className="mb-2 text-sm font-semibold">Timezone</p>
@@ -715,19 +735,36 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
                 <p className="font-semibold">Ready to start automation</p>
                 <ul className="mt-3 space-y-1 text-muted-foreground">
                   <li>{selectedPages.length} Facebook page(s)</li>
-                  <li>
-                    Source: {sourceUsername ? `@${sourceUsername.replace(/^@/, '')} (${sourcePlatform})` : 'From CSV mapping'}
-                  </li>
+                  {mode === 'bulk' && (
+                    <li>
+                      Source: @{sourceUsername.replace(/^@/, '')} ({sourcePlatform})
+                    </li>
+                  )}
+                  {mode === 'csv' && (
+                    <li>{csvPreview.rows.length} source URL mapping(s) with auto-detected usernames</li>
+                  )}
                   <li>{postsPerDay} posts per day · {timezone}</li>
-                  {mode === 'csv' && <li>{parseCsvRows().length} CSV source mapping row(s)</li>}
                 </ul>
               </div>
               <ul className="max-h-48 space-y-1 overflow-y-auto text-sm">
-                {selectedPages.map((p) => (
-                  <li key={`${p.accountId}:${p.metaPageId}`} className="rounded-lg border border-border px-3 py-2">
-                    {p.name} · {p.metaPageId}
+                {(mode === 'csv' ? csvPreview.rows : selectedPages.map((p) => ({ metaPageId: p.metaPageId, name: p.name }))).map(
+                  (item) => (
+                  <li
+                    key={'sourceUsername' in item ? `${item.metaPageId}-${item.sourceUsername}` : item.metaPageId}
+                    className="rounded-lg border border-border px-3 py-2"
+                  >
+                    {'sourceUsername' in item ? (
+                      <>
+                        {item.metaPageId} → @{item.sourceUsername.replace(/^@/, '')} ({item.platform})
+                      </>
+                    ) : (
+                      <>
+                        {item.name} · {item.metaPageId}
+                      </>
+                    )}
                   </li>
-                ))}
+                ),
+                )}
               </ul>
             </div>
           )}
