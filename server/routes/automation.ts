@@ -59,6 +59,8 @@ automationRouter.put('/assignments/:pageId', requireRole('owner', 'admin'), (req
     ON CONFLICT(page_id) DO UPDATE SET source_account_id = excluded.source_account_id, agency_id = excluded.agency_id
   `).run(req.params.pageId, sourceId, req.user!.id, req.agency!.id)
 
+  void import('../services/prefillScheduler.js').then((m) => m.tickPrefillQueue())
+
   res.json({ message: 'Source assigned to page' })
 })
 

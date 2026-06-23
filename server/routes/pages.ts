@@ -103,11 +103,11 @@ pagesRouter.get('/hub', (req: AgencyRequest, res) => {
           FROM facebook_accounts fa WHERE fa.id = p.facebook_account_id) AS facebook_account_name,
       (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id) AS reels_started,
       (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status = 'published') AS total_posted,
-      (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status IN ('pending','downloading','publishing')) AS total_pending,
+      (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status = 'queued') AS total_pending,
       (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status = 'failed') AS total_failed,
       (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status = 'published' AND date(completed_at) = date('now')) AS today_posted,
       (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status = 'failed' AND date(completed_at) = date('now')) AS today_failed,
-      (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status IN ('pending','downloading','publishing') AND date(created_at) = date('now')) AS today_pending
+      (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status = 'queued' AND date(created_at) = date('now')) AS today_pending
     FROM facebook_pages p
     ${where}
     ORDER BY ${orderClause}

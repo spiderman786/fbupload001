@@ -366,13 +366,15 @@ export function AduPageDetailPage() {
           <section className="rounded-xl border border-border bg-card p-5">
             <h2 className="font-semibold">Downloaded Queue</h2>
             <p className="text-sm text-muted-foreground">
-              View reels waiting in the automatic publication queue for this page
+              Pre-downloaded reels waiting to publish at scheduled times (Pro-style queue)
             </p>
             {queue.length ? (
               <ul className="mt-4 space-y-2">
                 {queue.map((q) => (
                   <li key={q.id} className="flex justify-between rounded-lg border border-border px-3 py-2 text-sm">
-                    <span>{q.sourceUsername ?? '—'} · {q.status}</span>
+                    <span>
+                      @{q.sourceUsername?.replace(/^@/, '') ?? '—'} · <span className="text-primary">ready</span>
+                    </span>
                     <span className="text-xs text-muted-foreground">{new Date(q.createdAt).toLocaleString()}</span>
                   </li>
                 ))}
@@ -474,10 +476,11 @@ export function AduPageDetailPage() {
         <div className="space-y-4">
           <section className="rounded-xl border border-border bg-card p-5">
             <h2 className="font-semibold">Queue ({queue.length})</h2>
+            <p className="mb-2 text-xs text-muted-foreground">Pre-downloaded reels ready to publish on schedule</p>
             <ul className="mt-3 space-y-2">
               {queue.map((q) => (
                 <li key={q.id} className="flex justify-between border-b border-border py-2 text-sm">
-                  <span>{q.status} · {q.sourceUsername}</span>
+                  <span>@{q.sourceUsername?.replace(/^@/, '') ?? '—'} · ready</span>
                   <span className="text-muted-foreground">{new Date(q.createdAt).toLocaleString()}</span>
                 </li>
               ))}

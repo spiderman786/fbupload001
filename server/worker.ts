@@ -2,6 +2,7 @@ import 'dotenv/config'
 import { initDb } from './db.js'
 import { startJobQueue } from './services/jobQueue.js'
 import { startScheduler } from './services/scheduler.js'
+import { startPrefillScheduler } from './services/prefillScheduler.js'
 import { initProxyPool, getProxyPoolStats } from './services/proxyPool.js'
 import { runOpsAlertChecks } from './services/opsAlerts.js'
 import { seedPlatformAdmin } from './services/platformAdmin.js'
@@ -11,6 +12,7 @@ await seedPlatformAdmin()
 initProxyPool()
 startJobQueue()
 startScheduler()
+startPrefillScheduler()
 
 const alertIntervalMs = Number(process.env.OPS_ALERT_INTERVAL_MS ?? 15 * 60 * 1000)
 setInterval(() => {

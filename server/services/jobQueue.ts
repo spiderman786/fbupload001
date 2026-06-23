@@ -14,23 +14,36 @@ export function getActiveJobCount() {
 
 function claimNextJobId(): string | null {
   return db.transaction(() => {
-    const row = db
+    const publishing = db
       .prepare(`
         SELECT id FROM reel_jobs
-        WHERE status = 'pending'
-          AND (scheduled_for IS NULL OR scheduled_for <= datetime('now'))
+        WHERE status = 'publishing'
         ORDER BY created_at ASC
         LIMIT 1
       `)
       .get() as { id: string } | undefined
 
-    if (!row) return null
+    if (publishing) return publishing.id
+
+    const pending = db
+      .prepare(`
+        SELECT id FROM reel_jobs
+        WHERE status = 'pending'
+          AND (scheduled_for IS NULL OR scheduled_for <= datetime('now'))
+        ORDER BY
+          CASE job_type WHEN 'direct' THEN 0 WHEN 'prefill' THEN 1 ELSE 2 END,
+          created_at ASC
+        LIMIT 1
+      `)
+      .get() as { id: string } | undefined
+
+    if (!pending) return null
 
     const result = db
       .prepare(`UPDATE reel_jobs SET status = 'downloading' WHERE id = ? AND status = 'pending'`)
-      .run(row.id)
+      .run(pending.id)
 
-    return result.changes > 0 ? row.id : null
+    return result.changes > 0 ? pending.id : null
   })()
 }
 

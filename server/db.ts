@@ -87,7 +87,7 @@ export function initDb() {
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       source_account_id TEXT REFERENCES source_accounts(id) ON DELETE SET NULL,
       target_page_id TEXT REFERENCES facebook_pages(id) ON DELETE SET NULL,
-      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'downloading', 'publishing', 'published', 'failed')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'downloading', 'publishing', 'published', 'failed', 'queued')),
       source_url TEXT,
       meta_post_id TEXT,
       tokens_charged INTEGER NOT NULL DEFAULT 0,
@@ -437,6 +437,65 @@ function migrateOps() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `)
+
+  migrateReelJobsQueuedStatus()
+}
+
+function migrateReelJobsQueuedStatus() {
+  const done = db.prepare("SELECT value FROM platform_settings WHERE key = 'reel_jobs_queued_status'").get() as
+    | { value: string }
+    | undefined
+  if (done?.value === '1') return
+
+  db.exec(`PRAGMA foreign_keys = OFF`)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS reel_jobs_v2 (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      agency_id TEXT REFERENCES agencies(id) ON DELETE CASCADE,
+      source_account_id TEXT REFERENCES source_accounts(id) ON DELETE SET NULL,
+      target_page_id TEXT REFERENCES facebook_pages(id) ON DELETE SET NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'downloading', 'publishing', 'published', 'failed', 'queued')),
+      source_url TEXT,
+      meta_post_id TEXT,
+      tokens_charged INTEGER NOT NULL DEFAULT 0,
+      error_message TEXT,
+      scheduled_for TEXT,
+      completed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      local_file_path TEXT,
+      cleaned_file_path TEXT,
+      metadata_stripped INTEGER NOT NULL DEFAULT 0,
+      job_type TEXT NOT NULL DEFAULT 'scheduled',
+      source_reel_id TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0
+    );
+
+    INSERT INTO reel_jobs_v2 (
+      id, user_id, agency_id, source_account_id, target_page_id, status, source_url, meta_post_id,
+      tokens_charged, error_message, scheduled_for, completed_at, created_at, local_file_path,
+      cleaned_file_path, metadata_stripped, job_type, source_reel_id, retry_count
+    )
+    SELECT
+      id, user_id, agency_id, source_account_id, target_page_id, status, source_url, meta_post_id,
+      tokens_charged, error_message, scheduled_for, completed_at, created_at, local_file_path,
+      cleaned_file_path, metadata_stripped, job_type, source_reel_id, retry_count
+    FROM reel_jobs;
+
+    DROP TABLE reel_jobs;
+    ALTER TABLE reel_jobs_v2 RENAME TO reel_jobs;
+
+    CREATE INDEX IF NOT EXISTS idx_jobs_user ON reel_jobs(user_id);
+    CREATE INDEX IF NOT EXISTS idx_jobs_status ON reel_jobs(status);
+    CREATE INDEX IF NOT EXISTS idx_jobs_agency ON reel_jobs(agency_id);
+    CREATE INDEX IF NOT EXISTS idx_jobs_page_status ON reel_jobs(target_page_id, status);
+  `)
+  db.exec(`PRAGMA foreign_keys = ON`)
+
+  db.prepare(`
+    INSERT INTO platform_settings (key, value, updated_at) VALUES ('reel_jobs_queued_status', '1', datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).run()
 }
 
 function migrateMultiByoc() {

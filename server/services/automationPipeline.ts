@@ -13,51 +13,71 @@ import { maybeAutoRetryJob } from './autoRetry.js'
 import { applySelfHealingOnJobFailure, resetPageFailureStreak, resetSourceFailureStreak } from './selfHealing.js'
 import { isPlatformFlagEnabled, isAgencyInMaintenance } from './platformSettings.js'
 
-export type JobType = 'direct' | 'inapp' | 'scheduled'
+async function triggerPrefillRefill() {
+  try {
+    const { tickPrefillQueue } = await import('./prefillScheduler.js')
+    tickPrefillQueue()
+  } catch {
+    /* worker-only */
+  }
+}
 
-export async function runAutomationJob(jobId: string): Promise<void> {
-  appendJobLog(jobId, 'start', 'Job started')
+export type JobType = 'direct' | 'inapp' | 'scheduled' | 'prefill'
 
-  const job = db.prepare('SELECT * FROM reel_jobs WHERE id = ?').get(jobId) as Record<string, unknown> | undefined
+type JobRow = Record<string, unknown>
+
+function loadJob(jobId: string): JobRow {
+  const job = db.prepare('SELECT * FROM reel_jobs WHERE id = ?').get(jobId) as JobRow | undefined
   if (!job) throw new Error('Job not found')
+  return job
+}
 
-  const userId = job.user_id as string
-  const agencyId = (job.agency_id as string | null) ?? userId
-
-  if (!isPlatformFlagEnabled('publishing_enabled')) throw new Error('Publishing disabled platform-wide')
-  if (!isPlatformFlagEnabled('downloads_enabled')) throw new Error('Downloads disabled platform-wide')
-  if (isAgencyInMaintenance(agencyId)) throw new Error('Agency is in maintenance mode')
-
+function resolveSourceId(job: JobRow, pageId: string): string {
   let sourceId = job.source_account_id as string | null
-  const pageId = job.target_page_id as string
-
-  const page = db.prepare('SELECT * FROM facebook_pages WHERE id = ? AND agency_id = ?').get(pageId, agencyId) as
-    | Record<string, unknown>
-    | undefined
-  if (!page) throw new Error('Target page not found')
-  if (page.status !== 'active') throw new Error('Target page is paused')
-  if (page.health_status !== 'completed') throw new Error(`Page health: ${page.health_status}`)
-  if (!canPagePostToday(pageId)) throw new Error('Daily reel limit reached for this page')
-
   if (!sourceId) {
     const assignment = db
       .prepare('SELECT source_account_id FROM page_source_assignments WHERE page_id = ?')
       .get(pageId) as { source_account_id: string } | undefined
     if (!assignment) throw new Error('No source assigned to this page')
     sourceId = assignment.source_account_id
-    db.prepare('UPDATE reel_jobs SET source_account_id = ? WHERE id = ?').run(sourceId, jobId)
+    db.prepare('UPDATE reel_jobs SET source_account_id = ? WHERE id = ?').run(sourceId, job.id)
   }
+  return sourceId
+}
 
+function validateJobContext(job: JobRow, options?: { skipQuota?: boolean }) {
+  const userId = job.user_id as string
+  const agencyId = (job.agency_id as string | null) ?? userId
+  const pageId = job.target_page_id as string
+
+  if (!isPlatformFlagEnabled('publishing_enabled')) throw new Error('Publishing disabled platform-wide')
+  if (!isPlatformFlagEnabled('downloads_enabled')) throw new Error('Downloads disabled platform-wide')
+  if (isAgencyInMaintenance(agencyId)) throw new Error('Agency is in maintenance mode')
+
+  const page = db.prepare('SELECT * FROM facebook_pages WHERE id = ? AND agency_id = ?').get(pageId, agencyId) as
+    | JobRow
+    | undefined
+  if (!page) throw new Error('Target page not found')
+  if (page.status !== 'active') throw new Error('Target page is paused')
+  if (page.health_status !== 'completed') throw new Error(`Page health: ${page.health_status}`)
+  if (!options?.skipQuota && !canPagePostToday(pageId)) throw new Error('Daily reel limit reached for this page')
+
+  const sourceId = resolveSourceId(job, pageId)
   const source = db.prepare('SELECT * FROM source_accounts WHERE id = ? AND agency_id = ?').get(sourceId, agencyId) as
-    | Record<string, unknown>
+    | JobRow
     | undefined
   if (!source || !source.is_active) throw new Error('Source account inactive')
 
-  const agency = db.prepare('SELECT token_balance FROM agencies WHERE id = ?').get(agencyId) as { token_balance: number }
-  const tokenCost = source.tokens_per_reel as number
-  if (agency.token_balance < tokenCost) throw new Error('Insufficient token balance')
+  return { userId, agencyId, pageId, page, sourceId, source }
+}
 
-  db.prepare("UPDATE reel_jobs SET status = 'downloading' WHERE id = ?").run(jobId)
+async function downloadAndClean(
+  agencyId: string,
+  jobId: string,
+  source: JobRow,
+  pageId: string,
+  sourceId: string,
+) {
   appendJobLog(jobId, 'discover', `Finding reel from ${source.username} (${source.platform})`)
 
   const discovered = await discoverNextReel({
@@ -71,13 +91,7 @@ export async function runAutomationJob(jobId: string): Promise<void> {
   appendJobLog(jobId, 'discover', `Found reel ${discovered.reelId}`, 'info', { url: discovered.sourceUrl, mock: discovered.mock })
 
   appendJobLog(jobId, 'download', 'Downloading video')
-  const download = await downloadReelFromUrl(
-    agencyId,
-    jobId,
-    discovered.sourceUrl,
-    discovered.reelId,
-    discovered.mock,
-  )
+  const download = await downloadReelFromUrl(agencyId, jobId, discovered.sourceUrl, discovered.reelId, discovered.mock)
   appendJobLog(jobId, 'download', 'Download complete', 'info', { mock: download.mock })
 
   db.prepare('UPDATE reel_jobs SET source_url = ?, local_file_path = ? WHERE id = ?').run(
@@ -103,7 +117,22 @@ export async function runAutomationJob(jobId: string): Promise<void> {
     /* ignore */
   }
 
-  db.prepare("UPDATE reel_jobs SET status = 'publishing' WHERE id = ?").run(jobId)
+  return { discovered, download, cleanedPath }
+}
+
+async function publishCleanedFile(
+  jobId: string,
+  ctx: ReturnType<typeof validateJobContext>,
+  cleanedPath: string,
+  discovered: { reelId: string; sourceUrl: string },
+  downloadSourceUrl: string,
+) {
+  const { userId, agencyId, pageId, page, sourceId, source } = ctx
+  const tokenCost = source.tokens_per_reel as number
+
+  const agency = db.prepare('SELECT token_balance FROM agencies WHERE id = ?').get(agencyId) as { token_balance: number }
+  if (agency.token_balance < tokenCost) throw new Error('Insufficient token balance')
+
   appendJobLog(jobId, 'publish', 'Uploading to Facebook')
 
   const account = page.facebook_account_id
@@ -156,9 +185,9 @@ export async function runAutomationJob(jobId: string): Promise<void> {
     recordPostedReel({
       agencyId,
       pageId,
-      sourceAccountId: sourceId!,
+      sourceAccountId: sourceId,
       sourceReelId: discovered.reelId,
-      sourceUrl: download.sourceUrl,
+      sourceUrl: downloadSourceUrl,
       metaPostId: postId,
       jobId,
     })
@@ -166,8 +195,78 @@ export async function runAutomationJob(jobId: string): Promise<void> {
 
   appendJobLog(jobId, 'complete', 'Job finished successfully')
   resetPageFailureStreak(pageId)
-  if (sourceId) resetSourceFailureStreak(sourceId)
+  resetSourceFailureStreak(sourceId)
   cleanupJobFiles(agencyId, jobId)
+
+  void triggerPrefillRefill()
+}
+
+/** Download + metadata strip only — stays in queue until schedule publishes. */
+async function runPrefillJob(jobId: string) {
+  appendJobLog(jobId, 'start', 'Prefill download started')
+  const job = loadJob(jobId)
+  const ctx = validateJobContext(job, { skipQuota: true })
+  const { agencyId, pageId, sourceId, source } = ctx
+
+  db.prepare("UPDATE reel_jobs SET status = 'downloading' WHERE id = ?").run(jobId)
+  await downloadAndClean(agencyId, jobId, source, pageId, sourceId)
+
+  db.prepare("UPDATE reel_jobs SET status = 'queued' WHERE id = ?").run(jobId)
+  appendJobLog(jobId, 'queued', 'Reel ready in publish queue')
+}
+
+/** Publish a pre-downloaded queued reel (status already set to publishing). */
+async function runPublishFromQueueJob(jobId: string) {
+  appendJobLog(jobId, 'start', 'Publishing from pre-download queue')
+  const job = loadJob(jobId)
+  const ctx = validateJobContext(job)
+  const { agencyId, pageId } = ctx
+
+  const cleanedPath = job.cleaned_file_path as string | null
+  if (!cleanedPath || !fs.existsSync(cleanedPath)) {
+    throw new Error('Queued video file missing — re-download required')
+  }
+
+  const discovered = {
+    reelId: (job.source_reel_id as string) ?? 'unknown',
+    sourceUrl: (job.source_url as string) ?? '',
+  }
+
+  await publishCleanedFile(jobId, ctx, cleanedPath, discovered, discovered.sourceUrl)
+
+  void triggerPrefillRefill()
+}
+
+/** Full discover → download → publish pipeline (Direct Post fallback). */
+async function runFullPipelineJob(jobId: string) {
+  appendJobLog(jobId, 'start', 'Job started')
+  const job = loadJob(jobId)
+  const ctx = validateJobContext(job)
+  const { agencyId, pageId, sourceId, source } = ctx
+
+  db.prepare("UPDATE reel_jobs SET status = 'downloading' WHERE id = ?").run(jobId)
+  const { discovered, download, cleanedPath } = await downloadAndClean(agencyId, jobId, source, pageId, sourceId)
+
+  db.prepare("UPDATE reel_jobs SET status = 'publishing' WHERE id = ?").run(jobId)
+  await publishCleanedFile(jobId, ctx, cleanedPath, discovered, download.sourceUrl)
+}
+
+export async function runAutomationJob(jobId: string): Promise<void> {
+  const job = loadJob(jobId)
+  const jobType = job.job_type as JobType
+  const status = job.status as string
+
+  if (status === 'publishing' && job.cleaned_file_path) {
+    await runPublishFromQueueJob(jobId)
+    return
+  }
+
+  if (jobType === 'prefill') {
+    await runPrefillJob(jobId)
+    return
+  }
+
+  await runFullPipelineJob(jobId)
 }
 
 export function failAutomationJob(jobId: string, message: string) {
@@ -175,13 +274,15 @@ export function failAutomationJob(jobId: string, message: string) {
   applySelfHealingOnJobFailure(jobId, message)
   if (maybeAutoRetryJob(jobId, message)) return
 
-  const job = db.prepare('SELECT user_id, agency_id FROM reel_jobs WHERE id = ?').get(jobId) as
-    | { user_id: string; agency_id: string | null }
+  const job = db.prepare('SELECT user_id, agency_id, job_type, status FROM reel_jobs WHERE id = ?').get(jobId) as
+    | { user_id: string; agency_id: string | null; job_type: string; status: string }
     | undefined
+
   db.prepare("UPDATE reel_jobs SET status = 'failed', error_message = ?, completed_at = datetime('now') WHERE id = ?").run(
     message,
     jobId,
   )
+
   if (job) cleanupJobFiles(job.agency_id ?? job.user_id, jobId)
 }
 

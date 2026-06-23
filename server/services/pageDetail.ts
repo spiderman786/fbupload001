@@ -37,12 +37,9 @@ export function getPageDetail(pageId: string, agencyId: string) {
     : undefined
 
   const reelsReady = (
-    db
-      .prepare(`
-        SELECT COUNT(*) as c FROM reel_jobs
-        WHERE target_page_id = ? AND status IN ('pending','downloading')
-      `)
-      .get(pageId) as { c: number }
+    db.prepare("SELECT COUNT(*) as c FROM reel_jobs WHERE target_page_id = ? AND status = 'queued'").get(pageId) as {
+      c: number
+    }
   ).c
 
   const successful = (
@@ -134,7 +131,7 @@ export function getPageQueue(pageId: string) {
       SELECT r.id, r.status, r.source_url, r.source_reel_id, r.created_at, s.username as source_username
       FROM reel_jobs r
       LEFT JOIN source_accounts s ON s.id = r.source_account_id
-      WHERE r.target_page_id = ? AND r.status IN ('pending','downloading','publishing')
+      WHERE r.target_page_id = ? AND r.status = 'queued'
       ORDER BY r.created_at ASC
       LIMIT 100
     `)

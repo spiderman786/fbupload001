@@ -3,6 +3,7 @@ import { db } from '../db.js'
 import { createAutomationJob } from './automationPipeline.js'
 import { canPagePostToday } from './pageQuota.js'
 import { enqueueJob } from './jobQueue.js'
+import { claimQueuedJobForPublish } from './reelQueue.js'
 import { syncAllUsersFollowers } from './followerSync.js'
 import { resetAllDailyQuotas } from './pageQuota.js'
 import { runMaintenance } from './cleanup.js'
@@ -22,7 +23,7 @@ function enqueuePageJob(
 ) {
   if (!canPagePostToday(pageId)) return
 
-  const pending = db
+  const inflight = db
     .prepare(`
       SELECT id FROM reel_jobs
       WHERE target_page_id = ? AND status IN ('pending', 'downloading', 'publishing')
@@ -30,7 +31,13 @@ function enqueuePageJob(
     `)
     .get(pageId)
 
-  if (pending) return
+  if (inflight) return
+
+  const queuedJobId = claimQueuedJobForPublish(pageId, jobType)
+  if (queuedJobId) {
+    enqueueJob(queuedJobId)
+    return
+  }
 
   const jobId = createAutomationJob(agencyId, userId, pageId, jobType, undefined, scheduledFor)
   enqueueJob(jobId)

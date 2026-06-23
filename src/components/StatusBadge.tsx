@@ -5,6 +5,7 @@ export function StatusBadge({ status }: { status: string }) {
     completed: 'border-primary/25 bg-primary/10 text-primary',
     upcoming: 'border-blue-200 bg-blue-50 text-blue-700',
     pending: 'border-yellow-200 bg-yellow-50 text-yellow-700',
+    queued: 'border-blue-200 bg-blue-50 text-blue-700',
     downloading: 'border-blue-200 bg-blue-50 text-blue-700',
     publishing: 'border-purple-200 bg-purple-50 text-purple-700',
     published: 'border-primary/25 bg-primary/10 text-primary',
