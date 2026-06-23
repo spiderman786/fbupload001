@@ -96,7 +96,18 @@ pagesRouter.get('/hub', (req: AgencyRequest, res) => {
           WHERE r.target_page_id = p.id
           ORDER BY r.created_at DESC LIMIT 1)
       ) AS source_username,
-      (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id) AS reels_started
+      (SELECT s.platform FROM page_source_assignments a
+          JOIN source_accounts s ON s.id = a.source_account_id
+          WHERE a.page_id = p.id) AS source_platform,
+      (SELECT COALESCE(fa.display_name, fa.meta_user_id)
+          FROM facebook_accounts fa WHERE fa.id = p.facebook_account_id) AS facebook_account_name,
+      (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id) AS reels_started,
+      (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status = 'published') AS total_posted,
+      (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status IN ('pending','downloading','publishing')) AS total_pending,
+      (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status = 'failed') AS total_failed,
+      (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status = 'published' AND date(completed_at) = date('now')) AS today_posted,
+      (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status = 'failed' AND date(completed_at) = date('now')) AS today_failed,
+      (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status IN ('pending','downloading','publishing') AND date(created_at) = date('now')) AS today_pending
     FROM facebook_pages p
     ${where}
     ORDER BY ${orderClause}
@@ -107,8 +118,22 @@ pagesRouter.get('/hub', (req: AgencyRequest, res) => {
   let pages = rows.map((row) => ({
     ...mapPage(row),
     sourceUsername: (row.source_username as string | null) ?? null,
+    sourcePlatform: (row.source_platform as string | null) ?? null,
+    facebookAccountName: (row.facebook_account_name as string | null) ?? null,
     reelsStarted: Number(row.reels_started ?? 0),
     followersNumeric: Number(row.followers_count ?? parseFollowers(String(row.followers ?? '0'))),
+    stats: {
+      total: {
+        posted: Number(row.total_posted ?? 0),
+        pending: Number(row.total_pending ?? 0),
+        failed: Number(row.total_failed ?? 0),
+      },
+      today: {
+        pending: Number(row.today_pending ?? 0),
+        posted: Number(row.today_posted ?? 0),
+        failed: Number(row.today_failed ?? 0),
+      },
+    },
   }))
 
   if (sort === 'followers') {

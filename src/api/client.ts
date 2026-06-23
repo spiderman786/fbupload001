@@ -555,10 +555,18 @@ export type FacebookPage = {
   lastFollowersSyncAt?: string | null
 }
 
+export type PageJobStats = {
+  total: { posted: number; pending: number; failed: number }
+  today: { pending: number; posted: number; failed: number }
+}
+
 export type AutomationPage = FacebookPage & {
   sourceUsername: string | null
+  sourcePlatform: string | null
+  facebookAccountName: string | null
   reelsStarted: number
   followersNumeric: number
+  stats: PageJobStats
 }
 
 export type PageAutomationSettings = {

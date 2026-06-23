@@ -46,7 +46,6 @@ export function AutoDownloadUploadPage() {
   const [syncing, setSyncing] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [savingLimitId, setSavingLimitId] = useState<string | null>(null)
   const [sources, setSources] = useState<SourceAccount[]>([])
   const [assignments, setAssignments] = useState<Record<string, string>>({})
   const [addOpen, setAddOpen] = useState(false)
@@ -159,31 +158,6 @@ export function AutoDownloadUploadPage() {
       toast.success('Source assigned to page')
     } catch (err) {
       toast.error(getApiError(err, 'Failed to assign source'))
-    }
-  }
-
-  async function handleDailyLimitChange(pageId: string, dailyReelLimit: number) {
-    setSavingLimitId(pageId)
-    try {
-      const { page } = await api.pages.update(pageId, { dailyReelLimit })
-      setPages((prev) =>
-        prev.map((p) =>
-          p.id === pageId
-            ? {
-                ...p,
-                dailyReelLimit: page.dailyReelLimit ?? dailyReelLimit,
-                reelsRemainingToday:
-                  page.reelsRemainingToday ??
-                  Math.max(0, dailyReelLimit - (page.reelsPostedToday ?? p.reelsPostedToday ?? 0)),
-              }
-            : p,
-        ),
-      )
-      toast.success(`Daily limit set to ${dailyReelLimit} reels`)
-    } catch (err) {
-      toast.error(getApiError(err, 'Failed to update daily limit'))
-    } finally {
-      setSavingLimitId(null)
     }
   }
 
@@ -342,7 +316,7 @@ export function AutoDownloadUploadPage() {
               </div>
             ) : (
               <>
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-4 sm:grid-cols-2">
                   {pages.map((page) => (
                     <AutomationPageCard
                       key={page.id}
@@ -352,8 +326,6 @@ export function AutoDownloadUploadPage() {
                       sources={sources.map((s) => ({ id: s.id, username: s.username, platform: s.platform }))}
                       assignedSourceId={assignments[page.id]}
                       onAssignSource={canWrite ? handleAssignSource : undefined}
-                      onDailyLimitChange={handleDailyLimitChange}
-                      savingLimit={savingLimitId === page.id}
                     />
                   ))}
                 </div>

@@ -6,9 +6,14 @@ import {
   ArrowLeft,
   BarChart3,
   Calendar,
+  CheckCircle2,
+  Clock,
   Film,
   Link2,
+  Music2,
   Settings2,
+  Share2,
+  TrendingUp,
   User,
 } from 'lucide-react'
 import { api, type PageDetail, type PageInsightsPayload, type SourceAccount } from '../../api/client'
@@ -20,6 +25,51 @@ import { getApiError } from '../../lib/apiError'
 
 type MainTab = 'overview' | 'insights' | 'reels' | 'failed' | 'settings'
 type SettingsTab = 'automation' | 'connections' | 'source' | 'identity'
+
+function platformLabel(platform: string) {
+  const map: Record<string, string> = {
+    instagram: 'Instagram',
+    tiktok: 'TikTok',
+    youtube: 'YouTube',
+    facebook: 'Facebook',
+  }
+  return map[platform] ?? platform
+}
+
+function OverviewStat({
+  label,
+  value,
+  sub,
+  icon: Icon,
+  tone,
+}: {
+  label: string
+  value: string | number
+  sub: string
+  icon: React.ElementType
+  tone?: 'primary' | 'success' | 'warning' | 'danger'
+}) {
+  const toneClass =
+    tone === 'success'
+      ? 'text-emerald-600'
+      : tone === 'warning'
+        ? 'text-amber-600'
+        : tone === 'danger'
+          ? 'text-red-600'
+          : 'text-primary'
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+          <p className={`mt-1 font-display text-3xl font-bold ${toneClass}`}>{value}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{sub}</p>
+        </div>
+        <Icon className={`h-5 w-5 shrink-0 ${toneClass}`} />
+      </div>
+    </div>
+  )
+}
 
 function MiniBarChart({ data, keys, colors }: { data: Record<string, number | string>[]; keys: string[]; colors: string[] }) {
   const max = Math.max(...data.flatMap((d) => keys.map((k) => Number(d[k] ?? 0))), 1)
@@ -157,6 +207,7 @@ export function AduPageDetailPage() {
   }
 
   const { page, stats, settings, source, facebookIdentity } = detail
+  const initial = (page.name?.trim()?.[0] ?? '?').toUpperCase()
   const mainTabs: { id: MainTab; label: string; icon: React.ElementType }[] = [
     { id: 'overview', label: 'Overview', icon: Activity },
     { id: 'insights', label: 'Insights', icon: BarChart3 },
@@ -167,92 +218,156 @@ export function AduPageDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <Link to="/facebook/auto-download-upload" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-4 w-4" /> Back to Hub
-          </Link>
-          <div className="mt-2 flex flex-wrap items-center gap-3">
-            <h1 className="font-display text-2xl font-bold">{page.name}</h1>
-            <AutomationStatusBadge status={page.status} healthStatus={page.healthStatus ?? 'completed'} />
-            <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
-              {page.status === 'active' ? 'Active posting' : 'Paused'}
-            </span>
+      <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-lg font-bold text-primary">
+              {initial}
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="font-display text-2xl font-bold">{page.name}</h1>
+                <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
+                  {page.status === 'active' ? 'Active posting' : 'Paused'}
+                </span>
+                <AutomationStatusBadge status={page.status} healthStatus={page.healthStatus ?? 'completed'} />
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">Internal ID: {page.metaPageId}</p>
+              <div className="mt-3 grid grid-cols-2 gap-4 sm:max-w-xs">
+                <div>
+                  <p className="text-xs text-muted-foreground">{page.followers} followers</p>
+                </div>
+                <div>
+                  <p className={`text-xs font-medium ${(page.followersGained ?? 0) >= 0 ? 'text-primary' : 'text-red-600'}`}>
+                    {(page.followersGained ?? 0) >= 0 ? '+' : ''}
+                    {page.followersGained ?? 0} gained
+                  </p>
+                </div>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Starting {page.reelsStarted.toLocaleString()} · Added {formatAddedDate(page.createdAt)} ·{' '}
+                {formatDurationSince(page.createdAt)}
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-2.5 py-1 text-xs">
+                  <Share2 className="h-3.5 w-3.5 text-primary" />
+                  Facebook Page
+                </span>
+                {source ? (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-2.5 py-1 text-xs font-medium">
+                    {source.platform === 'tiktok' ? (
+                      <Music2 className="h-3.5 w-3.5 text-primary" />
+                    ) : (
+                      <Share2 className="h-3.5 w-3.5 text-primary" />
+                    )}
+                    {platformLabel(source.platform)}: @{source.username.replace(/^@/, '')}
+                  </span>
+                ) : null}
+              </div>
+              {facebookIdentity ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  via <span className="font-medium text-foreground">{facebookIdentity.name}</span>
+                </p>
+              ) : null}
+            </div>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">Internal ID: {page.metaPageId}</p>
-          <p className="text-xs text-muted-foreground">
-            Starting {page.reelsStarted.toLocaleString()} · Added {formatAddedDate(page.createdAt)} · {formatDurationSince(page.createdAt)}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">Automation</span>
-            <button
-              type="button"
-              onClick={toggleAutomation}
-              className={`relative h-6 w-11 rounded-full transition ${page.status === 'active' ? 'bg-primary' : 'bg-muted'}`}
+          <div className="flex flex-col items-end gap-3">
+            <Link
+              to="/facebook/auto-download-upload"
+              className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-muted"
             >
-              <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${page.status === 'active' ? 'left-5' : 'left-0.5'}`} />
-            </button>
-          </label>
+              <ArrowLeft className="h-4 w-4" /> Back to Hub
+            </Link>
+            <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Automation
+              <button
+                type="button"
+                onClick={toggleAutomation}
+                className={`relative h-6 w-11 rounded-full transition ${page.status === 'active' ? 'bg-primary' : 'bg-muted'}`}
+              >
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${page.status === 'active' ? 'left-5' : 'left-0.5'}`} />
+              </button>
+            </label>
+          </div>
         </div>
-      </div>
+      </section>
 
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="flex flex-wrap gap-2">
         {mainTabs.map((t) => (
           <button
             key={t.id}
             type="button"
             onClick={() => setTab(t.id)}
-            className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-3 text-sm font-medium transition ${
-              tab === t.id ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-card hover:bg-muted/50'
-            } ${t.id === 'settings' ? 'sm:col-span-2 lg:col-span-1' : ''}`}
+            className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition ${
+              tab === t.id ? 'border-primary bg-primary/5 text-primary shadow-sm' : 'border-border bg-card hover:bg-muted/50'
+            }`}
           >
             <t.icon className="h-4 w-4" />
-            <span className="truncate">{t.label}</span>
+            {t.label}
           </button>
         ))}
       </div>
 
       {tab === 'overview' && (
         <div className="space-y-6">
-          <div className="grid gap-4 lg:grid-cols-2">
-            <section className="rounded-xl border border-border bg-card p-5">
-              <h2 className="font-semibold">Total Statistics</h2>
-              <div className="mt-4 grid grid-cols-2 gap-4">
-                {[
-                  { v: stats.total.reelsReady, l: 'Reels ready for posting' },
-                  { v: stats.total.successfulAutomations, l: 'Successful automations' },
-                  { v: stats.total.requireAttention, l: 'Require attention' },
-                  { v: `+${stats.total.netGrowth.toLocaleString()}`, l: 'Net growth since onboarding' },
-                ].map((s) => (
-                  <div key={s.l}>
-                    <p className="font-display text-2xl font-bold">{s.v}</p>
-                    <p className="text-xs text-muted-foreground">{s.l}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-            <section className="rounded-xl border border-border bg-card p-5">
-              <h2 className="font-semibold">Today&apos;s Statistics</h2>
-              <div className="mt-4 grid grid-cols-3 gap-4">
-                {[
-                  { v: stats.today.remainingScheduled, l: 'Remaining scheduled posts' },
-                  { v: stats.today.publishedToday, l: 'Published today' },
-                  { v: stats.today.errorsToday, l: 'Errors today' },
-                ].map((s) => (
-                  <div key={s.l}>
-                    <p className="font-display text-2xl font-bold">{s.v}</p>
-                    <p className="text-xs text-muted-foreground">{s.l}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <OverviewStat
+              label="Total Pending"
+              value={stats.total.reelsReady}
+              sub="Reels ready for posting"
+              icon={Clock}
+              tone="primary"
+            />
+            <OverviewStat
+              label="Total Posted"
+              value={stats.total.successfulAutomations}
+              sub="Successful automations"
+              icon={CheckCircle2}
+              tone="success"
+            />
+            <OverviewStat
+              label="Require Attention"
+              value={stats.total.requireAttention}
+              sub="Health or recent failures"
+              icon={AlertTriangle}
+              tone="warning"
+            />
+            <OverviewStat
+              label="Net Growth"
+              value={`+${stats.total.netGrowth.toLocaleString()}`}
+              sub="Net growth since page onboarding"
+              icon={TrendingUp}
+              tone="success"
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <OverviewStat
+              label="Remaining Today"
+              value={stats.today.remainingScheduled}
+              sub="Remaining scheduled posts today"
+              icon={Clock}
+            />
+            <OverviewStat
+              label="Published Today"
+              value={stats.today.publishedToday}
+              sub="Published since page local midnight"
+              icon={CheckCircle2}
+              tone="success"
+            />
+            <OverviewStat
+              label="Errors Today"
+              value={stats.today.errorsToday}
+              sub="Errors since page local midnight"
+              icon={AlertTriangle}
+              tone={stats.today.errorsToday > 0 ? 'danger' : undefined}
+            />
           </div>
 
           <section className="rounded-xl border border-border bg-card p-5">
             <h2 className="font-semibold">Downloaded Queue</h2>
-            <p className="text-sm text-muted-foreground">Reels waiting to publish for this page</p>
+            <p className="text-sm text-muted-foreground">
+              View reels waiting in the automatic publication queue for this page
+            </p>
             {queue.length ? (
               <ul className="mt-4 space-y-2">
                 {queue.map((q) => (
@@ -278,7 +393,9 @@ export function AduPageDetailPage() {
             ) : (
               <>
                 <h3 className="mt-4 font-medium">No Failed Posts Found</h3>
-                <p className="text-sm text-muted-foreground">All systems operating normally for this page.</p>
+                <p className="text-sm text-muted-foreground">
+                  All systems are operating normally. There are no failed publish attempts recorded for this page.
+                </p>
               </>
             )}
           </section>
@@ -483,7 +600,7 @@ export function AduPageDetailPage() {
 
           {settingsTab === 'source' && (
             <section className="rounded-xl border border-border bg-card p-5">
-              <h2 className="font-semibold">Current Source</h2>
+              <h2 className="font-semibold">Update Content Source</h2>
               <p className="text-sm text-muted-foreground">Reels are downloaded from this account and posted to your page.</p>
               {source ? (
                 <div className="mt-4 rounded-lg border border-border p-4">
