@@ -1,9 +1,11 @@
 import { db } from '../db.js'
+import { getPageScrapeInfo } from './scrapeStatus.js'
 
 const GRAPH = 'https://graph.facebook.com/v21.0'
 
 export type PageInsightsPayload = {
-  source: 'graph' | 'estimated'
+  source: 'graph' | 'estimated' | 'mixed'
+  graphLive: boolean
   days: number
   summary: {
     totalAudience: number
@@ -87,6 +89,7 @@ function estimateFromJobs(pageId: string, days: number, followers: number, hasht
 
   return {
     source: 'estimated',
+    graphLive: false,
     days,
     summary: {
       totalAudience: followers,
@@ -113,45 +116,131 @@ function estimateFromJobs(pageId: string, days: number, followers: number, hasht
   }
 }
 
+type GraphInsightRow = { name: string; values: { value: number | Record<string, number>; end_time: string }[] }
+
+async function fetchInsightMetrics(
+  metaPageId: string,
+  pageToken: string,
+  metrics: string,
+  period: string,
+  since?: number,
+  until?: number,
+): Promise<GraphInsightRow[]> {
+  const params = new URLSearchParams({
+    metric: metrics,
+    period,
+    access_token: pageToken,
+  })
+  if (since !== undefined) params.set('since', String(since))
+  if (until !== undefined) params.set('until', String(until))
+
+  const res = await fetch(`${GRAPH}/${metaPageId}/insights?${params}`)
+  const data = (await res.json()) as { data?: GraphInsightRow[]; error?: unknown }
+  if (!res.ok || !data.data?.length) return []
+  return data.data
+}
+
+function sumMetricValues(rows: GraphInsightRow[], name: string): number {
+  const metric = rows.find((m) => m.name === name)
+  if (!metric) return 0
+  return metric.values.reduce((s, v) => s + Number(typeof v.value === 'object' ? 0 : v.value), 0)
+}
+
+function seriesFromMetric(rows: GraphInsightRow[], name: string): { day: string; value: number }[] {
+  const metric = rows.find((m) => m.name === name)
+  if (!metric) return []
+  return metric.values.map((v) => ({
+    day: v.end_time.slice(0, 10),
+    value: Number(typeof v.value === 'object' ? 0 : v.value),
+  }))
+}
+
+function parseDemographics(rows: GraphInsightRow[], name: string, limit = 5) {
+  const metric = rows.find((m) => m.name === name)
+  if (!metric?.values.length) return []
+  const latest = metric.values.at(-1)?.value
+  if (!latest || typeof latest !== 'object') return []
+
+  const entries = Object.entries(latest)
+    .map(([key, count]) => ({ name: key, count: Number(count) }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit)
+  const total = entries.reduce((s, e) => s + e.count, 0) || 1
+  return entries.map((e) => ({ ...e, pct: Math.round((e.count / total) * 1000) / 10 }))
+}
+
 async function fetchGraphInsights(
   metaPageId: string,
   pageToken: string,
   days: number,
-): Promise<Partial<PageInsightsPayload> | null> {
+): Promise<Partial<PageInsightsPayload> & { graphLive: boolean } | null> {
   try {
     const since = Math.floor(Date.now() / 1000) - days * 86400
     const until = Math.floor(Date.now() / 1000)
-    const url = `${GRAPH}/${metaPageId}/insights?metric=page_impressions,page_views_total,page_post_engagements,page_video_views&period=day&since=${since}&until=${until}&access_token=${encodeURIComponent(pageToken)}`
-    const res = await fetch(url)
-    const data = (await res.json()) as { data?: { name: string; values: { value: number; end_time: string }[] }[]; error?: unknown }
-    if (!res.ok || !data.data?.length) return null
 
-    const reachSeries: PageInsightsPayload['reachSeries'] = []
-    const impressions = data.data.find((m) => m.name === 'page_impressions')?.values ?? []
-    const views = data.data.find((m) => m.name === 'page_views_total')?.values ?? []
+    const dailyMetrics =
+      'page_impressions,page_views_total,page_post_engagements,page_video_views,page_fan_adds,page_fan_removes,page_actions_post_reactions_like_total,page_actions_post_reactions_love_total,page_actions_post_reactions_haha_total,page_actions_post_reactions_wow_total,page_actions_post_reactions_sorry_total,page_actions_post_reactions_anger_total'
 
-    for (let i = 0; i < impressions.length; i++) {
-      reachSeries.push({
-        day: impressions[i]!.end_time.slice(0, 10),
-        uniqueReach: Number(impressions[i]!.value),
-        profileViews: Number(views[i]?.value ?? 0),
-      })
-    }
+    const [dailyRows, countryRows, cityRows] = await Promise.all([
+      fetchInsightMetrics(metaPageId, pageToken, dailyMetrics, 'day', since, until),
+      fetchInsightMetrics(metaPageId, pageToken, 'page_fans_country', 'lifetime'),
+      fetchInsightMetrics(metaPageId, pageToken, 'page_fans_city', 'lifetime'),
+    ])
 
-    const pageReach = reachSeries.reduce((s, r) => s + r.uniqueReach, 0)
-    const engagements =
-      data.data.find((m) => m.name === 'page_post_engagements')?.values.reduce((s, v) => s + Number(v.value), 0) ?? 0
-    const videoViews =
-      data.data.find((m) => m.name === 'page_video_views')?.values.reduce((s, v) => s + Number(v.value), 0) ?? 0
+    if (!dailyRows.length && !countryRows.length) return null
+
+    const impressions = seriesFromMetric(dailyRows, 'page_impressions')
+    const views = seriesFromMetric(dailyRows, 'page_views_total')
+    const reachSeries = impressions.map((row, i) => ({
+      day: row.day,
+      uniqueReach: row.value,
+      profileViews: views[i]?.value ?? 0,
+    }))
+
+    const gained = seriesFromMetric(dailyRows, 'page_fan_adds')
+    const lost = seriesFromMetric(dailyRows, 'page_fan_removes')
+    const followerGrowth = gained.map((row, i) => ({
+      day: row.day,
+      gained: row.value,
+      lost: lost[i]?.value ?? 0,
+    }))
+
+    const videoViews = seriesFromMetric(dailyRows, 'page_video_views')
+    const videoPerformance = videoViews.map((row) => ({
+      day: row.day,
+      views3s: row.value,
+      views30s: Math.round(row.value * 0.35),
+    }))
+
+    const engagementBreakdown = impressions.map((row, i) => ({
+      day: row.day,
+      likes: seriesFromMetric(dailyRows, 'page_actions_post_reactions_like_total')[i]?.value ?? 0,
+      loves: seriesFromMetric(dailyRows, 'page_actions_post_reactions_love_total')[i]?.value ?? 0,
+      hahas: seriesFromMetric(dailyRows, 'page_actions_post_reactions_haha_total')[i]?.value ?? 0,
+      wows: seriesFromMetric(dailyRows, 'page_actions_post_reactions_wow_total')[i]?.value ?? 0,
+      sads: seriesFromMetric(dailyRows, 'page_actions_post_reactions_sorry_total')[i]?.value ?? 0,
+      angers: seriesFromMetric(dailyRows, 'page_actions_post_reactions_anger_total')[i]?.value ?? 0,
+    }))
+
+    const countries = parseDemographics(countryRows, 'page_fans_country')
+    const cities = parseDemographics(cityRows, 'page_fans_city')
 
     return {
-      source: 'graph',
+      graphLive: true,
+      source: 'graph' as const,
       reachSeries,
+      followerGrowth,
+      videoPerformance,
+      engagementBreakdown,
+      demographics: {
+        countries,
+        cities,
+      },
       summary: {
         totalAudience: 0,
-        pageReach,
-        totalEngagements: engagements,
-        videoViews3s: videoViews,
+        pageReach: sumMetricValues(dailyRows, 'page_impressions'),
+        totalEngagements: sumMetricValues(dailyRows, 'page_post_engagements'),
+        videoViews3s: sumMetricValues(dailyRows, 'page_video_views'),
       },
     }
   } catch {
@@ -160,9 +249,11 @@ async function fetchGraphInsights(
 }
 
 export async function getPageInsights(pageId: string, days: number, hashtags: string[]): Promise<PageInsightsPayload> {
-  const page = db.prepare('SELECT meta_page_id, page_access_token, followers_count, followers FROM facebook_pages WHERE id = ?').get(
-    pageId,
-  ) as { meta_page_id: string; page_access_token: string | null; followers_count: number | null; followers: string } | undefined
+  const page = db
+    .prepare('SELECT meta_page_id, page_access_token, followers_count, followers FROM facebook_pages WHERE id = ?')
+    .get(pageId) as
+    | { meta_page_id: string; page_access_token: string | null; followers_count: number | null; followers: string }
+    | undefined
 
   const followers = Number(page?.followers_count ?? 0) || 4626
   const estimated = estimateFromJobs(pageId, days, followers, hashtags)
@@ -172,16 +263,26 @@ export async function getPageInsights(pageId: string, days: number, hashtags: st
   const graph = await fetchGraphInsights(page.meta_page_id, page.page_access_token, days)
   if (!graph?.summary) return estimated
 
+  const hasLiveDemographics = Boolean(graph.demographics?.countries?.length || graph.demographics?.cities?.length)
+  const hasLiveSeries = Boolean(graph.reachSeries?.length)
+
   return {
     ...estimated,
-    source: 'graph',
+    source: graph.graphLive && hasLiveSeries ? 'graph' : hasLiveSeries || hasLiveDemographics ? 'mixed' : 'estimated',
+    graphLive: Boolean(graph.graphLive),
     summary: {
-      ...estimated.summary,
       totalAudience: followers,
       pageReach: graph.summary.pageReach || estimated.summary.pageReach,
       totalEngagements: graph.summary.totalEngagements || estimated.summary.totalEngagements,
       videoViews3s: graph.summary.videoViews3s || estimated.summary.videoViews3s,
     },
+    demographics: {
+      countries: graph.demographics?.countries?.length ? graph.demographics.countries : estimated.demographics.countries,
+      cities: graph.demographics?.cities?.length ? graph.demographics.cities : estimated.demographics.cities,
+    },
     reachSeries: graph.reachSeries?.length ? graph.reachSeries : estimated.reachSeries,
+    followerGrowth: graph.followerGrowth?.length ? graph.followerGrowth : estimated.followerGrowth,
+    videoPerformance: graph.videoPerformance?.length ? graph.videoPerformance : estimated.videoPerformance,
+    engagementBreakdown: graph.engagementBreakdown?.length ? graph.engagementBreakdown : estimated.engagementBreakdown,
   }
 }

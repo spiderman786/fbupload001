@@ -12,6 +12,11 @@ import { appendJobLog } from './jobLog.js'
 import { maybeAutoRetryJob } from './autoRetry.js'
 import { applySelfHealingOnJobFailure, resetPageFailureStreak, resetSourceFailureStreak } from './selfHealing.js'
 import { isPlatformFlagEnabled, isAgencyInMaintenance } from './platformSettings.js'
+import {
+  handlePrefillDiscoveryFailure,
+  handlePrefillSuccess,
+  markScrapeIdle,
+} from './scrapeStatus.js'
 
 async function triggerPrefillRefill() {
   try {
@@ -209,16 +214,24 @@ async function runPrefillJob(jobId: string) {
   const { agencyId, pageId, sourceId, source } = ctx
 
   db.prepare("UPDATE reel_jobs SET status = 'downloading' WHERE id = ?").run(jobId)
-  const { discovered, download, cleanedPath } = await downloadAndClean(agencyId, jobId, source, pageId, sourceId)
+  markScrapeIdle(pageId)
+  try {
+    const { discovered, download, cleanedPath } = await downloadAndClean(agencyId, jobId, source, pageId, sourceId)
 
-  const meta = await fetchReelMetadata(download.sourceUrl)
-  const defaultCaption = `Reel from @${String(source.username).replace(/^@/, '')}`
-  const caption = meta?.description || meta?.title || defaultCaption
-  const thumbPath = meta?.thumbnailUrl ? await downloadThumbnail(meta.thumbnailUrl, path.dirname(cleanedPath)) : null
+    const meta = await fetchReelMetadata(download.sourceUrl)
+    const defaultCaption = `Reel from @${String(source.username).replace(/^@/, '')}`
+    const caption = meta?.description || meta?.title || defaultCaption
+    const thumbPath = meta?.thumbnailUrl ? await downloadThumbnail(meta.thumbnailUrl, path.dirname(cleanedPath)) : null
 
-  db.prepare('UPDATE reel_jobs SET caption = ?, thumbnail_path = ? WHERE id = ?').run(caption, thumbPath, jobId)
-  db.prepare("UPDATE reel_jobs SET status = 'queued' WHERE id = ?").run(jobId)
-  appendJobLog(jobId, 'queued', 'Reel ready in publish queue')
+    db.prepare('UPDATE reel_jobs SET caption = ?, thumbnail_path = ? WHERE id = ?').run(caption, thumbPath, jobId)
+    db.prepare("UPDATE reel_jobs SET status = 'queued' WHERE id = ?").run(jobId)
+    appendJobLog(jobId, 'queued', 'Reel ready in publish queue')
+    handlePrefillSuccess(pageId)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    handlePrefillDiscoveryFailure(pageId, sourceId, message)
+    throw err
+  }
 }
 
 /** Publish a pre-downloaded queued reel (status already set to publishing). */

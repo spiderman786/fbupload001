@@ -1,5 +1,6 @@
 import { db } from '../db.js'
 import { getPageAutomationSettings, ensurePageAutomationSettings } from './pageAutomationSettings.js'
+import { getPageScrapeInfo } from './scrapeStatus.js'
 
 export function getAgencyPage(pageId: string, agencyId: string) {
   return db.prepare('SELECT * FROM facebook_pages WHERE id = ? AND agency_id = ?').get(pageId, agencyId) as
@@ -86,6 +87,8 @@ export function getPageDetail(pageId: string, agencyId: string) {
     db.prepare('SELECT COUNT(*) as c FROM reel_jobs WHERE target_page_id = ?').get(pageId) as { c: number }
   ).c
 
+  const scrape = getPageScrapeInfo(pageId)
+
   return {
     page: {
       id: page.id,
@@ -103,8 +106,23 @@ export function getPageDetail(pageId: string, agencyId: string) {
       reelsStarted,
     },
     source: assignment
-      ? { id: assignment.id, username: assignment.username, platform: assignment.platform, isActive: Boolean(assignment.is_active) }
+      ? {
+          id: assignment.id,
+          username: assignment.username,
+          platform: assignment.platform,
+          isActive: Boolean(assignment.is_active),
+          scrapeStatus: scrape?.status ?? 'none',
+          scrapeLabel: scrape?.label ?? 'No source',
+          scrapeError: scrape?.errorMessage ?? null,
+        }
       : null,
+    scrape: scrape ?? {
+      status: 'none' as const,
+      label: 'No source',
+      totalScraped: 0,
+      errorMessage: null,
+      inflightDownloads: 0,
+    },
     facebookIdentity: fbAccount
       ? { name: fbAccount.full_name ?? fbAccount.meta_user_id, uid: fbAccount.meta_user_id, connectedAt: fbAccount.connected_at }
       : null,
@@ -115,6 +133,7 @@ export function getPageDetail(pageId: string, agencyId: string) {
         successfulAutomations: successful,
         requireAttention,
         netGrowth: Number(page.followers_gained ?? 0),
+        totalScraped: scrape?.totalScraped ?? 0,
       },
       today: {
         remainingScheduled: Math.max(0, dailyLimit - postedToday),

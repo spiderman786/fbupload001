@@ -9,6 +9,15 @@ export function getCurrentTimeHHMM(timezone: string = DEFAULT_SCHEDULE_TIMEZONE)
   }).format(new Date())
 }
 
+export function getTodayDateInTimezone(timezone: string = DEFAULT_SCHEDULE_TIMEZONE): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
+
 export function formatTimeInTimezone(time: string, timezone: string = DEFAULT_SCHEDULE_TIMEZONE): string {
   const [h, m] = time.split(':').map(Number)
   const now = new Date()

@@ -17,6 +17,7 @@ import {
 } from '../services/pageDetail.js'
 import { getPageInsights } from '../services/pageInsights.js'
 import { upsertPageAutomationSettings, getPageAutomationSettings } from '../services/pageAutomationSettings.js'
+import { generateRandomScheduleTimes } from '../services/pageSchedule.js'
 import {
   getQueuedJobForPage,
   updateQueuedCaption,
@@ -334,14 +335,29 @@ pagesRouter.patch('/:id/automation-settings', requireRole('owner', 'admin'), (re
     res.status(404).json({ error: 'Page not found' })
     return
   }
-  const { postsPerDay, postingLogic, timezone, scheduleTimes, hashtags } = req.body ?? {}
+  const { postsPerDay, postingLogic, timezone, scheduleTimes, hashtags, regenerateRandomTimes } = req.body ?? {}
+  const current = getPageAutomationSettings(req.params.id)
+  let nextTimes = Array.isArray(scheduleTimes) ? scheduleTimes.map(String) : undefined
+
+  if (regenerateRandomTimes === true) {
+    const count = postsPerDay !== undefined ? Number(postsPerDay) : current.postsPerDay
+    nextTimes = generateRandomScheduleTimes(count)
+  } else if (postingLogic === 'dailyrandom' && postingLogic !== current.postingLogic && !nextTimes) {
+    nextTimes = generateRandomScheduleTimes(postsPerDay !== undefined ? Number(postsPerDay) : current.postsPerDay)
+  }
+
   const settings = upsertPageAutomationSettings(req.params.id, {
     postsPerDay: postsPerDay !== undefined ? Number(postsPerDay) : undefined,
     postingLogic: postingLogic !== undefined ? String(postingLogic) : undefined,
     timezone: timezone !== undefined ? String(timezone) : undefined,
-    scheduleTimes: Array.isArray(scheduleTimes) ? scheduleTimes.map(String) : undefined,
+    scheduleTimes: nextTimes,
     hashtags: Array.isArray(hashtags) ? hashtags.map(String) : undefined,
   })
+
+  if (nextTimes || scheduleTimes) {
+    db.prepare('UPDATE page_automation_settings SET last_schedule_fire = NULL WHERE page_id = ?').run(req.params.id)
+  }
+
   res.json({ settings })
 })
 

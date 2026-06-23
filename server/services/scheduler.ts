@@ -7,6 +7,7 @@ import { claimQueuedJobForPublish } from './reelQueue.js'
 import { syncAllUsersFollowers } from './followerSync.js'
 import { resetAllDailyQuotas } from './pageQuota.js'
 import { runMaintenance } from './cleanup.js'
+import { processPageAutomationSchedules } from './pageSchedule.js'
 import { DEFAULT_SCHEDULE_TIMEZONE, getCurrentTimeHHMM } from '../utils/timezone.js'
 import { SCHEDULER_PAGES_BATCH_SIZE } from '../utils/pagination.js'
 
@@ -105,6 +106,7 @@ function tickScheduler() {
   try {
     processScheduledSlots('direct')
     processScheduledSlots('inapp')
+    processPageAutomationSchedules()
   } finally {
     scheduling = false
   }

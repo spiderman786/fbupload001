@@ -10,6 +10,7 @@ const STYLES: Record<string, string> = {
   invalid_token: 'border-red-200 bg-red-50 text-red-700',
   invalid_username: 'border-red-200 bg-red-50 text-red-700',
   creator_suspended: 'border-red-200 bg-red-50 text-red-700',
+  source_exhausted: 'border-primary/25 bg-primary/10 text-primary',
   twofa_required_bm: 'border-orange-200 bg-orange-50 text-orange-700',
   check_dev_app: 'border-yellow-200 bg-yellow-50 text-yellow-800',
   account_suspended: 'border-red-200 bg-red-50 text-red-700',

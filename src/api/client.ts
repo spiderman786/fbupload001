@@ -94,7 +94,14 @@ export const api = {
       request<{ message: string }>(`/pages/${pageId}/queue/${jobId}`, { method: 'DELETE' }),
     updateAutomationSettings: (
       id: string,
-      body: { postsPerDay?: number; postingLogic?: string; timezone?: string; scheduleTimes?: string[]; hashtags?: string[] },
+      body: {
+        postsPerDay?: number
+        postingLogic?: string
+        timezone?: string
+        scheduleTimes?: string[]
+        hashtags?: string[]
+        regenerateRandomTimes?: boolean
+      },
     ) =>
       request<{ settings: PageAutomationSettings }>(`/pages/${id}/automation-settings`, {
         method: 'PATCH',
@@ -588,19 +595,37 @@ export type PageAutomationSettings = {
   hashtags: string[]
 }
 
+export type PageScrapeInfo = {
+  status: 'none' | 'scraping_pending' | 'pending_scrap' | 'scraping_error' | 'idle'
+  label: string
+  totalScraped: number
+  errorMessage: string | null
+  inflightDownloads: number
+}
+
 export type PageDetail = {
   page: AutomationPage
-  source: { id: string; username: string; platform: string; isActive: boolean } | null
+  source: {
+    id: string
+    username: string
+    platform: string
+    isActive: boolean
+    scrapeStatus?: string
+    scrapeLabel?: string
+    scrapeError?: string | null
+  } | null
+  scrape: PageScrapeInfo
   facebookIdentity: { name: string; uid: string; connectedAt: string } | null
   settings: PageAutomationSettings
   stats: {
-    total: { reelsReady: number; successfulAutomations: number; requireAttention: number; netGrowth: number }
+    total: { reelsReady: number; successfulAutomations: number; requireAttention: number; netGrowth: number; totalScraped: number }
     today: { remainingScheduled: number; publishedToday: number; errorsToday: number }
   }
 }
 
 export type PageInsightsPayload = {
-  source: 'graph' | 'estimated'
+  source: 'graph' | 'estimated' | 'mixed'
+  graphLive?: boolean
   days: number
   summary: { totalAudience: number; pageReach: number; totalEngagements: number; videoViews3s: number }
   demographics: {

@@ -19,6 +19,7 @@ import {
 import { api, type PageDetail, type PageInsightsPayload, type PageQueueItem } from '../../api/client'
 import { AutomationStatusBadge } from '../../components/HealthStatusBadge'
 import { ReelsQueueWorkspace } from '../../components/ReelsQueueWorkspace'
+import { ScrapeStatusBanner } from '../../components/ScrapeStatusBanner'
 import { SwitchSourceModal } from '../../components/SwitchSourceModal'
 import { formatAddedDate, formatDurationSince } from '../../lib/formatDuration'
 import { useToast } from '../../context/ToastContext'
@@ -174,20 +175,47 @@ export function AduPageDetailPage() {
     }
   }
 
-  async function saveSettings() {
+  async function saveSettings(opts?: { regenerateRandomTimes?: boolean }) {
     if (!pageId) return
+    const isFixed = form.postingLogic === 'fixed'
     try {
-      await api.pages.updateAutomationSettings(pageId, {
+      const result = await api.pages.updateAutomationSettings(pageId, {
         postsPerDay: form.postsPerDay,
         postingLogic: form.postingLogic,
         timezone: form.timezone,
-        scheduleTimes: form.scheduleTimes.split(/[,;\s]+/).filter(Boolean),
+        scheduleTimes: isFixed ? form.scheduleTimes.split(/[,;\s]+/).filter(Boolean) : undefined,
+        regenerateRandomTimes: opts?.regenerateRandomTimes,
       })
+      setForm((f) => ({
+        ...f,
+        scheduleTimes: result.settings.scheduleTimes.join(', '),
+      }))
       toast.success('Settings saved')
       setEditSettings(false)
       loadDetail()
     } catch (err) {
       toast.error(getApiError(err, 'Save failed'))
+    }
+  }
+
+  async function regenerateRandomTimes() {
+    if (!pageId) return
+    try {
+      const result = await api.pages.updateAutomationSettings(pageId, {
+        postsPerDay: form.postsPerDay,
+        postingLogic: 'dailyrandom',
+        timezone: form.timezone,
+        regenerateRandomTimes: true,
+      })
+      setForm((f) => ({
+        ...f,
+        postingLogic: 'dailyrandom',
+        scheduleTimes: result.settings.scheduleTimes.join(', '),
+      }))
+      toast.success('Random posting times generated')
+      loadDetail()
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to generate times'))
     }
   }
 
@@ -203,7 +231,7 @@ export function AduPageDetailPage() {
     return <p className="text-muted-foreground">Page not found. <Link to="/facebook/auto-download-upload" className="text-primary">Back to hub</Link></p>
   }
 
-  const { page, stats, settings, source, facebookIdentity } = detail
+  const { page, stats, settings, source, scrape, facebookIdentity } = detail
   const initial = (page.name?.trim()?.[0] ?? '?').toUpperCase()
   const mainTabs: { id: MainTab; label: string; icon: React.ElementType }[] = [
     { id: 'overview', label: 'Overview', icon: Activity },
@@ -360,26 +388,21 @@ export function AduPageDetailPage() {
             />
           </div>
 
-          <section className="rounded-xl border border-border bg-card p-5">
-            <h2 className="font-semibold">Downloaded Queue</h2>
-            <p className="text-sm text-muted-foreground">
-              Pre-downloaded reels waiting to publish at scheduled times (Pro-style queue)
-            </p>
-            {queue.length ? (
-              <ul className="mt-4 space-y-2">
-                {queue.map((q) => (
-                  <li key={q.id} className="flex justify-between rounded-lg border border-border px-3 py-2 text-sm">
-                    <span>
-                      @{q.sourceUsername?.replace(/^@/, '') ?? '—'} · <span className="text-primary">ready</span>
-                    </span>
-                    <span className="text-xs text-muted-foreground">{new Date(q.createdAt).toLocaleString()}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-4 text-sm text-muted-foreground">Queue is empty</p>
-            )}
-          </section>
+          <ScrapeStatusBanner scrape={scrape} totalScraped={stats.total.totalScraped} />
+
+          {pageId ? (
+            <ReelsQueueWorkspace
+              pageId={pageId}
+              queue={queue}
+              canWrite={canWrite}
+              defaultHashtags={settings.hashtags}
+              onRefresh={() => {
+                loadQueue()
+                loadDetail()
+              }}
+              refreshing={queueRefreshing}
+            />
+          ) : null}
 
           <section className="rounded-xl border border-border bg-card p-5">
             <h2 className="font-semibold">Failed Posts</h2>
@@ -409,7 +432,15 @@ export function AduPageDetailPage() {
                 {d} Days
               </button>
             ))}
-            <span className="ml-auto text-xs text-muted-foreground">Source: {insights.source}</span>
+            <span className="ml-auto inline-flex items-center gap-2 text-xs">
+              {insights.graphLive ? (
+                <span className="rounded-full bg-primary/10 px-2.5 py-0.5 font-semibold text-primary">Live from Meta</span>
+              ) : insights.source === 'mixed' ? (
+                <span className="rounded-full bg-amber-100 px-2.5 py-0.5 font-semibold text-amber-800">Partial Meta data</span>
+              ) : (
+                <span className="text-muted-foreground">Estimated from jobs</span>
+              )}
+            </span>
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {[
@@ -540,17 +571,77 @@ export function AduPageDetailPage() {
                 </button>
               </div>
               {editSettings ? (
-                <div className="mt-4 space-y-3">
-                  <label className="block text-sm">Posts per day<input type="number" className="mt-1 h-9 w-full rounded-md border px-3" value={form.postsPerDay} onChange={(e) => setForm({ ...form, postsPerDay: Number(e.target.value) })} /></label>
-                  <label className="block text-sm">Logic<input className="mt-1 h-9 w-full rounded-md border px-3" value={form.postingLogic} onChange={(e) => setForm({ ...form, postingLogic: e.target.value })} /></label>
-                  <label className="block text-sm">Timezone<input className="mt-1 h-9 w-full rounded-md border px-3" value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} /></label>
-                  <label className="block text-sm">Schedule times (comma separated)<input className="mt-1 h-9 w-full rounded-md border px-3" value={form.scheduleTimes} onChange={(e) => setForm({ ...form, scheduleTimes: e.target.value })} /></label>
-                  <button type="button" onClick={saveSettings} className="rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground">Save</button>
+                <div className="mt-4 space-y-4">
+                  <label className="block text-sm">
+                    Posts per day
+                    <input
+                      type="number"
+                      min={1}
+                      max={12}
+                      className="mt-1 h-9 w-full rounded-md border px-3"
+                      value={form.postsPerDay}
+                      onChange={(e) => setForm({ ...form, postsPerDay: Number(e.target.value) })}
+                    />
+                  </label>
+                  <div>
+                    <p className="mb-2 text-sm font-medium">Posting logic</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {([
+                        ['dailyrandom', 'Random daily times'],
+                        ['fixed', 'Fixed schedule times'],
+                      ] as const).map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setForm({ ...form, postingLogic: value })}
+                          className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                            form.postingLogic === value ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {form.postingLogic === 'dailyrandom' ? (
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <p className="text-xs text-muted-foreground">Random times auto-generate for each day&apos;s post count.</p>
+                        <button type="button" onClick={regenerateRandomTimes} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-muted">
+                          Regenerate random times
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-muted-foreground">Posts publish at the exact local times you set below.</p>
+                    )}
+                  </div>
+                  <label className="block text-sm">
+                    Timezone
+                    <input className="mt-1 h-9 w-full rounded-md border px-3" value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} />
+                  </label>
+                  <label className="block text-sm">
+                    Schedule times (comma separated, 24h — e.g. 03:33, 09:15, 16:00)
+                    <input
+                      className="mt-1 h-9 w-full rounded-md border px-3"
+                      value={form.scheduleTimes}
+                      onChange={(e) => setForm({ ...form, scheduleTimes: e.target.value })}
+                      disabled={form.postingLogic === 'dailyrandom'}
+                    />
+                  </label>
+                  {form.postingLogic === 'dailyrandom' && form.scheduleTimes ? (
+                    <div className="flex flex-wrap gap-2">
+                      {form.scheduleTimes.split(/[,;\s]+/).filter(Boolean).map((t) => (
+                        <span key={t} className="rounded-full bg-muted px-2.5 py-1 text-xs">{t}</span>
+                      ))}
+                    </div>
+                  ) : null}
+                  <button type="button" onClick={() => saveSettings()} className="rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground">Save</button>
                 </div>
               ) : (
                 <div className="mt-4 grid gap-4 sm:grid-cols-2">
                   <div><p className="text-xs text-muted-foreground">POSTS PER DAY</p><p className="font-semibold">{settings.postsPerDay} Posts</p></div>
-                  <div><p className="text-xs text-muted-foreground">LOGIC</p><p className="font-semibold capitalize">{settings.postingLogic}</p></div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">LOGIC</p>
+                    <p className="font-semibold">{settings.postingLogic === 'fixed' ? 'Fixed schedule times' : 'Random daily times'}</p>
+                  </div>
                   <div><p className="text-xs text-muted-foreground">TIMEZONE</p><p className="font-semibold">{settings.timezone}</p></div>
                   <div className="sm:col-span-2">
                     <p className="text-xs text-muted-foreground">SCHEDULED TIMES (LOCAL)</p>
@@ -588,8 +679,29 @@ export function AduPageDetailPage() {
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Current Source</p>
                 {source ? (
                   <>
-                    <p className="mt-1 font-medium">@{source.username.replace(/^@/, '')}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <p className="font-medium">@{source.username.replace(/^@/, '')}</p>
+                      {source.scrapeLabel && source.scrapeStatus !== 'idle' ? (
+                        <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                          source.scrapeStatus === 'scraping_error'
+                            ? 'bg-red-100 text-red-700'
+                            : source.scrapeStatus === 'pending_scrap' || source.scrapeStatus === 'scraping_pending'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-muted text-muted-foreground'
+                        }`}>
+                          {source.scrapeLabel}
+                        </span>
+                      ) : null}
+                      {page.healthStatus === 'source_exhausted' ? (
+                        <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                          Completed
+                        </span>
+                      ) : null}
+                    </div>
                     <p className="text-sm text-muted-foreground capitalize">{source.platform} · {source.isActive ? 'Active' : 'Disabled'}</p>
+                    {source.scrapeError ? (
+                      <p className="mt-2 text-xs text-red-600">{source.scrapeError}</p>
+                    ) : null}
                   </>
                 ) : (
                   <p className="mt-1 text-sm text-muted-foreground">No source assigned yet.</p>

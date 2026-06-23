@@ -8,6 +8,7 @@ import { bulkDeletePosts, listPagePosts } from '../services/publisher.js'
 import { isFacebookConfiguredForAgency } from '../services/byoc.js'
 import { purgeQueuedJobsForPage } from '../services/queueActions.js'
 import { tickPrefillQueue } from '../services/prefillScheduler.js'
+import { markSourceScrapingPending, reactivateSourceForRescrape } from '../services/scrapeStatus.js'
 import type { AgencyRequest } from '../utils/agency.js'
 
 export const automationRouter = Router()
@@ -65,8 +66,21 @@ automationRouter.put('/assignments/:pageId', requireRole('owner', 'admin'), (req
     ON CONFLICT(page_id) DO UPDATE SET source_account_id = excluded.source_account_id, agency_id = excluded.agency_id
   `).run(req.params.pageId, sourceId, req.user!.id, req.agency!.id)
 
+  if (previous && previous.source_account_id === sourceId) {
+    const pageHealth = db
+      .prepare('SELECT health_status FROM facebook_pages WHERE id = ?')
+      .get(req.params.pageId) as { health_status: string } | undefined
+    if (pageHealth?.health_status === 'source_exhausted') {
+      reactivateSourceForRescrape(req.params.pageId)
+      void tickPrefillQueue()
+      res.json({ message: 'Source re-sync started — scraping creator again' })
+      return
+    }
+  }
+
   if (!previous || previous.source_account_id !== sourceId) {
     purgeQueuedJobsForPage(req.params.pageId, req.agency!.id)
+    markSourceScrapingPending(req.params.pageId)
   }
 
   void tickPrefillQueue()

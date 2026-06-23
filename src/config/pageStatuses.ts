@@ -8,7 +8,7 @@ export type PageStatusFilter =
   | 'invalid_token'
   | 'invalid_username'
   | 'creator_suspended'
-  | 'completed'
+  | 'source_exhausted'
   | 'twofa_required_bm'
   | 'check_dev_app'
   | 'account_suspended'
@@ -23,7 +23,7 @@ export const PAGE_STATUS_FILTERS: { value: PageStatusFilter; label: string }[] =
   { value: 'invalid_token', label: 'Invalid Token' },
   { value: 'invalid_username', label: 'Invalid Username' },
   { value: 'creator_suspended', label: 'Creator Suspended' },
-  { value: 'completed', label: 'Completed' },
+  { value: 'source_exhausted', label: 'Completed' },
   { value: 'twofa_required_bm', label: '2FA Req. on BM' },
   { value: 'check_dev_app', label: 'Check Dev App' },
   { value: 'account_suspended', label: 'Account Suspended' },
@@ -37,6 +37,7 @@ export const HEALTH_STATUS_LABELS: Record<string, string> = {
   invalid_token: 'Invalid Token',
   invalid_username: 'Invalid Username',
   creator_suspended: 'Creator Suspended',
+  source_exhausted: 'Completed',
   twofa_required_bm: '2FA Req. on BM',
   check_dev_app: 'Check Dev App',
   account_suspended: 'Account Suspended',

@@ -441,6 +441,27 @@ function migrateOps() {
   `)
 
   migrateReelJobsQueuedStatus()
+  migrateScrapeAndSchedule()
+}
+
+function migrateScrapeAndSchedule() {
+  const assignCols = db.prepare('PRAGMA table_info(page_source_assignments)').all() as { name: string }[]
+  const assignNames = new Set(assignCols.map((c) => c.name))
+  if (!assignNames.has('scrape_status')) {
+    db.exec(`ALTER TABLE page_source_assignments ADD COLUMN scrape_status TEXT NOT NULL DEFAULT 'idle'`)
+  }
+  if (!assignNames.has('scrape_error')) {
+    db.exec(`ALTER TABLE page_source_assignments ADD COLUMN scrape_error TEXT`)
+  }
+  if (!assignNames.has('source_assigned_at')) {
+    db.exec(`ALTER TABLE page_source_assignments ADD COLUMN source_assigned_at TEXT`)
+  }
+
+  const pasCols = db.prepare('PRAGMA table_info(page_automation_settings)').all() as { name: string }[]
+  const pasNames = new Set(pasCols.map((c) => c.name))
+  if (!pasNames.has('last_schedule_fire')) {
+    db.exec(`ALTER TABLE page_automation_settings ADD COLUMN last_schedule_fire TEXT`)
+  }
 }
 
 function migrateReelJobsQueuedStatus() {
