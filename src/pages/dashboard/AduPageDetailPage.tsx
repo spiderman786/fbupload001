@@ -16,8 +16,10 @@ import {
   TrendingUp,
   User,
 } from 'lucide-react'
-import { api, type PageDetail, type PageInsightsPayload, type SourceAccount } from '../../api/client'
+import { api, type PageDetail, type PageInsightsPayload, type PageQueueItem } from '../../api/client'
 import { AutomationStatusBadge } from '../../components/HealthStatusBadge'
+import { ReelsQueueWorkspace } from '../../components/ReelsQueueWorkspace'
+import { SwitchSourceModal } from '../../components/SwitchSourceModal'
 import { formatAddedDate, formatDurationSince } from '../../lib/formatDuration'
 import { useToast } from '../../context/ToastContext'
 import { useAgencyRole } from '../../context/AuthContext'
@@ -99,15 +101,14 @@ export function AduPageDetailPage() {
   const [detail, setDetail] = useState<PageDetail | null>(null)
   const [insights, setInsights] = useState<PageInsightsPayload | null>(null)
   const [insightDays, setInsightDays] = useState(28)
-  const [queue, setQueue] = useState<{ id: string; status: string; sourceUrl: string | null; sourceUsername: string | null; createdAt: string }[]>([])
+  const [queue, setQueue] = useState<PageQueueItem[]>([])
+  const [queueRefreshing, setQueueRefreshing] = useState(false)
   const [failed, setFailed] = useState<{ id: string; errorMessage: string | null; completedAt: string | null; retryCount: number }[]>([])
   const [reasons, setReasons] = useState<{ errorMessage: string; count: number; lastAt: string }[]>([])
-  const [reelHistory, setReelHistory] = useState<{ id: string; status: string; sourceUrl: string | null; completedAt: string | null }[]>([])
   const [loading, setLoading] = useState(true)
   const [editSettings, setEditSettings] = useState(false)
   const [form, setForm] = useState({ postsPerDay: 3, postingLogic: 'dailyrandom', timezone: 'America/New_York', scheduleTimes: '' })
-  const [availableSources, setAvailableSources] = useState<SourceAccount[]>([])
-  const [assigningSource, setAssigningSource] = useState(false)
+  const [switchSourceOpen, setSwitchSourceOpen] = useState(false)
 
   const loadDetail = useCallback(async () => {
     if (!pageId) return
@@ -128,14 +129,22 @@ export function AduPageDetailPage() {
     }
   }, [pageId, toast])
 
+  const loadQueue = useCallback(async () => {
+    if (!pageId) return
+    setQueueRefreshing(true)
+    try {
+      const r = await api.pages.reels(pageId)
+      setQueue(r.queue)
+    } catch {
+      /* ignore */
+    } finally {
+      setQueueRefreshing(false)
+    }
+  }, [pageId])
+
   useEffect(() => {
     loadDetail()
   }, [loadDetail])
-
-  useEffect(() => {
-    if (!pageId || tab !== 'settings' || settingsTab !== 'source') return
-    api.sources.list().then((r) => setAvailableSources(r.sources.filter((s) => s.isActive))).catch(() => {})
-  }, [pageId, tab, settingsTab])
 
   useEffect(() => {
     if (!pageId) return
@@ -143,10 +152,7 @@ export function AduPageDetailPage() {
       api.pages.insights(pageId, insightDays).then((r) => setInsights(r.insights)).catch(() => {})
     }
     if (tab === 'overview' || tab === 'reels') {
-      api.pages.reels(pageId).then((r) => {
-        setQueue(r.queue)
-        setReelHistory(r.history)
-      }).catch(() => {})
+      loadQueue()
     }
     if (tab === 'failed' || tab === 'overview') {
       api.pages.failedPosts(pageId).then((r) => {
@@ -154,7 +160,7 @@ export function AduPageDetailPage() {
         setReasons(r.reasons)
       }).catch(() => {})
     }
-  }, [pageId, tab, insightDays])
+  }, [pageId, tab, insightDays, loadQueue])
 
   async function toggleAutomation() {
     if (!pageId || !detail) return
@@ -185,18 +191,9 @@ export function AduPageDetailPage() {
     }
   }
 
-  async function handleAssignSource(sourceId: string) {
-    if (!pageId || !sourceId) return
-    setAssigningSource(true)
-    try {
-      await api.automation.assignSource(pageId, sourceId)
-      toast.success('Source assigned to page')
-      loadDetail()
-    } catch (err) {
-      toast.error(getApiError(err, 'Failed to assign source'))
-    } finally {
-      setAssigningSource(false)
-    }
+  async function handleSourceSwitched() {
+    await loadDetail()
+    if (tab === 'overview' || tab === 'reels') loadQueue()
   }
 
   if (loading && !detail) {
@@ -472,33 +469,15 @@ export function AduPageDetailPage() {
         </div>
       )}
 
-      {tab === 'reels' && (
-        <div className="space-y-4">
-          <section className="rounded-xl border border-border bg-card p-5">
-            <h2 className="font-semibold">Queue ({queue.length})</h2>
-            <p className="mb-2 text-xs text-muted-foreground">Pre-downloaded reels ready to publish on schedule</p>
-            <ul className="mt-3 space-y-2">
-              {queue.map((q) => (
-                <li key={q.id} className="flex justify-between border-b border-border py-2 text-sm">
-                  <span>@{q.sourceUsername?.replace(/^@/, '') ?? '—'} · ready</span>
-                  <span className="text-muted-foreground">{new Date(q.createdAt).toLocaleString()}</span>
-                </li>
-              ))}
-              {!queue.length && <p className="text-sm text-muted-foreground">No queued reels</p>}
-            </ul>
-          </section>
-          <section className="rounded-xl border border-border bg-card p-5">
-            <h2 className="font-semibold">History</h2>
-            <ul className="mt-3 space-y-2">
-              {reelHistory.map((r) => (
-                <li key={r.id} className="flex justify-between border-b border-border py-2 text-sm">
-                  <span className={r.status === 'failed' ? 'text-red-600' : ''}>{r.status}</span>
-                  <span className="text-muted-foreground">{r.completedAt ? new Date(r.completedAt).toLocaleString() : '—'}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </div>
+      {tab === 'reels' && pageId && (
+        <ReelsQueueWorkspace
+          pageId={pageId}
+          queue={queue}
+          canWrite={canWrite}
+          defaultHashtags={settings.hashtags}
+          onRefresh={loadQueue}
+          refreshing={queueRefreshing}
+        />
       )}
 
       {tab === 'failed' && (
@@ -605,43 +584,26 @@ export function AduPageDetailPage() {
             <section className="rounded-xl border border-border bg-card p-5">
               <h2 className="font-semibold">Update Content Source</h2>
               <p className="text-sm text-muted-foreground">Reels are downloaded from this account and posted to your page.</p>
-              {source ? (
-                <div className="mt-4 rounded-lg border border-border p-4">
-                  <p className="font-medium">{source.username}</p>
-                  <p className="text-sm text-muted-foreground">{source.platform} · {source.isActive ? 'Active' : 'Disabled'}</p>
-                </div>
-              ) : (
-                <p className="mt-4 text-sm text-muted-foreground">No source assigned yet.</p>
-              )}
-              {canWrite && (
-                <div className="mt-4 space-y-2">
-                  <label className="text-sm font-medium">Assign source account</label>
-                  {availableSources.length ? (
-                    <select
-                      value={source?.id ?? ''}
-                      disabled={assigningSource}
-                      onChange={(e) => handleAssignSource(e.target.value)}
-                      className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm disabled:opacity-50"
-                    >
-                      <option value="" disabled>
-                        {source ? 'Change source…' : 'Select source…'}
-                      </option>
-                      {availableSources.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.username} ({s.platform})
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      No sources yet — add one under{' '}
-                      <Link to="/facebook/auto-download-upload" className="text-primary hover:underline">
-                        Auto Download/Upload → Source Accounts
-                      </Link>
-                    </p>
-                  )}
-                </div>
-              )}
+              <div className="mt-4 rounded-lg border border-border p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Current Source</p>
+                {source ? (
+                  <>
+                    <p className="mt-1 font-medium">@{source.username.replace(/^@/, '')}</p>
+                    <p className="text-sm text-muted-foreground capitalize">{source.platform} · {source.isActive ? 'Active' : 'Disabled'}</p>
+                  </>
+                ) : (
+                  <p className="mt-1 text-sm text-muted-foreground">No source assigned yet.</p>
+                )}
+                {canWrite ? (
+                  <button
+                    type="button"
+                    onClick={() => setSwitchSourceOpen(true)}
+                    className="mt-3 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+                  >
+                    Update Content Source
+                  </button>
+                ) : null}
+              </div>
             </section>
           )}
 
@@ -655,6 +617,15 @@ export function AduPageDetailPage() {
           )}
         </div>
       )}
+      {pageId ? (
+        <SwitchSourceModal
+          open={switchSourceOpen}
+          pageId={pageId}
+          currentSource={source}
+          onClose={() => setSwitchSourceOpen(false)}
+          onComplete={handleSourceSwitched}
+        />
+      ) : null}
     </div>
   )
 }

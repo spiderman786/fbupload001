@@ -290,6 +290,8 @@ function migrate() {
     ['metadata_stripped', 'INTEGER NOT NULL DEFAULT 0'],
     ['job_type', "TEXT NOT NULL DEFAULT 'scheduled'"],
     ['source_reel_id', 'TEXT'],
+    ['caption', 'TEXT'],
+    ['thumbnail_path', 'TEXT'],
   ]
   for (const [col, type] of jobMigrations) {
     if (!jobNames.has(col)) db.exec(`ALTER TABLE reel_jobs ADD COLUMN ${col} ${type}`)

@@ -53,11 +53,20 @@ automationRouter.put('/assignments/:pageId', requireRole('owner', 'admin'), (req
     return
   }
 
+  const previous = db
+    .prepare('SELECT source_account_id FROM page_source_assignments WHERE page_id = ? AND agency_id = ?')
+    .get(req.params.pageId, req.agency!.id) as { source_account_id: string } | undefined
+
   db.prepare(`
     INSERT INTO page_source_assignments (page_id, source_account_id, user_id, agency_id)
     VALUES (?, ?, ?, ?)
     ON CONFLICT(page_id) DO UPDATE SET source_account_id = excluded.source_account_id, agency_id = excluded.agency_id
   `).run(req.params.pageId, sourceId, req.user!.id, req.agency!.id)
+
+  if (!previous || previous.source_account_id !== sourceId) {
+    const { purgeQueuedJobsForPage } = await import('../services/queueActions.js')
+    purgeQueuedJobsForPage(req.params.pageId, req.agency!.id)
+  }
 
   void import('../services/prefillScheduler.js').then((m) => m.tickPrefillQueue())
 

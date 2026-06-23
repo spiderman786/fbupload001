@@ -81,6 +81,17 @@ export const api = {
       request<{ posts: PageFailedPost[]; reasons: PageFailedReason[] }>(`/pages/${id}/failed-posts`),
     reels: (id: string) =>
       request<{ queue: PageQueueItem[]; history: PageReelHistoryItem[] }>(`/pages/${id}/reels`),
+    queuePreviewUrl: (pageId: string, jobId: string, kind: 'video' | 'thumb' = 'video') =>
+      `${BASE}/pages/${pageId}/queue/${jobId}/preview${kind === 'thumb' ? '?type=thumb' : ''}`,
+    updateQueueCaption: (pageId: string, jobId: string, caption: string) =>
+      request<{ caption: string }>(`/pages/${pageId}/queue/${jobId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ caption }),
+      }),
+    skipQueueItem: (pageId: string, jobId: string) =>
+      request<{ message: string }>(`/pages/${pageId}/queue/${jobId}/skip`, { method: 'POST' }),
+    deleteQueueItem: (pageId: string, jobId: string) =>
+      request<{ message: string }>(`/pages/${pageId}/queue/${jobId}`, { method: 'DELETE' }),
     updateAutomationSettings: (
       id: string,
       body: { postsPerDay?: number; postingLogic?: string; timezone?: string; scheduleTimes?: string[]; hashtags?: string[] },
@@ -607,8 +618,13 @@ export type PageQueueItem = {
   id: string
   status: string
   sourceUrl: string | null
+  sourceReelId?: string | null
   sourceUsername: string | null
+  sourcePlatform?: string | null
+  caption?: string | null
   createdAt: string
+  hasPreview?: boolean
+  hasThumbnail?: boolean
 }
 
 export type PageFailedPost = {

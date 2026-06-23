@@ -2,7 +2,7 @@ import path from 'path'
 import fs from 'fs'
 import { v4 as uuid } from 'uuid'
 import { db } from '../db.js'
-import { downloadReelFromUrl, stripVideoMetadata, cleanupJobFiles } from './downloader.js'
+import { downloadReelFromUrl, stripVideoMetadata, cleanupJobFiles, fetchReelMetadata, downloadThumbnail } from './downloader.js'
 import { getPageAccessToken, publishReelVideo } from './publisher.js'
 import { isFacebookConfiguredForAgency } from './byoc.js'
 import { discoverNextReel } from './reelDiscovery.js'
@@ -157,7 +157,7 @@ async function publishCleanedFile(
       page.meta_page_id as string,
       pageToken,
       cleanedPath,
-      `Reel from ${source.username}`,
+      (loadJob(jobId).caption as string | null) || `Reel from ${source.username}`,
     )
     postId = result.postId
     appendJobLog(jobId, 'publish', `Published ${postId}`)
@@ -209,8 +209,14 @@ async function runPrefillJob(jobId: string) {
   const { agencyId, pageId, sourceId, source } = ctx
 
   db.prepare("UPDATE reel_jobs SET status = 'downloading' WHERE id = ?").run(jobId)
-  await downloadAndClean(agencyId, jobId, source, pageId, sourceId)
+  const { discovered, download, cleanedPath } = await downloadAndClean(agencyId, jobId, source, pageId, sourceId)
 
+  const meta = await fetchReelMetadata(download.sourceUrl)
+  const defaultCaption = `Reel from @${String(source.username).replace(/^@/, '')}`
+  const caption = meta?.description || meta?.title || defaultCaption
+  const thumbPath = meta?.thumbnailUrl ? await downloadThumbnail(meta.thumbnailUrl, path.dirname(cleanedPath)) : null
+
+  db.prepare('UPDATE reel_jobs SET caption = ?, thumbnail_path = ? WHERE id = ?').run(caption, thumbPath, jobId)
   db.prepare("UPDATE reel_jobs SET status = 'queued' WHERE id = ?").run(jobId)
   appendJobLog(jobId, 'queued', 'Reel ready in publish queue')
 }

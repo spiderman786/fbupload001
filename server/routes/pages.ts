@@ -17,6 +17,13 @@ import {
 } from '../services/pageDetail.js'
 import { getPageInsights } from '../services/pageInsights.js'
 import { upsertPageAutomationSettings, getPageAutomationSettings } from '../services/pageAutomationSettings.js'
+import {
+  getQueuedJobForPage,
+  updateQueuedCaption,
+  removeQueuedJob,
+  resolveQueueMediaPath,
+} from '../services/queueActions.js'
+import path from 'path'
 
 export const pagesRouter = Router()
 pagesRouter.use(authMiddleware, requireVerified, agencyMiddleware)
@@ -241,6 +248,85 @@ pagesRouter.get('/:id/reels', (req: AgencyRequest, res) => {
     queue: getPageQueue(req.params.id),
     history: getPageReelsHistory(req.params.id),
   })
+})
+
+pagesRouter.get('/:pageId/queue/:jobId/preview', (req: AgencyRequest, res) => {
+  const pageId = req.params.pageId
+  if (!requirePage(req, pageId)) {
+    res.status(404).json({ error: 'Page not found' })
+    return
+  }
+  const job = getQueuedJobForPage(req.params.jobId, pageId, req.agency!.id)
+  if (!job) {
+    res.status(404).json({ error: 'Queued reel not found' })
+    return
+  }
+  const kind = req.query.type === 'thumb' ? 'thumbnail' : 'video'
+  const filePath = resolveQueueMediaPath(job, kind === 'thumbnail' ? 'thumbnail' : 'video')
+  if (!filePath) {
+    res.status(404).json({ error: 'Media not available' })
+    return
+  }
+  const ext = path.extname(filePath).toLowerCase()
+  const type =
+    kind === 'thumbnail'
+      ? ext === '.webp'
+        ? 'image/webp'
+        : 'image/jpeg'
+      : 'video/mp4'
+  res.setHeader('Content-Type', type)
+  res.sendFile(path.resolve(filePath))
+})
+
+pagesRouter.patch('/:pageId/queue/:jobId', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
+  const pageId = req.params.pageId
+  if (!requirePage(req, pageId)) {
+    res.status(404).json({ error: 'Page not found' })
+    return
+  }
+  const { caption } = req.body ?? {}
+  if (typeof caption !== 'string') {
+    res.status(400).json({ error: 'caption is required' })
+    return
+  }
+  try {
+    const saved = updateQueuedCaption(req.params.jobId, pageId, req.agency!.id, caption)
+    res.json({ caption: saved })
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Update failed' })
+  }
+})
+
+pagesRouter.delete('/:pageId/queue/:jobId', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
+  const pageId = req.params.pageId
+  if (!requirePage(req, pageId)) {
+    res.status(404).json({ error: 'Page not found' })
+    return
+  }
+  try {
+    removeQueuedJob(req.params.jobId, pageId, req.agency!.id)
+    const { tickPrefillQueue } = await import('../services/prefillScheduler.js')
+    tickPrefillQueue()
+    res.json({ message: 'Removed from queue' })
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Delete failed' })
+  }
+})
+
+pagesRouter.post('/:pageId/queue/:jobId/skip', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
+  const pageId = req.params.pageId
+  if (!requirePage(req, pageId)) {
+    res.status(404).json({ error: 'Page not found' })
+    return
+  }
+  try {
+    removeQueuedJob(req.params.jobId, pageId, req.agency!.id)
+    const { tickPrefillQueue } = await import('../services/prefillScheduler.js')
+    tickPrefillQueue()
+    res.json({ message: 'Skipped — next reel will pre-download' })
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Skip failed' })
+  }
 })
 
 pagesRouter.patch('/:id/automation-settings', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {

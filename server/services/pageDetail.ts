@@ -128,7 +128,9 @@ export function getPageDetail(pageId: string, agencyId: string) {
 export function getPageQueue(pageId: string) {
   return db
     .prepare(`
-      SELECT r.id, r.status, r.source_url, r.source_reel_id, r.created_at, s.username as source_username
+      SELECT r.id, r.status, r.source_url, r.source_reel_id, r.created_at, r.caption,
+        r.thumbnail_path, r.cleaned_file_path,
+        s.username as source_username, s.platform as source_platform
       FROM reel_jobs r
       LEFT JOIN source_accounts s ON s.id = r.source_account_id
       WHERE r.target_page_id = ? AND r.status = 'queued'
@@ -144,7 +146,11 @@ export function getPageQueue(pageId: string) {
         sourceUrl: r.source_url,
         sourceReelId: r.source_reel_id,
         sourceUsername: r.source_username,
+        sourcePlatform: r.source_platform ?? 'instagram',
+        caption: r.caption,
         createdAt: r.created_at,
+        hasPreview: Boolean(r.cleaned_file_path),
+        hasThumbnail: Boolean(r.thumbnail_path),
       }
     })
 }

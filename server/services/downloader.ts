@@ -16,6 +16,12 @@ export type DownloadResult = {
   mock: boolean
 }
 
+export type ReelMetadata = {
+  title: string
+  description: string
+  thumbnailUrl: string
+}
+
 function ensureDir(dir: string) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
 }
@@ -98,6 +104,48 @@ export async function downloadReelFromUrl(
 
   writeMockVideo(outPath)
   return { filePath: outPath, sourceUrl, sourceReelId, mock: true }
+}
+
+/** Fetch title, description, and thumbnail URL via yt-dlp. */
+export async function fetchReelMetadata(sourceUrl: string): Promise<ReelMetadata | null> {
+  if (sourceUrl.startsWith('mock://')) return null
+  if (!(await hasYtDlp())) return null
+
+  try {
+    const baseArgs = [sourceUrl, '--dump-single-json', '--no-playlist', '--no-warnings']
+    const { stdout } = await execYtDlpWithProxyFallback(baseArgs, { timeout: 90_000, maxBuffer: 4 * 1024 * 1024 })
+    const data = JSON.parse(stdout) as {
+      title?: string
+      description?: string
+      thumbnail?: string
+      thumbnails?: { url?: string }[]
+    }
+    const thumbnailUrl = data.thumbnail ?? data.thumbnails?.at(-1)?.url ?? ''
+    return {
+      title: data.title?.trim() ?? '',
+      description: (data.description ?? data.title ?? '').trim(),
+      thumbnailUrl,
+    }
+  } catch (err) {
+    console.warn('[downloader] metadata fetch failed:', err)
+    return null
+  }
+}
+
+export async function downloadThumbnail(thumbnailUrl: string, jobDir: string): Promise<string | null> {
+  if (!thumbnailUrl) return null
+  try {
+    ensureDir(jobDir)
+    const res = await fetch(thumbnailUrl)
+    if (!res.ok) return null
+    const buf = Buffer.from(await res.arrayBuffer())
+    const ext = thumbnailUrl.includes('.webp') ? 'webp' : 'jpg'
+    const outPath = path.join(jobDir, `thumb.${ext}`)
+    fs.writeFileSync(outPath, buf)
+    return outPath
+  } catch {
+    return null
+  }
 }
 
 /** @deprecated use discoverNextReel + downloadReelFromUrl */
