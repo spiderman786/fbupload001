@@ -31,7 +31,7 @@ automationRouter.get('/assignments', (req: AgencyRequest, res) => {
   })
 })
 
-automationRouter.put('/assignments/:pageId', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
+automationRouter.put('/assignments/:pageId', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
   const { sourceId } = req.body ?? {}
   if (!sourceId || typeof sourceId !== 'string') {
     res.status(400).json({ error: 'sourceId is required' })
