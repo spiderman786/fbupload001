@@ -148,6 +148,23 @@ export async function downloadThumbnail(thumbnailUrl: string, jobDir: string): P
   }
 }
 
+/** Extract a poster frame from a local video when yt-dlp thumbnail is unavailable. */
+export async function extractVideoThumbnail(videoPath: string, jobDir: string): Promise<string | null> {
+  if (!fs.existsSync(videoPath)) return null
+  try {
+    ensureDir(jobDir)
+    const outPath = path.join(jobDir, 'thumb.jpg')
+    await execFileAsync(
+      'ffmpeg',
+      ['-y', '-ss', '00:00:01', '-i', videoPath, '-frames:v', '1', '-q:v', '2', outPath],
+      { timeout: 30_000 },
+    )
+    return fs.existsSync(outPath) ? outPath : null
+  } catch {
+    return null
+  }
+}
+
 /** @deprecated use discoverNextReel + downloadReelFromUrl */
 export async function downloadReelFromSource(
   tenantId: string,

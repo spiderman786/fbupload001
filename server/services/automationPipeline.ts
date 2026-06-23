@@ -2,7 +2,7 @@ import path from 'path'
 import fs from 'fs'
 import { v4 as uuid } from 'uuid'
 import { db } from '../db.js'
-import { downloadReelFromUrl, stripVideoMetadata, cleanupJobFiles, fetchReelMetadata, downloadThumbnail } from './downloader.js'
+import { downloadReelFromUrl, stripVideoMetadata, cleanupJobFiles, fetchReelMetadata, downloadThumbnail, extractVideoThumbnail } from './downloader.js'
 import { getPageAccessToken, publishReelVideo } from './publisher.js'
 import { isFacebookConfiguredForAgency } from './byoc.js'
 import { discoverNextReel } from './reelDiscovery.js'
@@ -221,7 +221,10 @@ async function runPrefillJob(jobId: string) {
     const meta = await fetchReelMetadata(download.sourceUrl)
     const defaultCaption = `Reel from @${String(source.username).replace(/^@/, '')}`
     const caption = meta?.description || meta?.title || defaultCaption
-    const thumbPath = meta?.thumbnailUrl ? await downloadThumbnail(meta.thumbnailUrl, path.dirname(cleanedPath)) : null
+    let thumbPath = meta?.thumbnailUrl ? await downloadThumbnail(meta.thumbnailUrl, path.dirname(cleanedPath)) : null
+    if (!thumbPath) {
+      thumbPath = await extractVideoThumbnail(cleanedPath, path.dirname(cleanedPath))
+    }
 
     db.prepare('UPDATE reel_jobs SET caption = ?, thumbnail_path = ? WHERE id = ?').run(caption, thumbPath, jobId)
     db.prepare("UPDATE reel_jobs SET status = 'queued' WHERE id = ?").run(jobId)

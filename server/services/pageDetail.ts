@@ -1,6 +1,7 @@
 import { db } from '../db.js'
 import { getPageAutomationSettings, ensurePageAutomationSettings } from './pageAutomationSettings.js'
 import { getPageScrapeInfo } from './scrapeStatus.js'
+import { queueItemHasPreview } from './queueActions.js'
 
 export function getAgencyPage(pageId: string, agencyId: string) {
   return db.prepare('SELECT * FROM facebook_pages WHERE id = ? AND agency_id = ?').get(pageId, agencyId) as
@@ -159,6 +160,7 @@ export function getPageQueue(pageId: string) {
     .all(pageId)
     .map((row) => {
       const r = row as Record<string, unknown>
+      const preview = queueItemHasPreview(r.cleaned_file_path, r.thumbnail_path)
       return {
         id: r.id,
         status: r.status,
@@ -168,8 +170,8 @@ export function getPageQueue(pageId: string) {
         sourcePlatform: r.source_platform ?? 'instagram',
         caption: r.caption,
         createdAt: r.created_at,
-        hasPreview: Boolean(r.cleaned_file_path),
-        hasThumbnail: Boolean(r.thumbnail_path),
+        hasPreview: preview.hasPreview,
+        hasThumbnail: preview.hasThumbnail,
       }
     })
 }

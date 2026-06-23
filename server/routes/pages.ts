@@ -23,6 +23,8 @@ import {
   updateQueuedCaption,
   removeQueuedJob,
   resolveQueueMediaPath,
+  ensureQueueThumbnail,
+  queueItemHasPreview,
 } from '../services/queueActions.js'
 import path from 'path'
 
@@ -251,7 +253,7 @@ pagesRouter.get('/:id/reels', (req: AgencyRequest, res) => {
   })
 })
 
-pagesRouter.get('/:pageId/queue/:jobId/preview', (req: AgencyRequest, res) => {
+pagesRouter.get('/:pageId/queue/:jobId/preview', async (req: AgencyRequest, res) => {
   const pageId = req.params.pageId
   if (!requirePage(req, pageId)) {
     res.status(404).json({ error: 'Page not found' })
@@ -263,7 +265,10 @@ pagesRouter.get('/:pageId/queue/:jobId/preview', (req: AgencyRequest, res) => {
     return
   }
   const kind = req.query.type === 'thumb' ? 'thumbnail' : 'video'
-  const filePath = resolveQueueMediaPath(job, kind === 'thumbnail' ? 'thumbnail' : 'video')
+  let filePath =
+    kind === 'thumbnail'
+      ? await ensureQueueThumbnail(job, req.params.jobId)
+      : resolveQueueMediaPath(job, 'video')
   if (!filePath) {
     res.status(404).json({ error: 'Media not available' })
     return

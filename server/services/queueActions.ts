@@ -1,6 +1,7 @@
 import fs from 'fs'
+import path from 'path'
 import { db } from '../db.js'
-import { cleanupJobFiles } from './downloader.js'
+import { cleanupJobFiles, extractVideoThumbnail } from './downloader.js'
 import { getAgencyPage } from './pageDetail.js'
 
 export function getQueuedJobForPage(jobId: string, pageId: string, agencyId: string) {
@@ -53,4 +54,25 @@ export function resolveQueueMediaPath(
   }
   const p = job.thumbnail_path as string | null
   return p && fs.existsSync(p) ? p : null
+}
+
+/** Generate thumbnail from video on demand and persist path for older queue rows. */
+export async function ensureQueueThumbnail(job: Record<string, unknown>, jobId: string): Promise<string | null> {
+  const existing = resolveQueueMediaPath(job, 'thumbnail')
+  if (existing) return existing
+
+  const video = job.cleaned_file_path as string | null
+  if (!video || !fs.existsSync(video)) return null
+
+  const generated = await extractVideoThumbnail(video, path.dirname(video))
+  if (!generated) return null
+
+  db.prepare('UPDATE reel_jobs SET thumbnail_path = ? WHERE id = ?').run(generated, jobId)
+  return generated
+}
+
+export function queueItemHasPreview(cleanedPath: unknown, thumbnailPath: unknown): { hasPreview: boolean; hasThumbnail: boolean } {
+  const video = typeof cleanedPath === 'string' && cleanedPath && fs.existsSync(cleanedPath)
+  const thumb = typeof thumbnailPath === 'string' && thumbnailPath && fs.existsSync(thumbnailPath)
+  return { hasPreview: video, hasThumbnail: thumb || video }
 }
