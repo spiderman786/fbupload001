@@ -6,6 +6,8 @@ import { agencyMiddleware, requireRole } from '../middleware/agency.js'
 import { enqueueDirectJob } from '../services/jobWorker.js'
 import { bulkDeletePosts, listPagePosts } from '../services/publisher.js'
 import { isFacebookConfiguredForAgency } from '../services/byoc.js'
+import { purgeQueuedJobsForPage } from '../services/queueActions.js'
+import { tickPrefillQueue } from '../services/prefillScheduler.js'
 import type { AgencyRequest } from '../utils/agency.js'
 
 export const automationRouter = Router()
@@ -64,11 +66,10 @@ automationRouter.put('/assignments/:pageId', requireRole('owner', 'admin'), (req
   `).run(req.params.pageId, sourceId, req.user!.id, req.agency!.id)
 
   if (!previous || previous.source_account_id !== sourceId) {
-    const { purgeQueuedJobsForPage } = await import('../services/queueActions.js')
     purgeQueuedJobsForPage(req.params.pageId, req.agency!.id)
   }
 
-  void import('../services/prefillScheduler.js').then((m) => m.tickPrefillQueue())
+  void tickPrefillQueue()
 
   res.json({ message: 'Source assigned to page' })
 })
