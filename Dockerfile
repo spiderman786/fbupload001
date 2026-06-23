@@ -34,5 +34,5 @@ ENV DATABASE_PATH=/app/data/fbuploadpro.db
 
 EXPOSE 3001
 
-# Railway web service — override worker service with: npm run worker
-CMD ["npm", "start"]
+# Default: web + background worker (prefill queue, scheduler, job processing)
+CMD ["npm", "run", "start:production"]
