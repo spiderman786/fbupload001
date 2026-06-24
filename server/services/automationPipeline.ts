@@ -7,7 +7,8 @@ import { getPageAccessToken, publishReelVideo } from './publisher.js'
 import { isFacebookConfiguredForAgency } from './byoc.js'
 import { discoverNextReel } from './reelDiscovery.js'
 import { recordPostedReel } from './dedup.js'
-import { canPagePostToday } from './pageQuota.js'
+import { canPagePostToday, refreshPagePostedToday } from './pageQuota.js'
+import { markPageHealthCompleted } from './pageHealth.js'
 import { appendJobLog } from './jobLog.js'
 import { maybeAutoRetryJob } from './autoRetry.js'
 import { applySelfHealingOnJobFailure, resetPageFailureStreak, resetSourceFailureStreak } from './selfHealing.js'
@@ -197,6 +198,9 @@ async function publishCleanedFile(
       jobId,
     })
   })()
+
+  refreshPagePostedToday(pageId)
+  markPageHealthCompleted(pageId)
 
   appendJobLog(jobId, 'complete', 'Job finished successfully')
   resetPageFailureStreak(pageId)

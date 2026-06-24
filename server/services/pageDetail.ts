@@ -2,6 +2,7 @@ import { db } from '../db.js'
 import { getPageAutomationSettings, ensurePageAutomationSettings } from './pageAutomationSettings.js'
 import { getPageScrapeInfo } from './scrapeStatus.js'
 import { queueItemHasPreview } from './queueActions.js'
+import { getPageTodayStats, syncPagePostedToday } from '../utils/pageDayStats.js'
 
 export function getAgencyPage(pageId: string, agencyId: string) {
   return db.prepare('SELECT * FROM facebook_pages WHERE id = ? AND agency_id = ?').get(pageId, agencyId) as
@@ -64,25 +65,11 @@ export function getPageDetail(pageId: string, agencyId: string) {
         ).c
 
   const dailyLimit = Number(page.daily_reel_limit ?? settings.postsPerDay)
-  const postedToday = Number(page.reels_posted_today ?? 0)
-
-  const errorsToday = (
-    db
-      .prepare(`
-        SELECT COUNT(*) as c FROM reel_jobs
-        WHERE target_page_id = ? AND status = 'failed' AND date(completed_at) = date('now')
-      `)
-      .get(pageId) as { c: number }
-  ).c
-
-  const publishedToday = (
-    db
-      .prepare(`
-        SELECT COUNT(*) as c FROM reel_jobs
-        WHERE target_page_id = ? AND status = 'published' AND date(completed_at) = date('now')
-      `)
-      .get(pageId) as { c: number }
-  ).c
+  const todayStats = getPageTodayStats(pageId)
+  syncPagePostedToday(pageId)
+  const postedToday = todayStats.publishedToday
+  const errorsToday = todayStats.errorsToday
+  const publishedToday = todayStats.publishedToday
 
   const reelsStarted = (
     db.prepare('SELECT COUNT(*) as c FROM reel_jobs WHERE target_page_id = ?').get(pageId) as { c: number }

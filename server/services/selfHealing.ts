@@ -1,6 +1,7 @@
 import { db } from '../db.js'
 import { appendJobLog } from './jobLog.js'
 import { isPlatformFlagEnabled } from './platformSettings.js'
+import { applyPageHealthFromError } from './pageHealth.js'
 
 const PAGE_FAIL_MAX = Number(process.env.OPS_SELF_HEAL_PAGE_FAIL_MAX ?? 5)
 const SOURCE_FAIL_MAX = Number(process.env.OPS_SELF_HEAL_SOURCE_FAIL_MAX ?? 8)
@@ -16,6 +17,7 @@ export function applySelfHealingOnJobFailure(jobId: string, errorMessage: string
   const msg = errorMessage.toLowerCase()
 
   if (job.target_page_id && /403|401|oauth|token|permission|blocked|meta api|facebook/i.test(msg)) {
+    applyPageHealthFromError(job.target_page_id, errorMessage, 'publish')
     const page = db
       .prepare('SELECT id, name, consecutive_failures, status FROM facebook_pages WHERE id = ?')
       .get(job.target_page_id) as
@@ -34,6 +36,7 @@ export function applySelfHealingOnJobFailure(jobId: string, errorMessage: string
   }
 
   if (job.source_account_id && /download|proxy|yt-dlp|timeout|429|blocked|rate/i.test(msg)) {
+    if (job.target_page_id) applyPageHealthFromError(job.target_page_id, errorMessage, 'download')
     const source = db
       .prepare('SELECT id, username, consecutive_failures, is_active FROM source_accounts WHERE id = ?')
       .get(job.source_account_id) as

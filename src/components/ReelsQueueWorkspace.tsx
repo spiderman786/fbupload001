@@ -103,6 +103,9 @@ function ReelCurationModal({
   const [draftCaption, setDraftCaption] = useState(item.caption ?? '')
   const [saving, setSaving] = useState(false)
   const [acting, setActing] = useState(false)
+  const [refreshingPreview, setRefreshingPreview] = useState(false)
+
+  const needsPreview = !item.hasPreview || !item.hasThumbnail
 
   useEffect(() => {
     setDraftCaption(item.caption ?? '')
@@ -138,6 +141,20 @@ function ReelCurationModal({
       toast.error(getApiError(err, 'Skip failed'))
     } finally {
       setActing(false)
+    }
+  }
+
+  async function refreshPreview() {
+    if (!canWrite) return
+    setRefreshingPreview(true)
+    try {
+      await api.pages.refreshQueueItem(pageId, item.id)
+      toast.success('Preview refreshed')
+      onRefresh()
+    } catch (err) {
+      toast.error(getApiError(err, 'Could not refresh preview'))
+    } finally {
+      setRefreshingPreview(false)
     }
   }
 
@@ -190,6 +207,17 @@ function ReelCurationModal({
 
         <div className="space-y-5 p-5">
           <ReelPhonePreview pageId={pageId} item={item} draftCaption={draftCaption} />
+          {needsPreview && canWrite ? (
+            <button
+              type="button"
+              onClick={refreshPreview}
+              disabled={refreshingPreview || acting}
+              className="mx-auto flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshingPreview ? 'animate-spin' : ''}`} />
+              {refreshingPreview ? 'Refreshing preview…' : 'Refresh preview'}
+            </button>
+          ) : null}
 
           <div className="rounded-xl border border-border bg-card p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
@@ -263,7 +291,11 @@ function ReelCurationModal({
 }
 
 export function ReelsQueueWorkspace({ pageId, queue, canWrite, defaultHashtags = [], onRefresh, refreshing }: Props) {
+  const toast = useToast()
   const [modalItemId, setModalItemId] = useState<string | null>(null)
+  const [refreshingMissing, setRefreshingMissing] = useState(false)
+
+  const missingPreviewCount = queue.filter((item) => !item.hasPreview || !item.hasThumbnail).length
 
   const modalItem = useMemo(
     () => queue.find((q) => q.id === modalItemId) ?? null,
@@ -276,6 +308,20 @@ export function ReelsQueueWorkspace({ pageId, queue, canWrite, defaultHashtags =
     }
   }, [queue, modalItemId])
 
+  async function refreshMissingPreviews() {
+    if (!canWrite || !missingPreviewCount) return
+    setRefreshingMissing(true)
+    try {
+      const result = await api.pages.refreshMissingQueuePreviews(pageId)
+      toast.success(`Refreshed ${result.refreshed} of ${result.attempted} preview${result.attempted !== 1 ? 's' : ''}`)
+      onRefresh()
+    } catch (err) {
+      toast.error(getApiError(err, 'Could not refresh previews'))
+    } finally {
+      setRefreshingMissing(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <section className="rounded-xl border border-border bg-card p-5">
@@ -286,15 +332,28 @@ export function ReelsQueueWorkspace({ pageId, queue, canWrite, defaultHashtags =
               View, edit captions, skip or purge reels from the automatic publication queue.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={refreshing}
-            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-50"
-          >
-            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {missingPreviewCount > 0 && canWrite ? (
+              <button
+                type="button"
+                onClick={refreshMissingPreviews}
+                disabled={refreshingMissing || refreshing}
+                className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshingMissing ? 'animate-spin' : ''}`} />
+                Fix {missingPreviewCount} preview{missingPreviewCount !== 1 ? 's' : ''}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={refreshing || refreshingMissing}
+              className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </div>
         </div>
 
         <div className="mt-5">
@@ -339,7 +398,7 @@ export function ReelsQueueWorkspace({ pageId, queue, canWrite, defaultHashtags =
                       {!item.hasThumbnail && !item.hasPreview ? (
                         <div className="flex h-full flex-col items-center justify-center gap-1 px-2 text-center text-xs text-muted-foreground">
                           <span>No preview</span>
-                          <span className="text-[10px]">Skip to re-download</span>
+                          <span className="text-[10px]">Click to fix preview</span>
                         </div>
                       ) : null}
                       <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-md bg-black/75 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">

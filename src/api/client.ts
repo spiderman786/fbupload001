@@ -92,6 +92,16 @@ export const api = {
       request<{ message: string }>(`/pages/${pageId}/queue/${jobId}/skip`, { method: 'POST' }),
     deleteQueueItem: (pageId: string, jobId: string) =>
       request<{ message: string }>(`/pages/${pageId}/queue/${jobId}`, { method: 'DELETE' }),
+    refreshQueueItem: (pageId: string, jobId: string) =>
+      request<{ jobId: string; hasPreview: boolean; hasThumbnail: boolean; refreshed: string }>(
+        `/pages/${pageId}/queue/${jobId}/refresh`,
+        { method: 'POST' },
+      ),
+    refreshMissingQueuePreviews: (pageId: string) =>
+      request<{ attempted: number; refreshed: number; failed: number; results: { jobId: string; ok: boolean; error?: string }[] }>(
+        `/pages/${pageId}/queue/refresh-missing`,
+        { method: 'POST' },
+      ),
     updateAutomationSettings: (
       id: string,
       body: {

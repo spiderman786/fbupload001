@@ -25,15 +25,27 @@ import {
   resolveQueueMediaPath,
   ensureQueueThumbnail,
   queueItemHasPreview,
+  refreshQueueItemMedia,
+  refreshMissingQueuePreviews,
 } from '../services/queueActions.js'
+import { getTodayStatsForPages } from '../utils/pageDayStats.js'
+import { getPageQuota } from '../services/pageQuota.js'
 import path from 'path'
 
 export const pagesRouter = Router()
 pagesRouter.use(authMiddleware, requireVerified, agencyMiddleware)
 
-function mapPage(row: Record<string, unknown>) {
+function mapPage(row: Record<string, unknown>, todayOverride?: { posted: number; failed: number; pending: number }) {
   const dailyReelLimit = Number(row.daily_reel_limit ?? 6)
-  const reelsPostedToday = Number(row.reels_posted_today ?? 0)
+  const quota = todayOverride
+    ? {
+        reelsPostedToday: todayOverride.posted,
+        reelsRemainingToday: row.status === 'active' ? Math.max(0, dailyReelLimit - todayOverride.posted) : 0,
+      }
+    : (() => {
+        const q = getPageQuota(row.id as string)
+        return { reelsPostedToday: q.posted, reelsRemainingToday: row.status === 'active' ? q.remaining : 0 }
+      })()
   return {
     id: row.id,
     metaPageId: row.meta_page_id,
@@ -42,9 +54,9 @@ function mapPage(row: Record<string, unknown>) {
     status: row.status,
     healthStatus: row.health_status ?? 'completed',
     followersGained: row.followers_gained ?? 0,
-    reelsPostedToday,
+    reelsPostedToday: quota.reelsPostedToday,
     dailyReelLimit,
-    reelsRemainingToday: row.status === 'active' ? Math.max(0, dailyReelLimit - reelsPostedToday) : 0,
+    reelsRemainingToday: quota.reelsRemainingToday,
     lastPublishedAt: row.last_published_at,
     createdAt: row.created_at,
     lastFollowersSyncAt: row.last_followers_sync_at ?? null,
@@ -114,37 +126,39 @@ pagesRouter.get('/hub', (req: AgencyRequest, res) => {
       (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id) AS reels_started,
       (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status = 'published') AS total_posted,
       (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status = 'queued') AS total_pending,
-      (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status = 'failed') AS total_failed,
-      (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status = 'published' AND date(completed_at) = date('now')) AS today_posted,
-      (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status = 'failed' AND date(completed_at) = date('now')) AS today_failed,
-      (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status = 'queued' AND date(created_at) = date('now')) AS today_pending
+      (SELECT COUNT(*) FROM reel_jobs WHERE target_page_id = p.id AND status = 'failed') AS total_failed
     FROM facebook_pages p
     ${where}
     ORDER BY ${orderClause}
     LIMIT ? OFFSET ?
   `
   const rows = db.prepare(query).all(...params, perPage, offset) as Record<string, unknown>[]
+  const pageIds = rows.map((row) => row.id as string)
+  const todayByPage = getTodayStatsForPages(pageIds)
 
-  let pages = rows.map((row) => ({
-    ...mapPage(row),
-    sourceUsername: (row.source_username as string | null) ?? null,
-    sourcePlatform: (row.source_platform as string | null) ?? null,
-    facebookAccountName: (row.facebook_account_name as string | null) ?? null,
-    reelsStarted: Number(row.reels_started ?? 0),
-    followersNumeric: Number(row.followers_count ?? parseFollowers(String(row.followers ?? '0'))),
-    stats: {
-      total: {
-        posted: Number(row.total_posted ?? 0),
-        pending: Number(row.total_pending ?? 0),
-        failed: Number(row.total_failed ?? 0),
+  let pages = rows.map((row) => {
+    const today = todayByPage.get(row.id as string) ?? { posted: 0, failed: 0, pending: 0 }
+    return {
+      ...mapPage(row, today),
+      sourceUsername: (row.source_username as string | null) ?? null,
+      sourcePlatform: (row.source_platform as string | null) ?? null,
+      facebookAccountName: (row.facebook_account_name as string | null) ?? null,
+      reelsStarted: Number(row.reels_started ?? 0),
+      followersNumeric: Number(row.followers_count ?? parseFollowers(String(row.followers ?? '0'))),
+      stats: {
+        total: {
+          posted: Number(row.total_posted ?? 0),
+          pending: Number(row.total_pending ?? 0),
+          failed: Number(row.total_failed ?? 0),
+        },
+        today: {
+          pending: today.pending,
+          posted: today.posted,
+          failed: today.failed,
+        },
       },
-      today: {
-        pending: Number(row.today_pending ?? 0),
-        posted: Number(row.today_posted ?? 0),
-        failed: Number(row.today_failed ?? 0),
-      },
-    },
-  }))
+    }
+  })
 
   if (sort === 'followers') {
     pages = pages.sort((a, b) => b.followersNumeric - a.followersNumeric)
@@ -316,6 +330,34 @@ pagesRouter.delete('/:pageId/queue/:jobId', requireRole('owner', 'admin'), async
     res.json({ message: 'Removed from queue' })
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Delete failed' })
+  }
+})
+
+pagesRouter.post('/:pageId/queue/:jobId/refresh', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
+  const pageId = req.params.pageId
+  if (!requirePage(req, pageId)) {
+    res.status(404).json({ error: 'Page not found' })
+    return
+  }
+  try {
+    const result = await refreshQueueItemMedia(req.params.jobId, pageId, req.agency!.id)
+    res.json(result)
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Refresh failed' })
+  }
+})
+
+pagesRouter.post('/:pageId/queue/refresh-missing', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
+  const pageId = req.params.pageId
+  if (!requirePage(req, pageId)) {
+    res.status(404).json({ error: 'Page not found' })
+    return
+  }
+  try {
+    const result = await refreshMissingQueuePreviews(pageId, req.agency!.id)
+    res.json(result)
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Refresh failed' })
   }
 })
 

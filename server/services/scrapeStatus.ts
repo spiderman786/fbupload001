@@ -1,4 +1,5 @@
 import { db } from '../db.js'
+import { applyPageHealthFromError, inferHealthStatusFromError } from './pageHealth.js'
 
 export type ScrapeStatusKey =
   | 'none'
@@ -144,11 +145,22 @@ function isSourceExhaustedError(message: string): boolean {
 }
 
 export function handlePrefillDiscoveryFailure(pageId: string, sourceAccountId: string, message: string) {
+  applyPageHealthFromError(pageId, message, 'scrape')
+
   if (isInvalidUsernameError(message)) {
     db.prepare(`
       UPDATE page_source_assignments SET scrape_status = 'scraping_error', scrape_error = ? WHERE page_id = ?
     `).run(message.slice(0, 500), pageId)
     db.prepare("UPDATE facebook_pages SET health_status = 'invalid_username' WHERE id = ?").run(pageId)
+    return
+  }
+
+  const scrapeHealth = inferHealthStatusFromError(message, 'scrape')
+  if (scrapeHealth === 'creator_suspended') {
+    db.prepare(`
+      UPDATE page_source_assignments SET scrape_status = 'scraping_error', scrape_error = ? WHERE page_id = ?
+    `).run(message.slice(0, 500), pageId)
+    db.prepare("UPDATE facebook_pages SET health_status = 'creator_suspended' WHERE id = ?").run(pageId)
     return
   }
 

@@ -1,6 +1,7 @@
 import { v4 as uuid } from 'uuid'
 import { db } from '../db.js'
 import { getPageAutomationSettings } from './pageAutomationSettings.js'
+import { getPageQuota } from './pageQuota.js'
 
 export type QueueJobType = 'direct' | 'inapp' | 'scheduled' | 'prefill'
 
@@ -32,15 +33,14 @@ export function countPrefillInflight(pageId: string): number {
 }
 
 export function getPrefillTarget(pageId: string): number {
-  const page = db.prepare('SELECT daily_reel_limit, reels_posted_today FROM facebook_pages WHERE id = ?').get(pageId) as
-    | { daily_reel_limit: number; reels_posted_today: number }
+  const page = db.prepare('SELECT daily_reel_limit FROM facebook_pages WHERE id = ?').get(pageId) as
+    | { daily_reel_limit: number }
     | undefined
   if (!page) return 0
 
   const settings = getPageAutomationSettings(pageId)
   const dailyLimit = Number(page.daily_reel_limit ?? settings.postsPerDay)
-  const postedToday = Number(page.reels_posted_today ?? 0)
-  const remainingToday = Math.max(0, dailyLimit - postedToday)
+  const { remaining: remainingToday } = getPageQuota(pageId)
 
   // Keep today's remaining slots plus one full day buffer (Pro-style backlog).
   return Math.min(maxQueuePerPage(), remainingToday + dailyLimit)

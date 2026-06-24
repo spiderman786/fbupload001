@@ -9,6 +9,7 @@ import { resetAllDailyQuotas } from './pageQuota.js'
 import { runMaintenance } from './cleanup.js'
 import { processPageAutomationSchedules } from './pageSchedule.js'
 import { DEFAULT_SCHEDULE_TIMEZONE, getCurrentTimeHHMM } from '../utils/timezone.js'
+import { tickTimezoneQuotaResets } from '../utils/pageDayStats.js'
 import { SCHEDULER_PAGES_BATCH_SIZE } from '../utils/pagination.js'
 
 const scheduleOffsets = new Map<string, number>()
@@ -104,6 +105,7 @@ function tickScheduler() {
   if (scheduling) return
   scheduling = true
   try {
+    tickTimezoneQuotaResets()
     processScheduledSlots('direct')
     processScheduledSlots('inapp')
     processPageAutomationSchedules()
