@@ -456,6 +456,9 @@ function migrateScrapeAndSchedule() {
   if (!assignNames.has('source_assigned_at')) {
     db.exec(`ALTER TABLE page_source_assignments ADD COLUMN source_assigned_at TEXT`)
   }
+  if (!assignNames.has('catalog_total')) {
+    db.exec(`ALTER TABLE page_source_assignments ADD COLUMN catalog_total INTEGER`)
+  }
 
   const pasCols = db.prepare('PRAGMA table_info(page_automation_settings)').all() as { name: string }[]
   const pasNames = new Set(pasCols.map((c) => c.name))

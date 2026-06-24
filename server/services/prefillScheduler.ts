@@ -4,6 +4,23 @@ import { fillPagePrefillQueue, isPrefillEnabled, listActivePagesWithSource } fro
 
 let prefilling = false
 
+export function tickPrefillQueueForPage(pageId: string, burst = false) {
+  if (!isPrefillEnabled()) return 0
+
+  const page = listActivePagesWithSource().find((p) => p.id === pageId)
+  if (!page) return 0
+
+  let created = 0
+  for (const jobId of fillPagePrefillQueue(page, { burst })) {
+    enqueueJob(jobId)
+    created++
+  }
+  if (created > 0) {
+    console.log(`[prefill] Queued ${created} job(s) for page ${pageId}${burst ? ' (initial burst)' : ''}`)
+  }
+  return created
+}
+
 export function tickPrefillQueue() {
   if (!isPrefillEnabled() || prefilling) return
   prefilling = true

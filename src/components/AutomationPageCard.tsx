@@ -1,4 +1,4 @@
-import { ChevronRight, Music2, Share2, Trash2 } from 'lucide-react'
+import { ChevronRight, Download, Loader2, Music2, Share2, Trash2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import type { AutomationPage } from '../api/client'
 import { AutomationStatusBadge } from './HealthStatusBadge'
@@ -51,6 +51,41 @@ export function AutomationPageCard({
     today: { pending: 0, posted: 0, failed: 0 },
   }
   const sourcePlatform = page.sourcePlatform ?? sources?.find((s) => s.id === assignedSourceId)?.platform
+  const scrape = page.scrape
+
+  function scrapeLine() {
+    if (!scrape || scrape.status === 'none') return null
+    if (scrape.status === 'pending_scrap') {
+      const catalog =
+        scrape.catalogTotal != null && scrape.catalogTotal > 0
+          ? `${scrape.totalScraped} / ${scrape.catalogTotal}`
+          : `${scrape.totalScraped} scraped`
+      return (
+        <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          Scraping · {catalog}
+        </span>
+      )
+    }
+    if (scrape.status === 'scraping_pending') {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+          <Download className="h-3 w-3" />
+          Scraping pending
+        </span>
+      )
+    }
+    if (scrape.totalScraped > 0) {
+      const suffix = scrape.catalogTotal ? ` / ${scrape.catalogTotal}` : ''
+      return (
+        <span className="text-[10px] text-muted-foreground">
+          {scrape.totalScraped.toLocaleString()}
+          {suffix} reels in queue
+        </span>
+      )
+    }
+    return null
+  }
 
   return (
     <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
@@ -129,9 +164,12 @@ export function AutomationPageCard({
                   )}
                   {sourcePlatform ? `${platformLabel(sourcePlatform)}: ` : ''}@{page.sourceUsername.replace(/^@/, '')}
                 </span>
-                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-primary">
-                  Synced
-                </span>
+                <div className="flex items-center gap-2">
+                  {scrapeLine()}
+                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-primary">
+                    Synced
+                  </span>
+                </div>
               </div>
             ) : onAssignSource && sources && sources.length > 0 ? (
               <div className="space-y-1">

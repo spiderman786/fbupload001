@@ -12,13 +12,19 @@ export function ScrapeStatusBanner({ scrape, totalScraped }: Props) {
   const scraped = totalScraped ?? scrape.totalScraped
 
   if (scrape.status === 'pending_scrap') {
+    const catalogHint =
+      scrape.catalogTotal != null && scrape.catalogTotal > 0
+        ? ` Catalog: ${scraped} / ${scrape.catalogTotal} reels.`
+        : scraped > 0
+          ? ` ${scraped} scraped so far.`
+          : ''
     return (
       <div className="flex items-start gap-3 rounded-xl border border-primary/30 bg-primary/5 p-4">
         <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-primary" />
         <div>
           <p className="font-semibold text-primary">Pending Scrap</p>
           <p className="text-sm text-muted-foreground">
-            Downloading reels from the assigned creator. {scraped > 0 ? `${scraped} scraped so far.` : ''}
+            Downloading reels from the assigned creator.{catalogHint}
           </p>
         </div>
       </div>
@@ -52,10 +58,12 @@ export function ScrapeStatusBanner({ scrape, totalScraped }: Props) {
   }
 
   if (scraped > 0) {
+    const catalogSuffix =
+      scrape.catalogTotal != null && scrape.catalogTotal > 0 ? ` of ${scrape.catalogTotal.toLocaleString()} in catalog` : ''
     return (
       <div className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm">
-        <span className="font-semibold">{scraped.toLocaleString()}</span>{' '}
-        <span className="text-muted-foreground">reels scraped from current source</span>
+        <span className="font-semibold">{scraped.toLocaleString()}</span>
+        <span className="text-muted-foreground">{catalogSuffix} reels scraped from current source</span>
       </div>
     )
   }

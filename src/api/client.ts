@@ -282,6 +282,10 @@ export const api = {
         '/automation/bulk-delete',
         { method: 'POST', body: JSON.stringify(body) },
       ),
+    aiPost: (body: { pageId: string; prompt: string; postType?: 'text' | 'image' }) =>
+      request<{ message: string; jobId?: string }>('/automation/ai-post', { method: 'POST', body: JSON.stringify(body) }),
+    payout: (body: { pageId: string; amount: number; recipientId?: string }) =>
+      request<{ message: string }>('/automation/payout', { method: 'POST', body: JSON.stringify(body) }),
   },
   byoc: {
     listApps: (platform: string) =>
@@ -595,6 +599,7 @@ export type AutomationPage = FacebookPage & {
   reelsStarted: number
   followersNumeric: number
   stats: PageJobStats
+  scrape?: PageScrapeInfo
 }
 
 export type PageAutomationSettings = {
@@ -609,6 +614,7 @@ export type PageScrapeInfo = {
   status: 'none' | 'scraping_pending' | 'pending_scrap' | 'scraping_error' | 'idle'
   label: string
   totalScraped: number
+  catalogTotal: number | null
   errorMessage: string | null
   inflightDownloads: number
 }

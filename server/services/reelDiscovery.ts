@@ -1,12 +1,13 @@
 import { execFile } from 'child_process'
 import crypto from 'crypto'
 import { promisify } from 'util'
+import { db } from '../db.js'
 import { isReelAlreadyPosted } from './dedup.js'
 import { execYtDlpWithProxyFallback } from '../utils/ytdlpRunner.js'
 
 const execFileAsync = promisify(execFile)
 
-function platformFeedUrl(platform: string, username: string): string {
+export function platformFeedUrl(platform: string, username: string): string {
   const handle = username.replace(/^@/, '')
   switch (platform) {
     case 'instagram':
@@ -31,7 +32,7 @@ async function hasYtDlp(): Promise<boolean> {
   }
 }
 
-async function listCandidateReels(feedUrl: string, limit = 20): Promise<{ id: string; url: string }[]> {
+export async function listCandidateReels(feedUrl: string, limit = 20): Promise<{ id: string; url: string }[]> {
   const baseArgs = [
     feedUrl,
     '--flat-playlist',
@@ -42,8 +43,8 @@ async function listCandidateReels(feedUrl: string, limit = 20): Promise<{ id: st
   ]
 
   const { stdout, usedProxy, proxyLabel } = await execYtDlpWithProxyFallback(baseArgs, {
-    timeout: 90_000,
-    maxBuffer: 2 * 1024 * 1024,
+    timeout: 120_000,
+    maxBuffer: 4 * 1024 * 1024,
   })
 
   if (usedProxy) console.log(`[discovery] listed reels via proxy ${proxyLabel ?? 'pool'}`)
@@ -60,6 +61,23 @@ async function listCandidateReels(feedUrl: string, limit = 20): Promise<{ id: st
   return results
 }
 
+export function catalogProbeLimit(): number {
+  return Number(process.env.PREFILL_CATALOG_PROBE_LIMIT ?? 100)
+}
+
+/** Count reels visible on a creator feed (up to limit). */
+export async function countCatalogReels(platform: string, username: string, limit = catalogProbeLimit()): Promise<number> {
+  if (!(await hasYtDlp())) return 0
+  try {
+    const feedUrl = platformFeedUrl(platform, username)
+    const candidates = await listCandidateReels(feedUrl, limit)
+    return candidates.length
+  } catch (err) {
+    console.warn('[catalog] probe failed:', err)
+    return 0
+  }
+}
+
 function mockReelForToday(pageId: string, sourceAccountId: string): { id: string; url: string } {
   const day = new Date().toISOString().slice(0, 10)
   const id = crypto.createHash('sha1').update(`${pageId}:${sourceAccountId}:${day}:${Date.now()}`).digest('hex').slice(0, 16)
@@ -73,10 +91,11 @@ export async function discoverNextReel(params: {
   username: string
 }): Promise<{ reelId: string; sourceUrl: string; mock: boolean }> {
   const feedUrl = platformFeedUrl(params.platform, params.username)
+  const listLimit = Number(process.env.PREFILL_DISCOVERY_LIST_LIMIT ?? 50)
 
   if (await hasYtDlp()) {
     try {
-      const candidates = await listCandidateReels(feedUrl)
+      const candidates = await listCandidateReels(feedUrl, listLimit)
       for (const c of candidates) {
         if (!isReelAlreadyPosted(params.pageId, c.id)) {
           return { reelId: c.id, sourceUrl: c.url, mock: false }
@@ -91,7 +110,28 @@ export async function discoverNextReel(params: {
 
   const mock = mockReelForToday(params.pageId, params.sourceAccountId)
   if (isReelAlreadyPosted(params.pageId, mock.id)) {
-    throw new Error('Daily mock reel already posted for this page/source')
+    throw new Error('Daily mock reel already posted for this page')
   }
   return { reelId: mock.id, sourceUrl: mock.url, mock: true }
+}
+
+/** Probe creator catalog size and persist on assignment (non-blocking). */
+export async function probeSourceCatalog(pageId: string): Promise<number> {
+  const row = db
+    .prepare(`
+      SELECT s.platform, s.username
+      FROM page_source_assignments a
+      JOIN source_accounts s ON s.id = a.source_account_id
+      WHERE a.page_id = ?
+    `)
+    .get(pageId) as { platform: string; username: string } | undefined
+
+  if (!row) return 0
+
+  const total = await countCatalogReels(row.platform, row.username)
+  if (total > 0) {
+    db.prepare('UPDATE page_source_assignments SET catalog_total = ? WHERE page_id = ?').run(total, pageId)
+    console.log(`[catalog] @${row.username} (${row.platform}): ${total} reels in catalog probe`)
+  }
+  return total
 }

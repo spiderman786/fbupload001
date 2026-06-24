@@ -26,7 +26,9 @@ import { ProxyPoolPage } from './pages/dashboard/ProxyPoolPage'
 import { TokensPage } from './pages/dashboard/TokensPage'
 import { AcceptInvitePage } from './pages/AcceptInvitePage'
 import { TeamPage } from './pages/dashboard/TeamPage'
-import { RoutedFeaturePage } from './pages/dashboard/RoutedFeaturePage'
+import { AiPostsPage } from './pages/dashboard/AiPostsPage'
+import { PayoutPage } from './pages/dashboard/PayoutPage'
+import { YoutubeToolsPage, InstagramToolsPage, YoutubeByocPage, InstagramByocPage } from './pages/dashboard/PlatformPages'
 import { OpsLayout, OpsGate } from './pages/ops/OpsLayout'
 import { OpsOverviewPage } from './pages/ops/OpsOverviewPage'
 import { OpsAgenciesPage, OpsAgencyDetailPage } from './pages/ops/OpsAgenciesPage'
@@ -74,30 +76,30 @@ function App() {
             <Route path="/agency/facebook/direct-post" element={<DirectPostPage />} />
             <Route path="/facebook/inapp-schedule" element={<InAppSchedulePage />} />
             <Route path="/agency/facebook/inapp-schedule" element={<InAppSchedulePage />} />
-            <Route path="/facebook/ai-posts" element={<RoutedFeaturePage />} />
-            <Route path="/agency/facebook/ai-posts" element={<RoutedFeaturePage />} />
-            <Route path="/facebook/payout" element={<RoutedFeaturePage />} />
-            <Route path="/agency/facebook/payout" element={<RoutedFeaturePage />} />
+            <Route path="/facebook/ai-posts" element={<AiPostsPage />} />
+            <Route path="/agency/facebook/ai-posts" element={<AiPostsPage />} />
+            <Route path="/facebook/payout" element={<PayoutPage />} />
+            <Route path="/agency/facebook/payout" element={<PayoutPage />} />
 
             {/* YouTube platform */}
-            <Route path="/youtube/accounts" element={<RoutedFeaturePage />} />
-            <Route path="/agency/youtube/accounts" element={<RoutedFeaturePage />} />
-            <Route path="/youtube/direct-post" element={<RoutedFeaturePage />} />
-            <Route path="/agency/youtube/direct-post" element={<RoutedFeaturePage />} />
-            <Route path="/youtube/direct-schedule" element={<RoutedFeaturePage />} />
-            <Route path="/agency/youtube/direct-schedule" element={<RoutedFeaturePage />} />
-            <Route path="/youtube/inapp-schedule" element={<RoutedFeaturePage />} />
-            <Route path="/agency/youtube/inapp-schedule" element={<RoutedFeaturePage />} />
+            <Route path="/youtube/accounts" element={<YoutubeToolsPage />} />
+            <Route path="/agency/youtube/accounts" element={<YoutubeToolsPage />} />
+            <Route path="/youtube/direct-post" element={<YoutubeToolsPage />} />
+            <Route path="/agency/youtube/direct-post" element={<YoutubeToolsPage />} />
+            <Route path="/youtube/direct-schedule" element={<YoutubeToolsPage />} />
+            <Route path="/agency/youtube/direct-schedule" element={<YoutubeToolsPage />} />
+            <Route path="/youtube/inapp-schedule" element={<YoutubeToolsPage />} />
+            <Route path="/agency/youtube/inapp-schedule" element={<YoutubeToolsPage />} />
 
             {/* Instagram platform */}
-            <Route path="/instagram/accounts" element={<RoutedFeaturePage />} />
-            <Route path="/agency/instagram/accounts" element={<RoutedFeaturePage />} />
-            <Route path="/instagram/direct-post" element={<RoutedFeaturePage />} />
-            <Route path="/agency/instagram/direct-post" element={<RoutedFeaturePage />} />
-            <Route path="/instagram/direct-schedule" element={<RoutedFeaturePage />} />
-            <Route path="/agency/instagram/direct-schedule" element={<RoutedFeaturePage />} />
-            <Route path="/instagram/inapp-schedule" element={<RoutedFeaturePage />} />
-            <Route path="/agency/instagram/inapp-schedule" element={<RoutedFeaturePage />} />
+            <Route path="/instagram/accounts" element={<InstagramToolsPage />} />
+            <Route path="/agency/instagram/accounts" element={<InstagramToolsPage />} />
+            <Route path="/instagram/direct-post" element={<InstagramToolsPage />} />
+            <Route path="/agency/instagram/direct-post" element={<InstagramToolsPage />} />
+            <Route path="/instagram/direct-schedule" element={<InstagramToolsPage />} />
+            <Route path="/agency/instagram/direct-schedule" element={<InstagramToolsPage />} />
+            <Route path="/instagram/inapp-schedule" element={<InstagramToolsPage />} />
+            <Route path="/agency/instagram/inapp-schedule" element={<InstagramToolsPage />} />
 
             {/* Settings & legacy redirects */}
             <Route path="/settings" element={<SettingsPage />} />
@@ -108,10 +110,10 @@ function App() {
             <Route path="/agency/settings/facebook-byoc" element={<FacebookByocPage />} />
             <Route path="/settings/proxy-pool" element={<OwnerRoute><ProxyPoolPage /></OwnerRoute>} />
             <Route path="/agency/settings/proxy-pool" element={<OwnerRoute><ProxyPoolPage /></OwnerRoute>} />
-            <Route path="/settings/youtube-byoc" element={<RoutedFeaturePage />} />
-            <Route path="/agency/settings/youtube-byoc" element={<RoutedFeaturePage />} />
-            <Route path="/settings/instagram-byoc" element={<RoutedFeaturePage />} />
-            <Route path="/agency/settings/instagram-byoc" element={<RoutedFeaturePage />} />
+            <Route path="/settings/youtube-byoc" element={<YoutubeByocPage />} />
+            <Route path="/agency/settings/youtube-byoc" element={<YoutubeByocPage />} />
+            <Route path="/settings/instagram-byoc" element={<InstagramByocPage />} />
+            <Route path="/agency/settings/instagram-byoc" element={<InstagramByocPage />} />
             <Route path="/reels" element={<Navigate to="/facebook/jobs" replace />} />
             <Route path="/pages" element={<Navigate to="/facebook/accounts" replace />} />
             <Route path="/sources" element={<Navigate to="/facebook/auto-download-upload" replace />} />

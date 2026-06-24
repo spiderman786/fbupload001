@@ -108,6 +108,7 @@ export function getPageDetail(pageId: string, agencyId: string) {
       status: 'none' as const,
       label: 'No source',
       totalScraped: 0,
+      catalogTotal: null,
       errorMessage: null,
       inflightDownloads: 0,
     },

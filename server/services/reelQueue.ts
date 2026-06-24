@@ -9,6 +9,10 @@ export function maxQueuePerPage(): number {
   return Number(process.env.PREFILL_MAX_QUEUE_PER_PAGE ?? 50)
 }
 
+export function initialPrefillBurst(): number {
+  return Number(process.env.PREFILL_INITIAL_BURST ?? 12)
+}
+
 export function isPrefillEnabled(): boolean {
   return process.env.PREFILL_ENABLED !== 'false'
 }
@@ -85,14 +89,21 @@ export function createPrefillJob(agencyId: string, userId: string, pageId: strin
   return id
 }
 
-export function fillPagePrefillQueue(page: {
-  id: string
-  agency_id: string
-  user_id: string
-}): string[] {
+export function fillPagePrefillQueue(
+  page: {
+    id: string
+    agency_id: string
+    user_id: string
+  },
+  options?: { burst?: boolean },
+): string[] {
   if (!isPrefillEnabled()) return []
 
-  const target = getPrefillTarget(page.id)
+  let target = getPrefillTarget(page.id)
+  if (options?.burst) {
+    target = Math.min(maxQueuePerPage(), Math.max(target, initialPrefillBurst()))
+  }
+
   const current = countQueuedForPage(page.id) + countPrefillInflight(page.id)
   const need = Math.max(0, target - current)
   const created: string[] = []

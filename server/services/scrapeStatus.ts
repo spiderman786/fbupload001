@@ -12,6 +12,7 @@ export type PageScrapeInfo = {
   status: ScrapeStatusKey
   label: string
   totalScraped: number
+  catalogTotal: number | null
   errorMessage: string | null
   inflightDownloads: number
 }
@@ -65,12 +66,12 @@ function countInflightPrefill(pageId: string): number {
 export function getPageScrapeInfo(pageId: string): PageScrapeInfo | null {
   const row = db
     .prepare(`
-      SELECT a.source_account_id, a.scrape_status, a.scrape_error
+      SELECT a.source_account_id, a.scrape_status, a.scrape_error, a.catalog_total
       FROM page_source_assignments a
       WHERE a.page_id = ?
     `)
     .get(pageId) as
-    | { source_account_id: string; scrape_status: string | null; scrape_error: string | null }
+    | { source_account_id: string; scrape_status: string | null; scrape_error: string | null; catalog_total: number | null }
     | undefined
 
   if (!row) {
@@ -78,6 +79,7 @@ export function getPageScrapeInfo(pageId: string): PageScrapeInfo | null {
       status: 'none',
       label: STATUS_LABELS.none,
       totalScraped: 0,
+      catalogTotal: null,
       errorMessage: null,
       inflightDownloads: 0,
     }
@@ -101,6 +103,7 @@ export function getPageScrapeInfo(pageId: string): PageScrapeInfo | null {
     status,
     label: STATUS_LABELS[status],
     totalScraped,
+    catalogTotal: row.catalog_total != null ? Number(row.catalog_total) : null,
     errorMessage: row.scrape_error,
     inflightDownloads: inflight,
   }
@@ -189,8 +192,12 @@ export function handlePrefillSuccess(pageId: string) {
 export function reactivateSourceForRescrape(pageId: string) {
   db.prepare(`
     UPDATE page_source_assignments
-    SET scrape_status = 'scraping_pending', scrape_error = NULL, source_assigned_at = datetime('now')
+    SET scrape_status = 'scraping_pending', scrape_error = NULL, source_assigned_at = datetime('now'), catalog_total = NULL
     WHERE page_id = ?
   `).run(pageId)
   db.prepare("UPDATE facebook_pages SET health_status = 'completed' WHERE id = ?").run(pageId)
+  void import('./reelDiscovery.js').then(({ probeSourceCatalog }) =>
+    probeSourceCatalog(pageId).catch((err) => console.warn('[catalog] probe failed:', err)),
+  )
+  void import('./prefillScheduler.js').then(({ tickPrefillQueueForPage }) => tickPrefillQueueForPage(pageId, true))
 }

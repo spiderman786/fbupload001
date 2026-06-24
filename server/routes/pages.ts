@@ -15,6 +15,7 @@ import {
   getPageReelsHistory,
   getAgencyPage,
 } from '../services/pageDetail.js'
+import { getPageScrapeInfo } from '../services/scrapeStatus.js'
 import { getPageInsights } from '../services/pageInsights.js'
 import { upsertPageAutomationSettings, getPageAutomationSettings } from '../services/pageAutomationSettings.js'
 import { generateRandomScheduleTimes } from '../services/pageSchedule.js'
@@ -138,6 +139,7 @@ pagesRouter.get('/hub', (req: AgencyRequest, res) => {
 
   let pages = rows.map((row) => {
     const today = todayByPage.get(row.id as string) ?? { posted: 0, failed: 0, pending: 0 }
+    const scrape = getPageScrapeInfo(row.id as string)
     return {
       ...mapPage(row, today),
       sourceUsername: (row.source_username as string | null) ?? null,
@@ -145,6 +147,14 @@ pagesRouter.get('/hub', (req: AgencyRequest, res) => {
       facebookAccountName: (row.facebook_account_name as string | null) ?? null,
       reelsStarted: Number(row.reels_started ?? 0),
       followersNumeric: Number(row.followers_count ?? parseFollowers(String(row.followers ?? '0'))),
+      scrape: scrape ?? {
+        status: 'none' as const,
+        label: 'No source',
+        totalScraped: 0,
+        catalogTotal: null,
+        errorMessage: null,
+        inflightDownloads: 0,
+      },
       stats: {
         total: {
           posted: Number(row.total_posted ?? 0),

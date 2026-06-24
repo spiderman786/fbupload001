@@ -7,8 +7,9 @@ import { enqueueDirectJob } from '../services/jobWorker.js'
 import { bulkDeletePosts, listPagePosts } from '../services/publisher.js'
 import { isFacebookConfiguredForAgency } from '../services/byoc.js'
 import { purgeQueuedJobsForPage } from '../services/queueActions.js'
-import { tickPrefillQueue } from '../services/prefillScheduler.js'
+import { tickPrefillQueue, tickPrefillQueueForPage } from '../services/prefillScheduler.js'
 import { markSourceScrapingPending, reactivateSourceForRescrape } from '../services/scrapeStatus.js'
+import { probeSourceCatalog } from '../services/reelDiscovery.js'
 import type { AgencyRequest } from '../utils/agency.js'
 
 export const automationRouter = Router()
@@ -81,9 +82,14 @@ automationRouter.put('/assignments/:pageId', requireRole('owner', 'admin'), (req
   if (!previous || previous.source_account_id !== sourceId) {
     purgeQueuedJobsForPage(req.params.pageId, req.agency!.id)
     markSourceScrapingPending(req.params.pageId)
+    db.prepare('UPDATE page_source_assignments SET catalog_total = NULL WHERE page_id = ?').run(req.params.pageId)
+    void probeSourceCatalog(req.params.pageId).catch((err) =>
+      console.warn('[catalog] probe failed:', err instanceof Error ? err.message : err),
+    )
+    tickPrefillQueueForPage(req.params.pageId, true)
+  } else {
+    void tickPrefillQueue()
   }
-
-  void tickPrefillQueue()
 
   res.json({ message: 'Source assigned to page' })
 })
