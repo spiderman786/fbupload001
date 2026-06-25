@@ -4,7 +4,7 @@ import { db } from '../db.js'
 import { authMiddleware, requireVerified } from '../middleware/auth.js'
 import { agencyMiddleware, requireRole } from '../middleware/agency.js'
 import { tokensForPlatform } from '../utils/helpers.js'
-import type { AgencyRequest } from '../utils/agency.js'
+import { revivePagesForSource } from '../services/scrapeStatus.js'
 
 export const sourcesRouter = Router()
 sourcesRouter.use(authMiddleware, requireVerified, agencyMiddleware)
@@ -66,6 +66,12 @@ sourcesRouter.patch('/:id', requireRole('owner', 'admin'), (req: AgencyRequest, 
 
   if (typeof isActive === 'boolean') {
     db.prepare('UPDATE source_accounts SET is_active = ? WHERE id = ?').run(isActive ? 1 : 0, req.params.id)
+    if (isActive) {
+      const revived = revivePagesForSource(req.params.id, req.agency!.id)
+      if (revived > 0) {
+        console.log(`[sources] Re-enabled ${req.params.id}: revived prefill on ${revived} page(s)`)
+      }
+    }
   }
 
   const updated = db.prepare('SELECT * FROM source_accounts WHERE id = ?').get(req.params.id) as Record<string, unknown>

@@ -1,5 +1,6 @@
 import { db } from '../db.js'
 import { applyPageHealthFromError, inferHealthStatusFromError } from './pageHealth.js'
+import { resolvePrefillPage } from './reelQueue.js'
 
 export type ScrapeStatusKey =
   | 'none'
@@ -65,6 +66,7 @@ function countInflightPrefill(pageId: string): number {
 
 export function getPageScrapeInfo(pageId: string): PageScrapeInfo | null {
   maybeRecoverStaleScrapePending(pageId)
+  reconcileStaleScrapeError(pageId)
 
   const row = db
     .prepare(`
@@ -124,6 +126,56 @@ export function clearScrapeError(pageId: string) {
   db.prepare(`
     UPDATE page_source_assignments SET scrape_status = 'idle', scrape_error = NULL WHERE page_id = ?
   `).run(pageId)
+}
+
+/** Drop stale scrape errors when the underlying blocker (e.g. disabled source) was fixed. */
+export function reconcileStaleScrapeError(pageId: string) {
+  const assignment = db
+    .prepare(`
+      SELECT a.scrape_error, p.agency_id
+      FROM page_source_assignments a
+      JOIN facebook_pages p ON p.id = a.page_id
+      WHERE a.page_id = ?
+    `)
+    .get(pageId) as { scrape_error: string | null; agency_id: string } | undefined
+
+  if (!assignment?.scrape_error) return
+
+  const resolved = resolvePrefillPage(pageId)
+  if (resolved.eligible) {
+    clearScrapeError(pageId)
+    void import('./prefillScheduler.js').then(({ syncPagePrefillQueue }) =>
+      syncPagePrefillQueue(pageId, assignment.agency_id).catch((err) =>
+        console.warn('[scrape] reconcile prefill failed:', pageId, err instanceof Error ? err.message : err),
+      ),
+    )
+    return
+  }
+
+  if (assignment.scrape_error !== resolved.message) {
+    notePrefillBlocked(pageId, resolved.message)
+  }
+}
+
+export function revivePagesForSource(sourceAccountId: string, agencyId: string) {
+  const pages = db
+    .prepare(`
+      SELECT page_id FROM page_source_assignments
+      WHERE source_account_id = ? AND agency_id = ?
+    `)
+    .all(sourceAccountId, agencyId) as { page_id: string }[]
+
+  for (const { page_id: pageId } of pages) {
+    clearScrapeError(pageId)
+    markSourceScrapingPending(pageId)
+    void import('./prefillScheduler.js').then(({ syncPagePrefillQueue }) =>
+      syncPagePrefillQueue(pageId, agencyId).catch((err) =>
+        console.warn('[scrape] revive prefill failed:', pageId, err instanceof Error ? err.message : err),
+      ),
+    )
+  }
+
+  return pages.length
 }
 
 export function markScrapeIdle(pageId: string) {

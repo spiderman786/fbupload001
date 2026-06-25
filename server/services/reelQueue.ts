@@ -130,7 +130,7 @@ export function resolvePrefillPage(pageId: string):
   | { eligible: false; reason: PrefillSkipReason; message: string } {
   const row = db
     .prepare(`
-      SELECT p.id, p.agency_id, p.user_id, p.status, p.health_status, s.is_active as source_active
+      SELECT p.id, p.agency_id, p.user_id, p.status, p.health_status, s.is_active as source_active, s.username as source_username
       FROM facebook_pages p
       LEFT JOIN page_source_assignments a ON a.page_id = p.id
       LEFT JOIN source_accounts s ON s.id = a.source_account_id
@@ -144,6 +144,7 @@ export function resolvePrefillPage(pageId: string):
         status: string
         health_status: string
         source_active: number | null
+        source_username: string | null
       }
     | undefined
 
@@ -158,10 +159,11 @@ export function resolvePrefillPage(pageId: string):
     }
   }
   if (!row.source_active) {
+    const handle = row.source_username?.replace(/^@/, '') ?? 'creator'
     return {
       eligible: false,
       reason: 'source_inactive',
-      message: 'Source account is disabled — re-enable it under Sources',
+      message: `Source @${handle} assigned to this page is disabled — enable that account under Sources`,
     }
   }
   if (row.health_status !== 'completed') {

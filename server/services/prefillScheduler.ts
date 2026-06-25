@@ -35,6 +35,8 @@ export async function syncPagePrefillQueue(pageId: string, agencyId: string): Pr
     return { trimmed, created: 0, target, skipped: resolved.reason }
   }
 
+  clearScrapeError(pageId)
+
   let created = 0
   for (const jobId of fillPagePrefillQueue(resolved.page)) {
     enqueueJob(jobId)
