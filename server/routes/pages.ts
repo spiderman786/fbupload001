@@ -27,6 +27,7 @@ import {
   ensureQueueThumbnail,
   refreshQueueItemMedia,
   refreshMissingQueuePreviews,
+  dedupeQueuedJobsForPage,
 } from '../services/queueActions.js'
 import { getTodayStatsForPages } from '../utils/pageDayStats.js'
 import { getPageQuota } from '../services/pageQuota.js'
@@ -395,6 +396,22 @@ pagesRouter.post('/:pageId/queue/refresh-missing', requireRole('owner', 'admin')
     res.json(result)
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Refresh failed' })
+  }
+})
+
+pagesRouter.post('/:pageId/queue/dedupe', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
+  const pageId = req.params.pageId
+  if (!requirePage(req, pageId)) {
+    res.status(404).json({ error: 'Page not found' })
+    return
+  }
+  try {
+    const result = await dedupeQueuedJobsForPage(pageId, req.agency!.id)
+    const { tickPrefillQueue } = await import('../services/prefillScheduler.js')
+    tickPrefillQueue()
+    res.json({ message: `Removed ${result.removed} duplicate${result.removed !== 1 ? 's' : ''}`, ...result })
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Dedupe failed' })
   }
 })
 

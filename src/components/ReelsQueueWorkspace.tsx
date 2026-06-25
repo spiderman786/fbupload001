@@ -597,9 +597,44 @@ export function ReelsQueueWorkspace({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [modalItemId, setModalItemId] = useState<string | null>(null)
   const [refreshingMissing, setRefreshingMissing] = useState(false)
+  const [deduping, setDeduping] = useState(false)
   const [gridVersion, setGridVersion] = useState(0)
 
   const missingPreviewCount = queue.filter((item) => !item.hasPreview || !item.hasThumbnail).length
+
+  const duplicateCount = useMemo(() => {
+    const seenReelIds = new Set<string>()
+    const seenUrls = new Set<string>()
+    let duplicates = 0
+
+    for (const item of queue) {
+      const reelId = item.sourceReelId?.trim()
+      const url = item.sourceUrl?.trim()
+
+      if (reelId) {
+        if (seenReelIds.has(reelId)) {
+          duplicates++
+          continue
+        }
+        seenReelIds.add(reelId)
+      }
+
+      if (url && !url.startsWith('mock://')) {
+        if (seenUrls.has(url)) {
+          duplicates++
+          continue
+        }
+        seenUrls.add(url)
+      }
+    }
+
+    const mockItems = queue.filter((item) => item.sourceUrl?.startsWith('mock://'))
+    if (mockItems.length > 1 && mockItems.length === queue.length) {
+      duplicates += mockItems.length - 1
+    }
+
+    return duplicates
+  }, [queue])
 
   const activeId = layout === 'workspace' ? selectedId : modalItemId
   const selectedItem = useMemo(
@@ -660,6 +695,21 @@ export function ReelsQueueWorkspace({
     }
   }
 
+  async function removeDuplicates() {
+    if (!canWrite || !duplicateCount) return
+    setDeduping(true)
+    try {
+      const result = await api.pages.dedupeQueue(pageId)
+      setGridVersion((v) => v + 1)
+      toast.success(result.message)
+      onRefresh()
+    } catch (err) {
+      toast.error(getApiError(err, 'Could not remove duplicates'))
+    } finally {
+      setDeduping(false)
+    }
+  }
+
   function selectItem(id: string) {
     if (layout === 'workspace') setSelectedId(id)
     else setModalItemId(id)
@@ -676,6 +726,17 @@ export function ReelsQueueWorkspace({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {duplicateCount > 0 && canWrite ? (
+              <button
+                type="button"
+                onClick={removeDuplicates}
+                disabled={deduping || refreshing || refreshingMissing}
+                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm text-red-900 hover:bg-red-100 disabled:opacity-50"
+              >
+                <Trash2 className={`h-4 w-4 ${deduping ? 'animate-pulse' : ''}`} />
+                Remove {duplicateCount} duplicate{duplicateCount !== 1 ? 's' : ''}
+              </button>
+            ) : null}
             {missingPreviewCount > 0 && canWrite ? (
               <button
                 type="button"

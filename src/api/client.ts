@@ -110,6 +110,10 @@ export const api = {
         alreadyRunning?: boolean
         results: { jobId: string; ok: boolean; error?: string }[]
       }>(`/pages/${pageId}/queue/refresh-missing`, { method: 'POST' }),
+    dedupeQueue: (pageId: string) =>
+      request<{ message: string; removed: number; kept: number }>(`/pages/${pageId}/queue/dedupe`, {
+        method: 'POST',
+      }),
     updateAutomationSettings: (
       id: string,
       body: {

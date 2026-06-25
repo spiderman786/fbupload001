@@ -33,12 +33,17 @@ export function updateQueuedCaption(jobId: string, pageId: string, agencyId: str
   return caption.trim()
 }
 
-export async function removeQueuedJob(jobId: string, pageId: string, agencyId: string) {
+export async function removeQueuedJob(
+  jobId: string,
+  pageId: string,
+  agencyId: string,
+  options?: { recordSkip?: boolean },
+) {
   const job = getQueuedJobForPage(jobId, pageId, agencyId)
   if (!job) throw new Error('Queued reel not found')
 
   const sourceReelId = job.source_reel_id as string | null
-  if (sourceReelId) {
+  if (sourceReelId && options?.recordSkip !== false) {
     recordSkippedReel({
       agencyId,
       pageId,
@@ -52,6 +57,60 @@ export async function removeQueuedJob(jobId: string, pageId: string, agencyId: s
   await deleteQueueR2Media(job)
   cleanupJobFiles(agencyId, jobId)
   db.prepare('DELETE FROM reel_jobs WHERE id = ?').run(jobId)
+}
+
+/** Remove duplicate queued reels — keeps the oldest copy per source reel / URL. */
+export async function dedupeQueuedJobsForPage(pageId: string, agencyId: string) {
+  const jobs = db
+    .prepare(`
+      SELECT id, source_reel_id, source_url
+      FROM reel_jobs
+      WHERE target_page_id = ? AND agency_id = ? AND status = 'queued'
+      ORDER BY created_at ASC
+    `)
+    .all(pageId, agencyId) as {
+      id: string
+      source_reel_id: string | null
+      source_url: string | null
+    }[]
+
+  const seenReelIds = new Set<string>()
+  const seenUrls = new Set<string>()
+  const toRemove: string[] = []
+
+  for (const job of jobs) {
+    const reelId = job.source_reel_id?.trim()
+    const url = job.source_url?.trim()
+
+    if (reelId) {
+      if (seenReelIds.has(reelId)) {
+        toRemove.push(job.id)
+        continue
+      }
+      seenReelIds.add(reelId)
+    }
+
+    if (url && !url.startsWith('mock://')) {
+      if (seenUrls.has(url)) {
+        toRemove.push(job.id)
+        continue
+      }
+      seenUrls.add(url)
+    }
+  }
+
+  const mockJobs = jobs.filter((job) => job.source_url?.startsWith('mock://'))
+  if (mockJobs.length > 1 && mockJobs.length === jobs.length) {
+    for (const job of mockJobs.slice(1)) {
+      if (!toRemove.includes(job.id)) toRemove.push(job.id)
+    }
+  }
+
+  for (const id of toRemove) {
+    await removeQueuedJob(id, pageId, agencyId, { recordSkip: false })
+  }
+
+  return { removed: toRemove.length, kept: jobs.length - toRemove.length }
 }
 
 export async function purgeQueuedJobsForPage(pageId: string, agencyId: string) {
