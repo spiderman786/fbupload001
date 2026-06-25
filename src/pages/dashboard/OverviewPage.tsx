@@ -126,7 +126,7 @@ export function OverviewPage() {
             <h2 className="font-semibold">Download proxies</h2>
           </div>
           <p className="mb-4 text-sm text-muted-foreground">
-            Upload your Webshare (or other) proxy list here — one IP per line. Required for Instagram/TikTok downloads at scale.
+            Paste your proxy list here (Webshare or any provider) — one line per IP. That is all you need for Instagram and TikTok. No cookies.
           </p>
           <ProxyPoolUploadPanel />
           <Link to="/settings/proxy-pool" className="mt-3 inline-block text-sm text-primary hover:underline">

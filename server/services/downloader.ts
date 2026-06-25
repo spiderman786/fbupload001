@@ -125,12 +125,27 @@ export async function downloadReelFromUrl(
 }
 
 /** Fetch title, description, and thumbnail URL via yt-dlp. */
+function platformFromUrl(url: string): string {
+  if (url.includes('instagram.com')) return 'instagram'
+  if (url.includes('tiktok.com')) return 'tiktok'
+  if (url.includes('facebook.com')) return 'facebook'
+  if (url.includes('youtube.com') || url.includes('youtu.be')) return 'youtube'
+  return ''
+}
+
 export async function fetchReelMetadata(sourceUrl: string): Promise<ReelMetadata | null> {
   if (sourceUrl.startsWith('mock://')) return null
   if (!(await hasYtDlp())) return null
 
   try {
-    const baseArgs = [sourceUrl, '--dump-single-json', '--no-playlist', '--no-warnings', ...ytDlpPlatformArgs('', sourceUrl)]
+    const platform = platformFromUrl(sourceUrl)
+    const baseArgs = [
+      sourceUrl,
+      '--dump-single-json',
+      '--no-playlist',
+      '--no-warnings',
+      ...ytDlpPlatformArgs(platform, sourceUrl),
+    ]
     const { stdout } = await execYtDlpWithProxyFallback(baseArgs, { timeout: 90_000, maxBuffer: 4 * 1024 * 1024 })
     const data = JSON.parse(stdout) as {
       title?: string

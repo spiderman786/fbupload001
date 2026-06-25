@@ -132,13 +132,39 @@ export function downloadUrlCandidates(
 
 export function ytDlpPlatformArgs(platform: string, url: string): string[] {
   const args: string[] = []
-  if (platform.toLowerCase() === 'facebook' || url.includes('facebook.com')) {
+  const p = platform.toLowerCase()
+  const isFb = p === 'facebook' || url.includes('facebook.com')
+  const isIg = p === 'instagram' || url.includes('instagram.com')
+  const isTt = p === 'tiktok' || url.includes('tiktok.com')
+
+  if (isFb) {
     args.push('--add-header', 'Referer:https://www.facebook.com/')
-    args.push('--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+    args.push(
+      '--add-header',
+      'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    )
   }
-  const cookiesFile = process.env.YTDLP_COOKIES_FILE ?? process.env.FACEBOOK_COOKIES_FILE
-  if (cookiesFile && (platform.toLowerCase() === 'facebook' || url.includes('facebook.com'))) {
+
+  if (isIg) {
+    args.push('--add-header', 'Referer:https://www.instagram.com/')
+    args.push(
+      '--add-header',
+      'User-Agent:Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    )
+    args.push('--extractor-args', 'instagram:web_embed=true')
+  }
+
+  if (isTt) {
+    args.push('--add-header', 'Referer:https://www.tiktok.com/')
+  }
+
+  const cookiesFile =
+    process.env.YTDLP_COOKIES_FILE ??
+    (isIg ? process.env.INSTAGRAM_COOKIES_FILE : undefined) ??
+    (isFb ? process.env.FACEBOOK_COOKIES_FILE : undefined)
+  if (cookiesFile && (isFb || isIg)) {
     args.push('--cookies', cookiesFile)
   }
+
   return args
 }

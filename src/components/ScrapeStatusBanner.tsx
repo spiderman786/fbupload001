@@ -1,4 +1,5 @@
 import { AlertTriangle, Download, Loader2 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import type { PageScrapeInfo } from '../api/client'
 
 type Props = {
@@ -62,6 +63,11 @@ export function ScrapeStatusBanner({ scrape, totalScraped, onRetry, retrying }: 
               {scrape.errorMessage ??
                 'Could not scrape this creator. Check the username or wait — false positives often recover automatically.'}
             </p>
+            {scrape.errorMessage?.includes('Download Proxies') ? (
+              <Link to="/settings/proxy-pool" className="mt-2 inline-block text-sm font-medium text-red-800 underline">
+                Open Download Proxies →
+              </Link>
+            ) : null}
           </div>
         </div>
         {showRetry ? (

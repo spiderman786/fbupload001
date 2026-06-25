@@ -37,7 +37,8 @@ export function ProxyPoolPage() {
           </div>
           <h1 className="font-display text-2xl font-bold">Download Proxy Pool</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Upload proxies for Instagram/TikTok/YouTube reel downloads.
+            One-time setup for Instagram, TikTok, and YouTube. Paste your proxy list and upload — no browser cookies or
+            technical config needed.
           </p>
         </div>
         <button

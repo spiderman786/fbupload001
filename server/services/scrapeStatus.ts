@@ -2,6 +2,7 @@ import { db } from '../db.js'
 import { applyPageHealthFromError, inferHealthStatusFromError } from './pageHealth.js'
 import { resolvePrefillPage, type PrefillSkipReason } from './reelQueue.js'
 import { healSourceAssignment, relinkAssignmentsToSource } from './sourceAccounts.js'
+import { userFacingDownloadError } from '../utils/downloadErrors.js'
 
 export type ScrapeStatusKey =
   | 'none'
@@ -214,12 +215,17 @@ function isSourceExhaustedError(message: string): boolean {
 }
 
 export function handlePrefillDiscoveryFailure(pageId: string, sourceAccountId: string, message: string) {
+  const source = db
+    .prepare('SELECT platform FROM source_accounts WHERE id = ?')
+    .get(sourceAccountId) as { platform: string } | undefined
+  const friendly = userFacingDownloadError(message, source?.platform ?? '')
+
   applyPageHealthFromError(pageId, message, 'scrape')
 
   if (isInvalidUsernameError(message)) {
     db.prepare(`
       UPDATE page_source_assignments SET scrape_status = 'scraping_error', scrape_error = ? WHERE page_id = ?
-    `).run(message.slice(0, 500), pageId)
+    `).run(friendly.slice(0, 500), pageId)
     db.prepare("UPDATE facebook_pages SET health_status = 'invalid_username' WHERE id = ?").run(pageId)
     return
   }
@@ -228,7 +234,7 @@ export function handlePrefillDiscoveryFailure(pageId: string, sourceAccountId: s
   if (scrapeHealth === 'creator_suspended') {
     db.prepare(`
       UPDATE page_source_assignments SET scrape_status = 'scraping_error', scrape_error = ? WHERE page_id = ?
-    `).run(message.slice(0, 500), pageId)
+    `).run(friendly.slice(0, 500), pageId)
     db.prepare("UPDATE facebook_pages SET health_status = 'creator_suspended' WHERE id = ?").run(pageId)
     return
   }
@@ -246,7 +252,12 @@ export function handlePrefillDiscoveryFailure(pageId: string, sourceAccountId: s
       `).run(pageId)
       db.prepare("UPDATE facebook_pages SET health_status = 'source_exhausted' WHERE id = ?").run(pageId)
     }
+    return
   }
+
+  db.prepare(`
+    UPDATE page_source_assignments SET scrape_status = 'scraping_error', scrape_error = ? WHERE page_id = ?
+  `).run(friendly.slice(0, 500), pageId)
 }
 
 export function handlePrefillSuccess(pageId: string) {
