@@ -431,13 +431,14 @@ pagesRouter.post('/:pageId/queue/:jobId/skip', requireRole('owner', 'admin'), as
   }
 })
 
-pagesRouter.patch('/:id/automation-settings', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
+pagesRouter.patch('/:id/automation-settings', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
   if (!requirePage(req, req.params.id)) {
     res.status(404).json({ error: 'Page not found' })
     return
   }
+  const pageId = req.params.id
   const { postsPerDay, postingLogic, timezone, scheduleTimes, hashtags, regenerateRandomTimes } = req.body ?? {}
-  const current = getPageAutomationSettings(req.params.id)
+  const current = getPageAutomationSettings(pageId)
   let nextTimes = Array.isArray(scheduleTimes) ? scheduleTimes.map(String) : undefined
 
   if (regenerateRandomTimes === true) {
@@ -447,7 +448,7 @@ pagesRouter.patch('/:id/automation-settings', requireRole('owner', 'admin'), (re
     nextTimes = generateRandomScheduleTimes(postsPerDay !== undefined ? Number(postsPerDay) : current.postsPerDay)
   }
 
-  const settings = upsertPageAutomationSettings(req.params.id, {
+  const settings = upsertPageAutomationSettings(pageId, {
     postsPerDay: postsPerDay !== undefined ? Number(postsPerDay) : undefined,
     postingLogic: postingLogic !== undefined ? String(postingLogic) : undefined,
     timezone: timezone !== undefined ? String(timezone) : undefined,
@@ -456,13 +457,19 @@ pagesRouter.patch('/:id/automation-settings', requireRole('owner', 'admin'), (re
   })
 
   if (nextTimes || scheduleTimes) {
-    db.prepare('UPDATE page_automation_settings SET last_schedule_fire = NULL WHERE page_id = ?').run(req.params.id)
+    db.prepare('UPDATE page_automation_settings SET last_schedule_fire = NULL WHERE page_id = ?').run(pageId)
   }
 
-  res.json({ settings })
+  let queueSync: { trimmed: number; created: number; target: number } | null = null
+  if (postsPerDay !== undefined && Number(postsPerDay) !== current.postsPerDay) {
+    const { syncPagePrefillQueue } = await import('../services/prefillScheduler.js')
+    queueSync = await syncPagePrefillQueue(pageId, req.agency!.id)
+  }
+
+  res.json({ settings, queueSync })
 })
 
-pagesRouter.patch('/:id', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
+pagesRouter.patch('/:id', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
   const { status, dailyReelLimit } = req.body ?? {}
   const page = db
     .prepare('SELECT * FROM facebook_pages WHERE id = ? AND agency_id = ?')
@@ -478,6 +485,9 @@ pagesRouter.patch('/:id', requireRole('owner', 'admin'), (req: AgencyRequest, re
     return
   }
 
+  const previousLimit = Number((page as Record<string, unknown>).daily_reel_limit ?? 6)
+  let queueSync: { trimmed: number; created: number; target: number } | null = null
+
   if (dailyReelLimit !== undefined) {
     const limit = Number(dailyReelLimit)
     if (!Number.isInteger(limit) || limit < 1 || limit > 24) {
@@ -485,6 +495,12 @@ pagesRouter.patch('/:id', requireRole('owner', 'admin'), (req: AgencyRequest, re
       return
     }
     db.prepare('UPDATE facebook_pages SET daily_reel_limit = ? WHERE id = ?').run(limit, req.params.id)
+    db.prepare('UPDATE page_automation_settings SET posts_per_day = ? WHERE page_id = ?').run(limit, req.params.id)
+
+    if (limit !== previousLimit) {
+      const { syncPagePrefillQueue } = await import('../services/prefillScheduler.js')
+      queueSync = await syncPagePrefillQueue(req.params.id, req.agency!.id)
+    }
   }
 
   if (status) {
@@ -492,7 +508,7 @@ pagesRouter.patch('/:id', requireRole('owner', 'admin'), (req: AgencyRequest, re
   }
 
   const updated = db.prepare('SELECT * FROM facebook_pages WHERE id = ?').get(req.params.id) as Record<string, unknown>
-  res.json({ page: mapPage(updated) })
+  res.json({ page: mapPage(updated), queueSync })
 })
 
 pagesRouter.delete('/:id', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {

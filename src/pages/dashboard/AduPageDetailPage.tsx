@@ -190,7 +190,11 @@ export function AduPageDetailPage() {
         ...f,
         scheduleTimes: result.settings.scheduleTimes.join(', '),
       }))
-      toast.success('Settings saved')
+      toast.success(
+        result.queueSync
+          ? `Settings saved — queue synced to ${result.queueSync.target} reel${result.queueSync.target !== 1 ? 's' : ''}`
+          : 'Settings saved',
+      )
       setEditSettings(false)
       loadDetail()
     } catch (err) {

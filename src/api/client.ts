@@ -125,7 +125,10 @@ export const api = {
         regenerateRandomTimes?: boolean
       },
     ) =>
-      request<{ settings: PageAutomationSettings }>(`/pages/${id}/automation-settings`, {
+      request<{
+        settings: PageAutomationSettings
+        queueSync?: { trimmed: number; created: number; target: number } | null
+      }>(`/pages/${id}/automation-settings`, {
         method: 'PATCH',
         body: JSON.stringify(body),
       }),

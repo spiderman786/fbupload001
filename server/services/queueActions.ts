@@ -113,6 +113,25 @@ export async function dedupeQueuedJobsForPage(pageId: string, agencyId: string) 
   return { removed: toRemove.length, kept: jobs.length - toRemove.length }
 }
 
+/** Trim queued reels down to the page daily limit (drops newest extras). */
+export async function trimPageQueueToLimit(pageId: string, agencyId: string, limit: number) {
+  const queued = db
+    .prepare(`
+      SELECT id FROM reel_jobs
+      WHERE target_page_id = ? AND agency_id = ? AND status = 'queued'
+      ORDER BY created_at ASC
+    `)
+    .all(pageId, agencyId) as { id: string }[]
+
+  if (queued.length <= limit) return 0
+
+  const excess = queued.slice(limit)
+  for (const job of excess) {
+    await removeQueuedJob(job.id, pageId, agencyId, { recordSkip: false })
+  }
+  return excess.length
+}
+
 export async function purgeQueuedJobsForPage(pageId: string, agencyId: string) {
   const jobs = db
     .prepare(`

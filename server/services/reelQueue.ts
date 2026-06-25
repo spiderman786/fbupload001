@@ -1,16 +1,11 @@
 import { v4 as uuid } from 'uuid'
 import { db } from '../db.js'
 import { getPageAutomationSettings } from './pageAutomationSettings.js'
-import { getPageQuota } from './pageQuota.js'
 
 export type QueueJobType = 'direct' | 'inapp' | 'scheduled' | 'prefill'
 
 export function maxQueuePerPage(): number {
   return Number(process.env.PREFILL_MAX_QUEUE_PER_PAGE ?? 50)
-}
-
-export function initialPrefillBurst(): number {
-  return Number(process.env.PREFILL_INITIAL_BURST ?? 12)
 }
 
 export function isPrefillEnabled(): boolean {
@@ -36,7 +31,8 @@ export function countPrefillInflight(pageId: string): number {
   ).c
 }
 
-export function getPrefillTarget(pageId: string): number {
+/** Queue target equals the page posts-per-day setting (each page maintains its own backlog). */
+export function getPageQueueTarget(pageId: string): number {
   const page = db.prepare('SELECT daily_reel_limit FROM facebook_pages WHERE id = ?').get(pageId) as
     | { daily_reel_limit: number }
     | undefined
@@ -44,10 +40,12 @@ export function getPrefillTarget(pageId: string): number {
 
   const settings = getPageAutomationSettings(pageId)
   const dailyLimit = Number(page.daily_reel_limit ?? settings.postsPerDay)
-  const { remaining: remainingToday } = getPageQuota(pageId)
+  return Math.min(maxQueuePerPage(), Math.max(0, dailyLimit))
+}
 
-  // Keep today's remaining slots plus one full day buffer (Pro-style backlog).
-  return Math.min(maxQueuePerPage(), remainingToday + dailyLimit)
+/** @deprecated use getPageQueueTarget */
+export function getPrefillTarget(pageId: string): number {
+  return getPageQueueTarget(pageId)
 }
 
 /** Atomically move oldest queued reel to publishing and return its job id. */
@@ -89,21 +87,14 @@ export function createPrefillJob(agencyId: string, userId: string, pageId: strin
   return id
 }
 
-export function fillPagePrefillQueue(
-  page: {
-    id: string
-    agency_id: string
-    user_id: string
-  },
-  options?: { burst?: boolean },
-): string[] {
+export function fillPagePrefillQueue(page: {
+  id: string
+  agency_id: string
+  user_id: string
+}): string[] {
   if (!isPrefillEnabled()) return []
 
-  let target = getPrefillTarget(page.id)
-  if (options?.burst) {
-    target = Math.min(maxQueuePerPage(), Math.max(target, initialPrefillBurst()))
-  }
-
+  const target = getPageQueueTarget(page.id)
   const current = countQueuedForPage(page.id) + countPrefillInflight(page.id)
   const need = Math.max(0, target - current)
   const created: string[] = []

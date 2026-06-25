@@ -199,5 +199,10 @@ export function reactivateSourceForRescrape(pageId: string) {
   void import('./reelDiscovery.js').then(({ probeSourceCatalog }) =>
     probeSourceCatalog(pageId).catch((err) => console.warn('[catalog] probe failed:', err)),
   )
-  void import('./prefillScheduler.js').then(({ tickPrefillQueueForPage }) => tickPrefillQueueForPage(pageId, true))
+  void import('./prefillScheduler.js').then(async ({ tickPrefillQueueForPage }) => {
+    const row = db.prepare('SELECT agency_id FROM facebook_pages WHERE id = ?').get(pageId) as
+      | { agency_id: string }
+      | undefined
+    if (row) tickPrefillQueueForPage(pageId, row.agency_id)
+  })
 }
