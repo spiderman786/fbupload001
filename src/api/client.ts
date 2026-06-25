@@ -85,8 +85,8 @@ export const api = {
       request<{ posts: PageFailedPost[]; reasons: PageFailedReason[] }>(`/pages/${id}/failed-posts`),
     reels: (id: string) =>
       request<{ queue: PageQueueItem[]; history: PageReelHistoryItem[] }>(`/pages/${id}/reels`),
-    queuePreviewUrl: (pageId: string, jobId: string, kind: 'video' | 'thumb' = 'video') =>
-      `${BASE}/pages/${pageId}/queue/${jobId}/preview${kind === 'thumb' ? '?type=thumb' : ''}`,
+    queuePreviewUrl: (pageId: string, jobId: string, kind: 'video' | 'thumb' = 'video', version = 0) =>
+      `${BASE}/pages/${pageId}/queue/${jobId}/preview?${kind === 'thumb' ? 'type=thumb&' : ''}v=${version}`,
     updateQueueCaption: (pageId: string, jobId: string, caption: string) =>
       request<{ caption: string }>(`/pages/${pageId}/queue/${jobId}`, {
         method: 'PATCH',

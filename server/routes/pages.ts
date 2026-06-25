@@ -304,6 +304,8 @@ pagesRouter.get('/:pageId/queue/:jobId/preview', async (req: AgencyRequest, res)
         ? 'image/webp'
         : 'image/jpeg'
       : 'video/mp4'
+  res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('Accept-Ranges', 'bytes')
   res.setHeader('Content-Type', type)
   res.sendFile(path.resolve(filePath))
 })

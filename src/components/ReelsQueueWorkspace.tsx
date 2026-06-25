@@ -29,28 +29,90 @@ function captionSnippet(caption: string | null | undefined, max = 72) {
   return text.length > max ? `${text.slice(0, max)}…` : text
 }
 
+function useAuthenticatedPreview(
+  pageId: string,
+  jobId: string,
+  kind: 'video' | 'thumb',
+  enabled: boolean,
+  version: number,
+) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    if (!enabled) {
+      setUrl(null)
+      setFailed(false)
+      return
+    }
+
+    let objectUrl: string | null = null
+    let cancelled = false
+    setFailed(false)
+
+    fetch(api.pages.queuePreviewUrl(pageId, jobId, kind, version), { credentials: 'include' })
+      .then((res) => {
+        if (!res.ok) throw new Error(String(res.status))
+        return res.blob()
+      })
+      .then((blob) => {
+        if (cancelled) return
+        objectUrl = URL.createObjectURL(blob)
+        setUrl(objectUrl)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setUrl(null)
+          setFailed(true)
+        }
+      })
+
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [pageId, jobId, kind, enabled, version])
+
+  return { url, failed }
+}
+
 function ReelPhonePreview({
   pageId,
   item,
   draftCaption,
+  mediaVersion,
 }: {
   pageId: string
   item: PageQueueItem
   draftCaption: string
+  mediaVersion: number
 }) {
-  const videoUrl = item.hasPreview ? api.pages.queuePreviewUrl(pageId, item.id, 'video') : null
-  const thumbUrl = api.pages.queuePreviewUrl(pageId, item.id, 'thumb')
+  const tryVideo = Boolean(item.hasPreview || item.hasThumbnail)
+  const { url: videoUrl, failed: videoFailed } = useAuthenticatedPreview(
+    pageId,
+    item.id,
+    'video',
+    tryVideo,
+    mediaVersion,
+  )
+  const { url: thumbUrl } = useAuthenticatedPreview(
+    pageId,
+    item.id,
+    'thumb',
+    tryVideo && (!videoUrl || videoFailed),
+    mediaVersion,
+  )
   const username = item.sourceUsername?.replace(/^@/, '') ?? 'creator'
 
   return (
     <div className="mx-auto w-[280px] rounded-[2.5rem] border-[8px] border-foreground bg-black p-2 shadow-2xl">
       <div className="relative overflow-hidden rounded-[1.75rem] bg-black">
         <div className="relative aspect-[9/16] w-full">
-          {videoUrl ? (
+          {videoUrl && !videoFailed ? (
             <video
               key={videoUrl}
               src={videoUrl}
-              poster={thumbUrl}
+              poster={thumbUrl ?? undefined}
               className="h-full w-full object-cover"
               controls
               playsInline
@@ -58,7 +120,7 @@ function ReelPhonePreview({
               muted
               loop
             />
-          ) : item.hasThumbnail || item.hasPreview ? (
+          ) : thumbUrl ? (
             <img src={thumbUrl} alt="" className="h-full w-full object-cover" />
           ) : (
             <div className="flex h-full items-center justify-center text-xs text-white/50">Preview unavailable</div>
@@ -100,26 +162,61 @@ function ReelCurationModal({
   onRefresh: () => void
 }) {
   const toast = useToast()
+  const [localItem, setLocalItem] = useState(item)
   const [draftCaption, setDraftCaption] = useState(item.caption ?? '')
   const [saving, setSaving] = useState(false)
   const [acting, setActing] = useState(false)
   const [refreshingPreview, setRefreshingPreview] = useState(false)
+  const [mediaVersion, setMediaVersion] = useState(0)
+  const [autoRefreshed, setAutoRefreshed] = useState(false)
 
-  const needsPreview = !item.hasPreview || !item.hasThumbnail
+  const needsPreview = !localItem.hasPreview || !localItem.hasThumbnail
 
   useEffect(() => {
+    setLocalItem(item)
     setDraftCaption(item.caption ?? '')
-  }, [item.id, item.caption])
+  }, [item])
+
+  useEffect(() => {
+    setMediaVersion((v) => v + 1)
+    setAutoRefreshed(false)
+  }, [item.id])
 
   const quickTags = defaultHashtags.length
     ? defaultHashtags
     : ['#reels', '#viral', '#trending', '#foryou', '#shorts']
 
+  async function refreshPreview() {
+    if (!canWrite) return
+    setRefreshingPreview(true)
+    try {
+      const result = await api.pages.refreshQueueItem(pageId, localItem.id)
+      setLocalItem((prev) => ({
+        ...prev,
+        hasPreview: result.hasPreview,
+        hasThumbnail: result.hasThumbnail,
+      }))
+      setMediaVersion((v) => v + 1)
+      toast.success(result.refreshed === 'none' ? 'Preview is up to date' : 'Preview refreshed')
+      onRefresh()
+    } catch (err) {
+      toast.error(getApiError(err, 'Could not refresh preview'))
+    } finally {
+      setRefreshingPreview(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!canWrite || !needsPreview || autoRefreshed || refreshingPreview) return
+    setAutoRefreshed(true)
+    void refreshPreview()
+  }, [localItem.id, needsPreview, canWrite, autoRefreshed, refreshingPreview])
+
   async function saveCaption() {
     if (!canWrite) return
     setSaving(true)
     try {
-      await api.pages.updateQueueCaption(pageId, item.id, draftCaption)
+      await api.pages.updateQueueCaption(pageId, localItem.id, draftCaption)
       toast.success('Caption saved')
       onRefresh()
     } catch (err) {
@@ -133,7 +230,7 @@ function ReelCurationModal({
     if (!canWrite) return
     setActing(true)
     try {
-      await api.pages.skipQueueItem(pageId, item.id)
+      await api.pages.skipQueueItem(pageId, localItem.id)
       toast.success('Skipped')
       onRefresh()
       onClose()
@@ -144,26 +241,12 @@ function ReelCurationModal({
     }
   }
 
-  async function refreshPreview() {
-    if (!canWrite) return
-    setRefreshingPreview(true)
-    try {
-      await api.pages.refreshQueueItem(pageId, item.id)
-      toast.success('Preview refreshed')
-      onRefresh()
-    } catch (err) {
-      toast.error(getApiError(err, 'Could not refresh preview'))
-    } finally {
-      setRefreshingPreview(false)
-    }
-  }
-
   async function deleteReel() {
     if (!canWrite) return
     if (!window.confirm('Remove this reel from the queue?')) return
     setActing(true)
     try {
-      await api.pages.deleteQueueItem(pageId, item.id)
+      await api.pages.deleteQueueItem(pageId, localItem.id)
       toast.success('Removed')
       onRefresh()
       onClose()
@@ -206,7 +289,7 @@ function ReelCurationModal({
         </div>
 
         <div className="space-y-5 p-5">
-          <ReelPhonePreview pageId={pageId} item={item} draftCaption={draftCaption} />
+          <ReelPhonePreview pageId={pageId} item={localItem} draftCaption={draftCaption} mediaVersion={mediaVersion} />
           {needsPreview && canWrite ? (
             <button
               type="button"
@@ -226,7 +309,7 @@ function ReelCurationModal({
                 <p className="text-xs text-muted-foreground">Adjust text and hashtags</p>
               </div>
               <span className="rounded-md bg-primary/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
-                {queuePlatformBadgeLabel(item.sourcePlatform)}
+                {queuePlatformBadgeLabel(localItem.sourcePlatform)}
               </span>
             </div>
             <textarea
@@ -238,7 +321,7 @@ function ReelCurationModal({
             />
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
               <span>{draftCaption.length} characters</span>
-              {item.sourceReelId ? <span className="font-mono">ID: {item.sourceReelId}</span> : null}
+              {localItem.sourceReelId ? <span className="font-mono">ID: {localItem.sourceReelId}</span> : null}
             </div>
             <div className="mt-3 flex flex-wrap gap-1.5">
               {quickTags.map((tag) => (
@@ -294,6 +377,7 @@ export function ReelsQueueWorkspace({ pageId, queue, canWrite, defaultHashtags =
   const toast = useToast()
   const [modalItemId, setModalItemId] = useState<string | null>(null)
   const [refreshingMissing, setRefreshingMissing] = useState(false)
+  const [gridVersion, setGridVersion] = useState(0)
 
   const missingPreviewCount = queue.filter((item) => !item.hasPreview || !item.hasThumbnail).length
 
@@ -303,16 +387,30 @@ export function ReelsQueueWorkspace({ pageId, queue, canWrite, defaultHashtags =
   )
 
   useEffect(() => {
+    setGridVersion((v) => v + 1)
+  }, [queue])
+
+  useEffect(() => {
     if (modalItemId && !queue.some((q) => q.id === modalItemId)) {
       setModalItemId(null)
     }
   }, [queue, modalItemId])
+
+  useEffect(() => {
+    const hasPending = queue.some((item) => !item.hasPreview || !item.hasThumbnail)
+    const intervalMs = hasPending ? 15_000 : 30_000
+    const timer = window.setInterval(() => {
+      onRefresh()
+    }, intervalMs)
+    return () => window.clearInterval(timer)
+  }, [queue, onRefresh])
 
   async function refreshMissingPreviews() {
     if (!canWrite || !missingPreviewCount) return
     setRefreshingMissing(true)
     try {
       const result = await api.pages.refreshMissingQueuePreviews(pageId)
+      setGridVersion((v) => v + 1)
       toast.success(`Refreshed ${result.refreshed} of ${result.attempted} preview${result.attempted !== 1 ? 's' : ''}`)
       onRefresh()
     } catch (err) {
@@ -362,6 +460,7 @@ export function ReelsQueueWorkspace({ pageId, queue, canWrite, defaultHashtags =
               {queue.map((item) => {
                 const PlatformIcon = queuePlatformIcon(item.sourcePlatform)
                 const badge = queuePlatformBadgeLabel(item.sourcePlatform)
+                const thumbSrc = api.pages.queuePreviewUrl(pageId, item.id, 'thumb', gridVersion)
                 return (
                   <button
                     key={item.id}
@@ -372,27 +471,11 @@ export function ReelsQueueWorkspace({ pageId, queue, canWrite, defaultHashtags =
                     <div className="relative aspect-[9/16] bg-muted">
                       {item.hasThumbnail || item.hasPreview ? (
                         <img
-                          src={api.pages.queuePreviewUrl(pageId, item.id, 'thumb')}
+                          key={`${item.id}-${item.hasPreview}-${item.hasThumbnail}-${gridVersion}`}
+                          src={thumbSrc}
                           alt=""
                           className="h-full w-full object-cover"
                           loading="lazy"
-                          onError={(e) => {
-                            const el = e.currentTarget
-                            if (item.hasPreview) {
-                              el.style.display = 'none'
-                              const vid = el.nextElementSibling as HTMLVideoElement | null
-                              if (vid) vid.style.display = 'block'
-                            }
-                          }}
-                        />
-                      ) : null}
-                      {item.hasPreview ? (
-                        <video
-                          src={api.pages.queuePreviewUrl(pageId, item.id, 'video')}
-                          className={`h-full w-full object-cover ${item.hasThumbnail ? 'hidden' : ''}`}
-                          muted
-                          playsInline
-                          preload="metadata"
                         />
                       ) : null}
                       {!item.hasThumbnail && !item.hasPreview ? (
