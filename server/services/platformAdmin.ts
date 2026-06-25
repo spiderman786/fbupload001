@@ -23,7 +23,18 @@ export function isPlatformAdminStrictMode(): boolean {
   return getPlatformAdminEmailsFromEnv().length > 0
 }
 
-/** Platform Ops access: explicit allowlist when configured, otherwise any agency admin/owner. */
+function hasAgencyOwnerRole(userId: string): boolean {
+  const member = db
+    .prepare(`
+      SELECT 1 FROM agency_members
+      WHERE user_id = ? AND role = 'owner'
+      LIMIT 1
+    `)
+    .get(userId)
+  return Boolean(member)
+}
+
+/** Platform Ops: allowlisted emails, otherwise agency owners only (never admins/staff). */
 export function isPlatformAdmin(userId: string, email: string): boolean {
   const normalized = email.trim().toLowerCase()
   const allowlist = getPlatformAdminEmailsFromEnv()
@@ -32,15 +43,7 @@ export function isPlatformAdmin(userId: string, email: string): boolean {
     return allowlist.includes(normalized)
   }
 
-  const member = db
-    .prepare(`
-      SELECT 1 FROM agency_members
-      WHERE user_id = ? AND role IN ('owner', 'admin')
-      LIMIT 1
-    `)
-    .get(userId)
-
-  return Boolean(member)
+  return hasAgencyOwnerRole(userId)
 }
 
 /** @deprecated use isPlatformAdmin(userId, email) */
@@ -81,7 +84,7 @@ export async function seedPlatformAdmin(): Promise<void> {
     uuid(),
     agencyId,
     id,
-    'admin',
+    'owner',
   )
 
   console.log(`[ops] Created platform admin ${email}`)
@@ -90,8 +93,8 @@ export async function seedPlatformAdmin(): Promise<void> {
 export function logPlatformAdminMode(): void {
   const allowlist = getPlatformAdminEmailsFromEnv()
   if (allowlist.length > 0) {
-    console.log(`[ops] Strict allowlist mode (${allowlist.length} email${allowlist.length === 1 ? '' : 's'})`)
+    console.log(`[ops] Allowlist mode (${allowlist.length} email${allowlist.length === 1 ? '' : 's'})`)
     return
   }
-  console.log('[ops] Open agency-admin mode (set PLATFORM_ADMIN_EMAILS to restrict /ops to specific emails)')
+  console.log('[ops] Owner-only mode — set PLATFORM_ADMIN_EMAILS on Railway to lock /ops to your Gmail')
 }
