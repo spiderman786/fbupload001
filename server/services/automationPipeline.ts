@@ -13,6 +13,8 @@ import { appendJobLog } from './jobLog.js'
 import { maybeAutoRetryJob } from './autoRetry.js'
 import { applySelfHealingOnJobFailure, resetPageFailureStreak, resetSourceFailureStreak } from './selfHealing.js'
 import { isPlatformFlagEnabled, isAgencyInMaintenance } from './platformSettings.js'
+import { resolvePublishVideoPath } from './queueActions.js'
+import { deleteQueueR2Media, syncQueueMediaToR2 } from './queueMediaSync.js'
 import {
   handlePrefillDiscoveryFailure,
   handlePrefillSuccess,
@@ -205,6 +207,7 @@ async function publishCleanedFile(
   appendJobLog(jobId, 'complete', 'Job finished successfully')
   resetPageFailureStreak(pageId)
   resetSourceFailureStreak(sourceId)
+  await deleteQueueR2Media(loadJob(jobId))
   cleanupJobFiles(agencyId, jobId)
 
   void triggerPrefillRefill()
@@ -232,6 +235,7 @@ async function runPrefillJob(jobId: string) {
 
     db.prepare('UPDATE reel_jobs SET caption = ?, thumbnail_path = ? WHERE id = ?').run(caption, thumbPath, jobId)
     db.prepare("UPDATE reel_jobs SET status = 'queued' WHERE id = ?").run(jobId)
+    await syncQueueMediaToR2(pageId, jobId, cleanedPath, thumbPath)
     appendJobLog(jobId, 'queued', 'Reel ready in publish queue')
     handlePrefillSuccess(pageId)
   } catch (err) {
@@ -248,10 +252,7 @@ async function runPublishFromQueueJob(jobId: string) {
   const ctx = validateJobContext(job)
   const { agencyId, pageId } = ctx
 
-  const cleanedPath = job.cleaned_file_path as string | null
-  if (!cleanedPath || !fs.existsSync(cleanedPath)) {
-    throw new Error('Queued video file missing — re-download required')
-  }
+  const cleanedPath = await resolvePublishVideoPath(job, agencyId)
 
   const discovered = {
     reelId: (job.source_reel_id as string) ?? 'unknown',
@@ -309,7 +310,10 @@ export function failAutomationJob(jobId: string, message: string) {
     jobId,
   )
 
-  if (job) cleanupJobFiles(job.agency_id ?? job.user_id, jobId)
+  if (job) {
+    void deleteQueueR2Media(job as Record<string, unknown>)
+    cleanupJobFiles(job.agency_id ?? job.user_id, jobId)
+  }
 }
 
 export function createAutomationJob(

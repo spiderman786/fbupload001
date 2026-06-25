@@ -686,6 +686,9 @@ export type PageQueueItem = {
   createdAt: string
   hasPreview?: boolean
   hasThumbnail?: boolean
+  /** Cloudflare R2 signed URL when R2 buffer is configured (Pro-style) */
+  previewVideoUrl?: string | null
+  previewThumbUrl?: string | null
 }
 
 export type PageFailedPost = {

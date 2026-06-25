@@ -508,6 +508,7 @@ export function AduPageDetailPage() {
           defaultHashtags={settings.hashtags}
           onRefresh={loadQueue}
           refreshing={queueRefreshing}
+          layout="workspace"
         />
       )}
 

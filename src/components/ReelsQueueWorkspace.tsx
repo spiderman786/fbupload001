@@ -1,5 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Film, Heart, MessageCircle, RefreshCw, Save, Share2, SkipForward, Trash2, X } from 'lucide-react'
+import {
+  CheckCircle2,
+  Film,
+  Heart,
+  MessageCircle,
+  RefreshCw,
+  Save,
+  Share2,
+  SkipForward,
+  Trash2,
+  Volume2,
+  VolumeX,
+  X,
+} from 'lucide-react'
 import { api, type PageQueueItem } from '../api/client'
 import { queuePlatformBadgeLabel, queuePlatformIcon } from '../lib/platformBadge'
 import { useToast } from '../context/ToastContext'
@@ -12,6 +25,8 @@ type Props = {
   defaultHashtags?: string[]
   onRefresh: () => void
   refreshing?: boolean
+  /** Pro-style inline workspace on Reels tab; modal popup on Overview */
+  layout?: 'workspace' | 'modal'
 }
 
 function formatQueueTime(iso: string) {
@@ -76,28 +91,104 @@ function useAuthenticatedPreview(
   return { url, failed }
 }
 
+function useQueueMediaUrl(
+  pageId: string,
+  item: PageQueueItem,
+  kind: 'video' | 'thumb',
+  enabled: boolean,
+  version: number,
+) {
+  const cdnUrl = kind === 'video' ? item.previewVideoUrl : item.previewThumbUrl
+  const auth = useAuthenticatedPreview(pageId, item.id, kind, enabled && !cdnUrl, version)
+  return {
+    url: cdnUrl ?? auth.url,
+    failed: cdnUrl ? false : auth.failed,
+  }
+}
+
+function ReelGridMedia({
+  item,
+  pageId,
+  gridVersion,
+  playVideo,
+}: {
+  item: PageQueueItem
+  pageId: string
+  gridVersion: number
+  playVideo: boolean
+}) {
+  const thumbFallback = api.pages.queuePreviewUrl(pageId, item.id, 'thumb', gridVersion)
+  const thumbUrl = item.previewThumbUrl ?? (item.hasThumbnail ? thumbFallback : null)
+  const videoUrl = item.previewVideoUrl
+
+  if (playVideo && videoUrl) {
+    return (
+      <video
+        key={videoUrl}
+        src={videoUrl}
+        poster={thumbUrl ?? undefined}
+        className="h-full w-full object-cover"
+        playsInline
+        autoPlay
+        muted
+        loop
+      />
+    )
+  }
+
+  if (thumbUrl) {
+    return (
+      <img
+        key={`${item.id}-${gridVersion}`}
+        src={thumbUrl}
+        alt=""
+        className="h-full w-full object-cover"
+        loading="lazy"
+      />
+    )
+  }
+
+  if (item.hasPreview) {
+    return (
+      <img
+        key={`${item.id}-${gridVersion}`}
+        src={thumbFallback}
+        alt=""
+        className="h-full w-full object-cover"
+        loading="lazy"
+      />
+    )
+  }
+
+  return null
+}
+
 function ReelPhonePreview({
   pageId,
   item,
   draftCaption,
   mediaVersion,
+  muted,
+  onToggleMute,
 }: {
   pageId: string
   item: PageQueueItem
   draftCaption: string
   mediaVersion: number
+  muted: boolean
+  onToggleMute?: () => void
 }) {
   const tryVideo = Boolean(item.hasPreview || item.hasThumbnail)
-  const { url: videoUrl, failed: videoFailed } = useAuthenticatedPreview(
+  const { url: videoUrl, failed: videoFailed } = useQueueMediaUrl(
     pageId,
-    item.id,
+    item,
     'video',
     tryVideo,
     mediaVersion,
   )
-  const { url: thumbUrl } = useAuthenticatedPreview(
+  const { url: thumbUrl } = useQueueMediaUrl(
     pageId,
-    item.id,
+    item,
     'thumb',
     tryVideo && (!videoUrl || videoFailed),
     mediaVersion,
@@ -105,40 +196,52 @@ function ReelPhonePreview({
   const username = item.sourceUsername?.replace(/^@/, '') ?? 'creator'
 
   return (
-    <div className="mx-auto w-[280px] rounded-[2.5rem] border-[8px] border-foreground bg-black p-2 shadow-2xl">
-      <div className="relative overflow-hidden rounded-[1.75rem] bg-black">
-        <div className="relative aspect-[9/16] w-full">
-          {videoUrl && !videoFailed ? (
-            <video
-              key={videoUrl}
-              src={videoUrl}
-              poster={thumbUrl ?? undefined}
-              className="h-full w-full object-cover"
-              controls
-              playsInline
-              autoPlay
-              muted
-              loop
-            />
-          ) : thumbUrl ? (
-            <img src={thumbUrl} alt="" className="h-full w-full object-cover" />
-          ) : (
-            <div className="flex h-full items-center justify-center text-xs text-white/50">Preview unavailable</div>
-          )}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-3 pt-16">
-            <p className="text-xs font-semibold text-white">@{username}</p>
-            <p className="mt-1 line-clamp-3 text-[11px] leading-snug text-white/95">{draftCaption || 'No caption'}</p>
-          </div>
-          <div className="pointer-events-none absolute bottom-16 right-2 flex flex-col items-center gap-3 text-white">
-            <div className="flex flex-col items-center gap-0.5">
-              <Heart className="h-5 w-5 fill-red-500 text-red-500" />
-              <span className="text-[10px] font-medium">1.2k</span>
+    <div className="relative mx-auto w-[280px]">
+      {onToggleMute && videoUrl && !videoFailed ? (
+        <button
+          type="button"
+          onClick={onToggleMute}
+          className="absolute right-2 top-2 z-10 rounded-full bg-black/60 p-2 text-white hover:bg-black/80"
+          title={muted ? 'Unmute' : 'Mute'}
+        >
+          {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+        </button>
+      ) : null}
+      <div className="rounded-[2.5rem] border-[8px] border-foreground bg-black p-2 shadow-2xl">
+        <div className="relative overflow-hidden rounded-[1.75rem] bg-black">
+          <div className="relative aspect-[9/16] w-full">
+            {videoUrl && !videoFailed ? (
+              <video
+                key={videoUrl}
+                src={videoUrl}
+                poster={thumbUrl ?? undefined}
+                className="h-full w-full object-cover"
+                controls
+                playsInline
+                autoPlay
+                muted={muted}
+                loop
+              />
+            ) : thumbUrl ? (
+              <img src={thumbUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full items-center justify-center text-xs text-white/50">Preview unavailable</div>
+            )}
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-3 pt-16">
+              <p className="text-xs font-semibold text-white">@{username}</p>
+              <p className="mt-1 line-clamp-3 text-[11px] leading-snug text-white/95">{draftCaption || 'No caption'}</p>
             </div>
-            <div className="flex flex-col items-center gap-0.5">
-              <MessageCircle className="h-5 w-5" />
-              <span className="text-[10px] font-medium">48</span>
+            <div className="pointer-events-none absolute bottom-16 right-2 flex flex-col items-center gap-3 text-white">
+              <div className="flex flex-col items-center gap-0.5">
+                <Heart className="h-5 w-5 fill-red-500 text-red-500" />
+                <span className="text-[10px] font-medium">1.2k</span>
+              </div>
+              <div className="flex flex-col items-center gap-0.5">
+                <MessageCircle className="h-5 w-5" />
+                <span className="text-[10px] font-medium">48</span>
+              </div>
+              <Share2 className="h-5 w-5" />
             </div>
-            <Share2 className="h-5 w-5" />
           </div>
         </div>
       </div>
@@ -146,20 +249,22 @@ function ReelPhonePreview({
   )
 }
 
-function ReelCurationModal({
+function ReelCurationPanel({
   pageId,
   item,
   canWrite,
   defaultHashtags,
-  onClose,
   onRefresh,
+  onRemoved,
+  layout,
 }: {
   pageId: string
   item: PageQueueItem
   canWrite: boolean
   defaultHashtags: string[]
-  onClose: () => void
   onRefresh: () => void
+  onRemoved?: () => void
+  layout: 'workspace' | 'modal'
 }) {
   const toast = useToast()
   const [localItem, setLocalItem] = useState(item)
@@ -169,6 +274,7 @@ function ReelCurationModal({
   const [refreshingPreview, setRefreshingPreview] = useState(false)
   const [mediaVersion, setMediaVersion] = useState(0)
   const [autoRefreshed, setAutoRefreshed] = useState(false)
+  const [muted, setMuted] = useState(true)
 
   const needsPreview = !localItem.hasPreview || !localItem.hasThumbnail
 
@@ -180,6 +286,7 @@ function ReelCurationModal({
   useEffect(() => {
     setMediaVersion((v) => v + 1)
     setAutoRefreshed(false)
+    setMuted(true)
   }, [item.id])
 
   const quickTags = defaultHashtags.length
@@ -233,7 +340,7 @@ function ReelCurationModal({
       await api.pages.skipQueueItem(pageId, localItem.id)
       toast.success('Skipped')
       onRefresh()
-      onClose()
+      onRemoved?.()
     } catch (err) {
       toast.error(getApiError(err, 'Skip failed'))
     } finally {
@@ -249,7 +356,7 @@ function ReelCurationModal({
       await api.pages.deleteQueueItem(pageId, localItem.id)
       toast.success('Removed')
       onRefresh()
-      onClose()
+      onRemoved?.()
     } catch (err) {
       toast.error(getApiError(err, 'Delete failed'))
     } finally {
@@ -267,6 +374,153 @@ function ReelCurationModal({
     })
   }
 
+  const editor = (
+    <>
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div>
+            <h4 className="font-semibold">Caption Editor</h4>
+            <p className="text-xs text-muted-foreground">Adjust text and hashtags</p>
+          </div>
+          <span className="rounded-md bg-primary/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+            {queuePlatformBadgeLabel(localItem.sourcePlatform)}
+          </span>
+        </div>
+        <textarea
+          value={draftCaption}
+          onChange={(e) => setDraftCaption(e.target.value)}
+          disabled={!canWrite}
+          rows={5}
+          placeholder="Type your caption here..."
+          className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm disabled:opacity-60"
+        />
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>{draftCaption.length} characters</span>
+          {localItem.sourceReelId ? <span className="font-mono">ID: {localItem.sourceReelId}</span> : null}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {quickTags.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              disabled={!canWrite}
+              onClick={() => appendHashtag(tag)}
+              className="rounded-full border border-primary/30 bg-primary/5 px-2.5 py-1 text-xs text-primary hover:bg-primary/10 disabled:opacity-50"
+            >
+              {tag.startsWith('#') ? tag : `#${tag}`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-3">
+        <button
+          type="button"
+          onClick={saveCaption}
+          disabled={!canWrite || saving}
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-foreground px-4 py-3 text-sm font-semibold text-background disabled:opacity-50 sm:col-span-3"
+        >
+          <Save className="h-4 w-4" />
+          {saving ? 'Saving…' : 'Save Caption'}
+        </button>
+        <button
+          type="button"
+          onClick={skipReel}
+          disabled={!canWrite || acting}
+          className="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-amber-400 bg-background px-4 py-3 text-sm font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+        >
+          <SkipForward className="h-4 w-4" />
+          Skip
+        </button>
+        <button
+          type="button"
+          onClick={deleteReel}
+          disabled={!canWrite || acting}
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50 sm:col-span-2"
+        >
+          <Trash2 className="h-4 w-4" />
+          Delete
+        </button>
+      </div>
+    </>
+  )
+
+  if (layout === 'workspace') {
+    return (
+      <section className="rounded-xl border border-border bg-card p-5">
+        <div className="mb-4">
+          <h3 className="font-semibold">Interactive Workspace</h3>
+          <p className="text-sm text-muted-foreground">Mobile preview &amp; detailed configuration</p>
+        </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div className="space-y-3">
+            <ReelPhonePreview
+              pageId={pageId}
+              item={localItem}
+              draftCaption={draftCaption}
+              mediaVersion={mediaVersion}
+              muted={muted}
+              onToggleMute={() => setMuted((m) => !m)}
+            />
+            {needsPreview && canWrite ? (
+              <button
+                type="button"
+                onClick={refreshPreview}
+                disabled={refreshingPreview || acting}
+                className="mx-auto flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted disabled:opacity-50"
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshingPreview ? 'animate-spin' : ''}`} />
+                {refreshingPreview ? 'Refreshing preview…' : 'Refresh preview'}
+              </button>
+            ) : null}
+          </div>
+          <div className="space-y-4">{editor}</div>
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      <ReelPhonePreview
+        pageId={pageId}
+        item={localItem}
+        draftCaption={draftCaption}
+        mediaVersion={mediaVersion}
+        muted={muted}
+        onToggleMute={() => setMuted((m) => !m)}
+      />
+      {needsPreview && canWrite ? (
+        <button
+          type="button"
+          onClick={refreshPreview}
+          disabled={refreshingPreview || acting}
+          className="mx-auto flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted disabled:opacity-50"
+        >
+          <RefreshCw className={`h-4 w-4 ${refreshingPreview ? 'animate-spin' : ''}`} />
+          {refreshingPreview ? 'Refreshing preview…' : 'Refresh preview'}
+        </button>
+      ) : null}
+      {editor}
+    </div>
+  )
+}
+
+function ReelCurationModal({
+  pageId,
+  item,
+  canWrite,
+  defaultHashtags,
+  onClose,
+  onRefresh,
+}: {
+  pageId: string
+  item: PageQueueItem
+  canWrite: boolean
+  defaultHashtags: string[]
+  onClose: () => void
+  onRefresh: () => void
+}) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div
@@ -287,108 +541,59 @@ function ReelCurationModal({
             <X className="h-4 w-4" />
           </button>
         </div>
-
-        <div className="space-y-5 p-5">
-          <ReelPhonePreview pageId={pageId} item={localItem} draftCaption={draftCaption} mediaVersion={mediaVersion} />
-          {needsPreview && canWrite ? (
-            <button
-              type="button"
-              onClick={refreshPreview}
-              disabled={refreshingPreview || acting}
-              className="mx-auto flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted disabled:opacity-50"
-            >
-              <RefreshCw className={`h-4 w-4 ${refreshingPreview ? 'animate-spin' : ''}`} />
-              {refreshingPreview ? 'Refreshing preview…' : 'Refresh preview'}
-            </button>
-          ) : null}
-
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <div>
-                <h4 className="font-semibold">Caption Editor</h4>
-                <p className="text-xs text-muted-foreground">Adjust text and hashtags</p>
-              </div>
-              <span className="rounded-md bg-primary/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
-                {queuePlatformBadgeLabel(localItem.sourcePlatform)}
-              </span>
-            </div>
-            <textarea
-              value={draftCaption}
-              onChange={(e) => setDraftCaption(e.target.value)}
-              disabled={!canWrite}
-              rows={5}
-              className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm disabled:opacity-60"
-            />
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-              <span>{draftCaption.length} characters</span>
-              {localItem.sourceReelId ? <span className="font-mono">ID: {localItem.sourceReelId}</span> : null}
-            </div>
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {quickTags.map((tag) => (
-                <button
-                  key={tag}
-                  type="button"
-                  disabled={!canWrite}
-                  onClick={() => appendHashtag(tag)}
-                  className="rounded-full border border-primary/30 bg-primary/5 px-2.5 py-1 text-xs text-primary hover:bg-primary/10 disabled:opacity-50"
-                >
-                  {tag.startsWith('#') ? tag : `#${tag}`}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid gap-2 sm:grid-cols-3">
-            <button
-              type="button"
-              onClick={saveCaption}
-              disabled={!canWrite || saving}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-foreground px-4 py-3 text-sm font-semibold text-background disabled:opacity-50 sm:col-span-3"
-            >
-              <Save className="h-4 w-4" />
-              {saving ? 'Saving…' : 'Save Caption'}
-            </button>
-            <button
-              type="button"
-              onClick={skipReel}
-              disabled={!canWrite || acting}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-amber-400 bg-background px-4 py-3 text-sm font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
-            >
-              <SkipForward className="h-4 w-4" />
-              Skip
-            </button>
-            <button
-              type="button"
-              onClick={deleteReel}
-              disabled={!canWrite || acting}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50 sm:col-span-2"
-            >
-              <Trash2 className="h-4 w-4" />
-              Delete
-            </button>
-          </div>
+        <div className="p-5">
+          <ReelCurationPanel
+            pageId={pageId}
+            item={item}
+            canWrite={canWrite}
+            defaultHashtags={defaultHashtags}
+            onRefresh={onRefresh}
+            onRemoved={onClose}
+            layout="modal"
+          />
         </div>
       </div>
     </div>
   )
 }
 
-export function ReelsQueueWorkspace({ pageId, queue, canWrite, defaultHashtags = [], onRefresh, refreshing }: Props) {
+export function ReelsQueueWorkspace({
+  pageId,
+  queue,
+  canWrite,
+  defaultHashtags = [],
+  onRefresh,
+  refreshing,
+  layout = 'modal',
+}: Props) {
   const toast = useToast()
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [modalItemId, setModalItemId] = useState<string | null>(null)
   const [refreshingMissing, setRefreshingMissing] = useState(false)
   const [gridVersion, setGridVersion] = useState(0)
 
   const missingPreviewCount = queue.filter((item) => !item.hasPreview || !item.hasThumbnail).length
 
-  const modalItem = useMemo(
-    () => queue.find((q) => q.id === modalItemId) ?? null,
-    [queue, modalItemId],
+  const activeId = layout === 'workspace' ? selectedId : modalItemId
+  const selectedItem = useMemo(
+    () => queue.find((q) => q.id === activeId) ?? null,
+    [queue, activeId],
   )
 
   useEffect(() => {
     setGridVersion((v) => v + 1)
   }, [queue])
+
+  useEffect(() => {
+    if (layout !== 'workspace') return
+    if (!queue.length) {
+      setSelectedId(null)
+      return
+    }
+    if (!selectedId || !queue.some((q) => q.id === selectedId)) {
+      setSelectedId(queue[0]!.id)
+    }
+  }, [layout, queue, selectedId])
 
   useEffect(() => {
     if (modalItemId && !queue.some((q) => q.id === modalItemId)) {
@@ -418,6 +623,11 @@ export function ReelsQueueWorkspace({ pageId, queue, canWrite, defaultHashtags =
     } finally {
       setRefreshingMissing(false)
     }
+  }
+
+  function selectItem(id: string) {
+    if (layout === 'workspace') setSelectedId(id)
+    else setModalItemId(id)
   }
 
   return (
@@ -456,26 +666,33 @@ export function ReelsQueueWorkspace({ pageId, queue, canWrite, defaultHashtags =
 
         <div className="mt-5">
           {queue.length ? (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            <div
+              className={
+                layout === 'workspace'
+                  ? 'flex gap-3 overflow-x-auto pb-2'
+                  : 'grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'
+              }
+            >
               {queue.map((item) => {
                 const PlatformIcon = queuePlatformIcon(item.sourcePlatform)
                 const badge = queuePlatformBadgeLabel(item.sourcePlatform)
-                const thumbSrc = api.pages.queuePreviewUrl(pageId, item.id, 'thumb', gridVersion)
+                const isSelected = activeId === item.id
                 return (
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => setModalItemId(item.id)}
-                    className="group relative overflow-hidden rounded-xl border border-border text-left transition hover:border-primary/40 hover:shadow-md"
+                    onClick={() => selectItem(item.id)}
+                    className={`group relative shrink-0 overflow-hidden rounded-xl border text-left transition hover:shadow-md ${
+                      layout === 'workspace' ? 'w-[140px] sm:w-[160px]' : ''
+                    } ${isSelected ? 'border-primary ring-2 ring-primary/30' : 'border-border hover:border-primary/40'}`}
                   >
                     <div className="relative aspect-[9/16] bg-muted">
                       {item.hasThumbnail || item.hasPreview ? (
-                        <img
-                          key={`${item.id}-${item.hasPreview}-${item.hasThumbnail}-${gridVersion}`}
-                          src={thumbSrc}
-                          alt=""
-                          className="h-full w-full object-cover"
-                          loading="lazy"
+                        <ReelGridMedia
+                          item={item}
+                          pageId={pageId}
+                          gridVersion={gridVersion}
+                          playVideo={layout === 'workspace'}
                         />
                       ) : null}
                       {!item.hasThumbnail && !item.hasPreview ? (
@@ -488,6 +705,11 @@ export function ReelsQueueWorkspace({ pageId, queue, canWrite, defaultHashtags =
                         <PlatformIcon className="h-3 w-3" />
                         {badge}
                       </span>
+                      {isSelected ? (
+                        <span className="absolute right-2 top-2 rounded-full bg-emerald-500 p-0.5 text-white shadow">
+                          <CheckCircle2 className="h-4 w-4" />
+                        </span>
+                      ) : null}
                       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-2 pt-8">
                         <p className="line-clamp-2 text-[11px] leading-snug text-white">{captionSnippet(item.caption, 56)}</p>
                         <p className="mt-1 text-[10px] text-white/70">{formatQueueTime(item.createdAt)}</p>
@@ -510,10 +732,21 @@ export function ReelsQueueWorkspace({ pageId, queue, canWrite, defaultHashtags =
         </div>
       </section>
 
-      {modalItem ? (
+      {layout === 'workspace' && selectedItem ? (
+        <ReelCurationPanel
+          pageId={pageId}
+          item={selectedItem}
+          canWrite={canWrite}
+          defaultHashtags={defaultHashtags}
+          onRefresh={onRefresh}
+          layout="workspace"
+        />
+      ) : null}
+
+      {layout === 'modal' && modalItemId && selectedItem ? (
         <ReelCurationModal
           pageId={pageId}
-          item={modalItem}
+          item={selectedItem}
           canWrite={canWrite}
           defaultHashtags={defaultHashtags}
           onClose={() => setModalItemId(null)}

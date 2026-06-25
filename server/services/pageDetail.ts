@@ -3,6 +3,7 @@ import { getPageAutomationSettings, ensurePageAutomationSettings } from './pageA
 import { getPageScrapeInfo } from './scrapeStatus.js'
 import { queueItemHasPreview } from './queueActions.js'
 import { getPageTodayStats, syncPagePostedToday } from '../utils/pageDayStats.js'
+import { getSignedPreviewUrl, isR2Enabled } from './r2Storage.js'
 
 export function getAgencyPage(pageId: string, agencyId: string) {
   return db.prepare('SELECT * FROM facebook_pages WHERE id = ? AND agency_id = ?').get(pageId, agencyId) as
@@ -133,11 +134,11 @@ export function getPageDetail(pageId: string, agencyId: string) {
   }
 }
 
-export function getPageQueue(pageId: string) {
-  return db
+export async function getPageQueue(pageId: string) {
+  const rows = db
     .prepare(`
       SELECT r.id, r.status, r.source_url, r.source_reel_id, r.created_at, r.caption,
-        r.thumbnail_path, r.cleaned_file_path,
+        r.thumbnail_path, r.cleaned_file_path, r.r2_video_key, r.r2_thumb_key,
         s.username as source_username, s.platform as source_platform
       FROM reel_jobs r
       LEFT JOIN source_accounts s ON s.id = r.source_account_id
@@ -146,9 +147,28 @@ export function getPageQueue(pageId: string) {
       LIMIT 100
     `)
     .all(pageId)
-    .map((row) => {
+
+  return Promise.all(
+    rows.map(async (row) => {
       const r = row as Record<string, unknown>
-      const preview = queueItemHasPreview(r.cleaned_file_path, r.thumbnail_path)
+      const preview = queueItemHasPreview(
+        r.cleaned_file_path,
+        r.thumbnail_path,
+        r.r2_video_key,
+        r.r2_thumb_key,
+      )
+
+      let previewVideoUrl: string | null = null
+      let previewThumbUrl: string | null = null
+      if (isR2Enabled()) {
+        if (typeof r.r2_video_key === 'string' && r.r2_video_key) {
+          previewVideoUrl = await getSignedPreviewUrl(r.r2_video_key)
+        }
+        if (typeof r.r2_thumb_key === 'string' && r.r2_thumb_key) {
+          previewThumbUrl = await getSignedPreviewUrl(r.r2_thumb_key)
+        }
+      }
+
       return {
         id: r.id,
         status: r.status,
@@ -160,8 +180,11 @@ export function getPageQueue(pageId: string) {
         createdAt: r.created_at,
         hasPreview: preview.hasPreview,
         hasThumbnail: preview.hasThumbnail,
+        previewVideoUrl,
+        previewThumbUrl,
       }
-    })
+    }),
+  )
 }
 
 export function getPageFailedPosts(pageId: string, limit = 50) {

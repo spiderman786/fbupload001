@@ -35,7 +35,7 @@ automationRouter.get('/assignments', (req: AgencyRequest, res) => {
   })
 })
 
-automationRouter.put('/assignments/:pageId', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
+automationRouter.put('/assignments/:pageId', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
   const { sourceId } = req.body ?? {}
   if (!sourceId || typeof sourceId !== 'string') {
     res.status(400).json({ error: 'sourceId is required' })
@@ -80,7 +80,7 @@ automationRouter.put('/assignments/:pageId', requireRole('owner', 'admin'), (req
   }
 
   if (!previous || previous.source_account_id !== sourceId) {
-    purgeQueuedJobsForPage(req.params.pageId, req.agency!.id)
+    await purgeQueuedJobsForPage(req.params.pageId, req.agency!.id)
     markSourceScrapingPending(req.params.pageId)
     db.prepare('UPDATE page_source_assignments SET catalog_total = NULL WHERE page_id = ?').run(req.params.pageId)
     void probeSourceCatalog(req.params.pageId).catch((err) =>

@@ -292,6 +292,8 @@ function migrate() {
     ['source_reel_id', 'TEXT'],
     ['caption', 'TEXT'],
     ['thumbnail_path', 'TEXT'],
+    ['r2_video_key', 'TEXT'],
+    ['r2_thumb_key', 'TEXT'],
   ]
   for (const [col, type] of jobMigrations) {
     if (!jobNames.has(col)) db.exec(`ALTER TABLE reel_jobs ADD COLUMN ${col} ${type}`)

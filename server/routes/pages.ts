@@ -25,13 +25,13 @@ import {
   removeQueuedJob,
   resolveQueueMediaPath,
   ensureQueueThumbnail,
-  queueItemHasPreview,
   refreshQueueItemMedia,
   refreshMissingQueuePreviews,
 } from '../services/queueActions.js'
 import { getTodayStatsForPages } from '../utils/pageDayStats.js'
 import { getPageQuota } from '../services/pageQuota.js'
 import path from 'path'
+import { getSignedPreviewUrl, isR2Enabled } from '../services/r2Storage.js'
 
 export const pagesRouter = Router()
 pagesRouter.use(authMiddleware, requireVerified, agencyMiddleware)
@@ -247,12 +247,12 @@ pagesRouter.get('/:id/insights', async (req: AgencyRequest, res) => {
   res.json({ insights })
 })
 
-pagesRouter.get('/:id/queue', (req: AgencyRequest, res) => {
+pagesRouter.get('/:id/queue', async (req: AgencyRequest, res) => {
   if (!requirePage(req, req.params.id)) {
     res.status(404).json({ error: 'Page not found' })
     return
   }
-  res.json({ queue: getPageQueue(req.params.id) })
+  res.json({ queue: await getPageQueue(req.params.id) })
 })
 
 pagesRouter.get('/:id/failed-posts', (req: AgencyRequest, res) => {
@@ -266,13 +266,13 @@ pagesRouter.get('/:id/failed-posts', (req: AgencyRequest, res) => {
   })
 })
 
-pagesRouter.get('/:id/reels', (req: AgencyRequest, res) => {
+pagesRouter.get('/:id/reels', async (req: AgencyRequest, res) => {
   if (!requirePage(req, req.params.id)) {
     res.status(404).json({ error: 'Page not found' })
     return
   }
   res.json({
-    queue: getPageQueue(req.params.id),
+    queue: await getPageQueue(req.params.id),
     history: getPageReelsHistory(req.params.id),
   })
 })
@@ -289,6 +289,14 @@ pagesRouter.get('/:pageId/queue/:jobId/preview', async (req: AgencyRequest, res)
     return
   }
   const kind = req.query.type === 'thumb' ? 'thumbnail' : 'video'
+  const r2Key =
+    kind === 'thumbnail' ? (job.r2_thumb_key as string | null) : (job.r2_video_key as string | null)
+  if (r2Key && isR2Enabled()) {
+    const signed = await getSignedPreviewUrl(r2Key)
+    res.redirect(302, signed)
+    return
+  }
+
   let filePath =
     kind === 'thumbnail'
       ? await ensureQueueThumbnail(job, req.params.jobId)
@@ -336,7 +344,7 @@ pagesRouter.delete('/:pageId/queue/:jobId', requireRole('owner', 'admin'), async
     return
   }
   try {
-    removeQueuedJob(req.params.jobId, pageId, req.agency!.id)
+    await removeQueuedJob(req.params.jobId, pageId, req.agency!.id)
     const { tickPrefillQueue } = await import('../services/prefillScheduler.js')
     tickPrefillQueue()
     res.json({ message: 'Removed from queue' })
@@ -380,7 +388,7 @@ pagesRouter.post('/:pageId/queue/:jobId/skip', requireRole('owner', 'admin'), as
     return
   }
   try {
-    removeQueuedJob(req.params.jobId, pageId, req.agency!.id)
+    await removeQueuedJob(req.params.jobId, pageId, req.agency!.id)
     const { tickPrefillQueue } = await import('../services/prefillScheduler.js')
     tickPrefillQueue()
     res.json({ message: 'Skipped — next reel will pre-download' })
