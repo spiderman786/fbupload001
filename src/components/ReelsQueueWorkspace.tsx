@@ -99,10 +99,19 @@ function useQueueMediaUrl(
   version: number,
 ) {
   const cdnUrl = kind === 'video' ? item.previewVideoUrl : item.previewThumbUrl
-  const auth = useAuthenticatedPreview(pageId, item.id, kind, enabled && !cdnUrl, version)
+  const [cdnFailed, setCdnFailed] = useState(false)
+
+  useEffect(() => {
+    setCdnFailed(false)
+  }, [cdnUrl, item.id, kind, version])
+
+  const useAuth = enabled && (!cdnUrl || cdnFailed)
+  const auth = useAuthenticatedPreview(pageId, item.id, kind, useAuth, version)
+
   return {
-    url: cdnUrl ?? auth.url,
-    failed: cdnUrl ? false : auth.failed,
+    url: cdnUrl && !cdnFailed ? cdnUrl : auth.url,
+    failed: Boolean(cdnUrl && cdnFailed && auth.failed),
+    onCdnError: () => setCdnFailed(true),
   }
 }
 
@@ -117,33 +126,50 @@ function ReelGridMedia({
   gridVersion: number
   playVideo: boolean
 }) {
-  const thumbFallback = api.pages.queuePreviewUrl(pageId, item.id, 'thumb', gridVersion)
-  const thumbUrl = item.previewThumbUrl ?? (item.hasThumbnail ? thumbFallback : null)
-  const videoUrl = item.previewVideoUrl
+  const tryMedia = Boolean(item.hasPreview || item.hasThumbnail)
+  const { url: videoUrl, onCdnError: onVideoCdnError } = useQueueMediaUrl(
+    pageId,
+    item,
+    'video',
+    tryMedia && playVideo,
+    gridVersion,
+  )
+  const { url: thumbUrl, onCdnError: onThumbCdnError } = useQueueMediaUrl(
+    pageId,
+    item,
+    'thumb',
+    tryMedia,
+    gridVersion,
+  )
+  const authThumbUrl = api.pages.queuePreviewUrl(pageId, item.id, 'thumb', gridVersion)
 
   if (playVideo && videoUrl) {
     return (
       <video
         key={videoUrl}
         src={videoUrl}
-        poster={thumbUrl ?? undefined}
+        poster={thumbUrl ?? authThumbUrl}
         className="h-full w-full object-cover"
         playsInline
         autoPlay
         muted
         loop
+        onError={onVideoCdnError}
       />
     )
   }
 
-  if (thumbUrl) {
+  const displayThumb = thumbUrl ?? (item.hasThumbnail ? authThumbUrl : null)
+
+  if (displayThumb) {
     return (
       <img
-        key={`${item.id}-${gridVersion}`}
-        src={thumbUrl}
+        key={`${item.id}-${gridVersion}-${displayThumb}`}
+        src={displayThumb}
         alt=""
         className="h-full w-full object-cover"
         loading="lazy"
+        onError={onThumbCdnError}
       />
     )
   }
@@ -152,7 +178,7 @@ function ReelGridMedia({
     return (
       <img
         key={`${item.id}-${gridVersion}`}
-        src={thumbFallback}
+        src={authThumbUrl}
         alt=""
         className="h-full w-full object-cover"
         loading="lazy"
@@ -179,14 +205,14 @@ function ReelPhonePreview({
   onToggleMute?: () => void
 }) {
   const tryVideo = Boolean(item.hasPreview || item.hasThumbnail)
-  const { url: videoUrl, failed: videoFailed } = useQueueMediaUrl(
+  const { url: videoUrl, failed: videoFailed, onCdnError: onVideoCdnError } = useQueueMediaUrl(
     pageId,
     item,
     'video',
     tryVideo,
     mediaVersion,
   )
-  const { url: thumbUrl } = useQueueMediaUrl(
+  const { url: thumbUrl, onCdnError: onThumbCdnError } = useQueueMediaUrl(
     pageId,
     item,
     'thumb',
@@ -221,9 +247,10 @@ function ReelPhonePreview({
                 autoPlay
                 muted={muted}
                 loop
+                onError={onVideoCdnError}
               />
             ) : thumbUrl ? (
-              <img src={thumbUrl} alt="" className="h-full w-full object-cover" />
+              <img src={thumbUrl} alt="" className="h-full w-full object-cover" onError={onThumbCdnError} />
             ) : (
               <div className="flex h-full items-center justify-center text-xs text-white/50">Preview unavailable</div>
             )}
@@ -616,7 +643,15 @@ export function ReelsQueueWorkspace({
     try {
       const result = await api.pages.refreshMissingQueuePreviews(pageId)
       setGridVersion((v) => v + 1)
-      toast.success(`Refreshed ${result.refreshed} of ${result.attempted} preview${result.attempted !== 1 ? 's' : ''}`)
+      if (result.background) {
+        toast.success(
+          result.alreadyRunning
+            ? 'Preview repair already in progress'
+            : `Repairing ${result.attempted} preview${result.attempted !== 1 ? 's' : ''} — queue will update automatically`,
+        )
+      } else {
+        toast.success(`Refreshed ${result.refreshed} of ${result.attempted} preview${result.attempted !== 1 ? 's' : ''}`)
+      }
       onRefresh()
     } catch (err) {
       toast.error(getApiError(err, 'Could not refresh previews'))

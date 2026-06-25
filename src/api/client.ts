@@ -102,10 +102,14 @@ export const api = {
         { method: 'POST' },
       ),
     refreshMissingQueuePreviews: (pageId: string) =>
-      request<{ attempted: number; refreshed: number; failed: number; results: { jobId: string; ok: boolean; error?: string }[] }>(
-        `/pages/${pageId}/queue/refresh-missing`,
-        { method: 'POST' },
-      ),
+      request<{
+        attempted: number
+        refreshed: number
+        failed: number
+        background?: boolean
+        alreadyRunning?: boolean
+        results: { jobId: string; ok: boolean; error?: string }[]
+      }>(`/pages/${pageId}/queue/refresh-missing`, { method: 'POST' }),
     updateAutomationSettings: (
       id: string,
       body: {

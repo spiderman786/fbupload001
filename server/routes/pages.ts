@@ -31,7 +31,7 @@ import {
 import { getTodayStatsForPages } from '../utils/pageDayStats.js'
 import { getPageQuota } from '../services/pageQuota.js'
 import path from 'path'
-import { getSignedPreviewUrl, isR2Enabled } from '../services/r2Storage.js'
+import { getSignedPreviewUrl, isR2Enabled, pipeQueueFileToResponse } from '../services/r2Storage.js'
 
 export const pagesRouter = Router()
 pagesRouter.use(authMiddleware, requireVerified, agencyMiddleware)
@@ -292,9 +292,26 @@ pagesRouter.get('/:pageId/queue/:jobId/preview', async (req: AgencyRequest, res)
   const r2Key =
     kind === 'thumbnail' ? (job.r2_thumb_key as string | null) : (job.r2_video_key as string | null)
   if (r2Key && isR2Enabled()) {
-    const signed = await getSignedPreviewUrl(r2Key)
-    res.redirect(302, signed)
-    return
+    if (req.query.direct === '1') {
+      const signed = await getSignedPreviewUrl(r2Key)
+      res.redirect(302, signed)
+      return
+    }
+    const ext = kind === 'thumbnail' ? path.extname(r2Key).toLowerCase() : '.mp4'
+    const type =
+      kind === 'thumbnail'
+        ? ext === '.webp'
+          ? 'image/webp'
+          : 'image/jpeg'
+        : 'video/mp4'
+    try {
+      await pipeQueueFileToResponse(r2Key, res, type)
+      return
+    } catch (err) {
+      console.warn('[preview] R2 stream failed:', r2Key, err)
+      res.status(404).json({ error: 'Media not available in CDN' })
+      return
+    }
   }
 
   let filePath =

@@ -1,5 +1,7 @@
 import fs from 'fs'
 import path from 'path'
+import { pipeline } from 'stream/promises'
+import type { Response } from 'express'
 import { GetObjectCommand, PutObjectCommand, DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
@@ -70,6 +72,30 @@ export async function getSignedPreviewUrl(key: string): Promise<string> {
     }),
     { expiresIn: SIGNED_TTL },
   )
+}
+
+/** Stream an R2 object through the app (avoids browser CORS issues on signed URLs). */
+export async function pipeQueueFileToResponse(key: string, res: Response, contentType: string): Promise<void> {
+  const s3 = getClient()
+  if (!s3) throw new Error('R2 is not configured')
+
+  const obj = await s3.send(
+    new GetObjectCommand({
+      Bucket: bucketName(),
+      Key: key,
+    }),
+  )
+
+  if (!obj.Body) throw new Error('Empty R2 object')
+
+  res.setHeader('Content-Type', contentType)
+  res.setHeader('Accept-Ranges', 'bytes')
+  res.setHeader('Cache-Control', 'private, max-age=300')
+  if (obj.ContentLength != null) {
+    res.setHeader('Content-Length', String(obj.ContentLength))
+  }
+
+  await pipeline(obj.Body as NodeJS.ReadableStream, res)
 }
 
 export async function downloadQueueFile(key: string, destPath: string): Promise<void> {

@@ -66,6 +66,59 @@ export function resolveQueueMediaPath(
   return p && fs.existsSync(p) ? p : null
 }
 
+/** Rebuild a download URL when older queue rows lost source_url but still have source_reel_id. */
+export function resolveQueueSourceUrl(job: Record<string, unknown>): string | null {
+  const existing = job.source_url as string | null
+  if (existing?.trim() && !existing.startsWith('mock://')) return existing.trim()
+
+  const reelId = job.source_reel_id as string | null
+  if (!reelId?.trim()) return null
+
+  const posted = db
+    .prepare(`
+      SELECT source_url FROM posted_reels
+      WHERE source_reel_id = ? AND source_url IS NOT NULL AND source_url != ''
+      ORDER BY created_at DESC
+      LIMIT 1
+    `)
+    .get(reelId) as { source_url: string } | undefined
+  if (posted?.source_url && !posted.source_url.startsWith('mock://')) {
+    return posted.source_url
+  }
+
+  let platform = job.source_platform as string | null
+  let username = job.source_username as string | null
+  if ((!platform || !username) && job.source_account_id) {
+    const source = db
+      .prepare('SELECT platform, username FROM source_accounts WHERE id = ?')
+      .get(job.source_account_id as string) as { platform: string; username: string } | undefined
+    platform = platform ?? source?.platform ?? null
+    username = username ?? source?.username ?? null
+  }
+
+  const handle = username?.replace(/^@/, '')
+  switch ((platform ?? '').toLowerCase()) {
+    case 'instagram':
+      return `https://www.instagram.com/reel/${reelId}/`
+    case 'youtube':
+      return `https://www.youtube.com/shorts/${reelId}`
+    case 'facebook':
+      return `https://www.facebook.com/reel/${reelId}`
+    case 'tiktok':
+      if (handle) return `https://www.tiktok.com/@${handle}/video/${reelId}`
+      return `https://www.tiktok.com/video/${reelId}`
+    default:
+      return null
+  }
+}
+
+function persistResolvedSourceUrl(jobId: string, job: Record<string, unknown>, sourceUrl: string) {
+  const existing = job.source_url as string | null
+  if (!existing?.trim()) {
+    db.prepare('UPDATE reel_jobs SET source_url = ? WHERE id = ?').run(sourceUrl, jobId)
+  }
+}
+
 /** Resolve a local video path for publishing — downloads from R2 when local file was cleared. */
 export async function resolvePublishVideoPath(
   job: Record<string, unknown>,
@@ -150,7 +203,11 @@ async function persistQueueMedia(
     WHERE id = ?
   `).run(cleanedPath, thumbPath, caption, jobId)
 
-  await syncQueueMediaToR2(pageId, jobId, cleanedPath, thumbPath)
+  try {
+    await syncQueueMediaToR2(pageId, jobId, cleanedPath, thumbPath)
+  } catch (err) {
+    console.warn('[queue] R2 sync failed, local copy kept:', jobId, err instanceof Error ? err.message : err)
+  }
 
   const row = db.prepare('SELECT cleaned_file_path, thumbnail_path, r2_video_key, r2_thumb_key FROM reel_jobs WHERE id = ?').get(jobId) as Record<string, unknown>
   return queueItemHasPreview(row.cleaned_file_path, row.thumbnail_path, row.r2_video_key, row.r2_thumb_key)
@@ -167,11 +224,12 @@ export async function refreshQueueItemMedia(jobId: string, pageId: string, agenc
     job.r2_video_key,
     job.r2_thumb_key,
   )
-  const sourceUrl = job.source_url as string | null
+  const sourceUrl = resolveQueueSourceUrl(job)
   const sourceReelId = (job.source_reel_id as string) || jobId
 
   if (!preview.hasPreview) {
     if (!sourceUrl) throw new Error('No source URL — skip this reel to fetch a new one')
+    persistResolvedSourceUrl(jobId, job, sourceUrl)
     const next = await persistQueueMedia(jobId, pageId, agencyId, sourceUrl, sourceReelId, job.caption as string | null)
     return { jobId, ...next, refreshed: 'video' as const }
   }
@@ -205,23 +263,35 @@ export async function refreshQueueItemMedia(jobId: string, pageId: string, agenc
   return { jobId, ...preview, refreshed: 'none' as const }
 }
 
+const refreshInFlight = new Set<string>()
+
+async function processMissingQueuePreviews(
+  pageId: string,
+  agencyId: string,
+  missing: { id: string }[],
+) {
+  for (const item of missing) {
+    try {
+      await refreshQueueItemMedia(item.id, pageId, agencyId)
+    } catch (err) {
+      console.warn('[queue] preview refresh failed:', item.id, err instanceof Error ? err.message : err)
+    }
+  }
+}
+
 export async function refreshMissingQueuePreviews(pageId: string, agencyId: string) {
   const rows = db
     .prepare(`
-      SELECT id, cleaned_file_path, thumbnail_path, r2_video_key, r2_thumb_key, source_url
-      FROM reel_jobs
-      WHERE target_page_id = ? AND agency_id = ? AND status = 'queued'
-      ORDER BY created_at ASC
+      SELECT r.id, r.cleaned_file_path, r.thumbnail_path, r.r2_video_key, r.r2_thumb_key,
+        r.source_url, r.source_reel_id, r.source_account_id,
+        s.platform as source_platform, s.username as source_username
+      FROM reel_jobs r
+      LEFT JOIN source_accounts s ON s.id = r.source_account_id
+      WHERE r.target_page_id = ? AND r.agency_id = ? AND r.status = 'queued'
+      ORDER BY r.created_at ASC
       LIMIT 100
     `)
-    .all(pageId, agencyId) as {
-      id: string
-      cleaned_file_path: string | null
-      thumbnail_path: string | null
-      r2_video_key: string | null
-      r2_thumb_key: string | null
-      source_url: string | null
-    }[]
+    .all(pageId, agencyId) as Record<string, unknown>[]
 
   const missing = rows.filter((row) => {
     const preview = queueItemHasPreview(
@@ -232,21 +302,21 @@ export async function refreshMissingQueuePreviews(pageId: string, agencyId: stri
     )
     return !preview.hasPreview || !preview.hasThumbnail
   })
-  const results: { jobId: string; ok: boolean; error?: string }[] = []
 
-  for (const item of missing) {
-    try {
-      await refreshQueueItemMedia(item.id, pageId, agencyId)
-      results.push({ jobId: item.id, ok: true })
-    } catch (err) {
-      results.push({ jobId: item.id, ok: false, error: err instanceof Error ? err.message : String(err) })
-    }
+  const alreadyRunning = refreshInFlight.has(pageId)
+  if (missing.length && !alreadyRunning) {
+    refreshInFlight.add(pageId)
+    void processMissingQueuePreviews(pageId, agencyId, missing as { id: string }[]).finally(() => {
+      refreshInFlight.delete(pageId)
+    })
   }
 
   return {
     attempted: missing.length,
-    refreshed: results.filter((r) => r.ok).length,
-    failed: results.filter((r) => !r.ok).length,
-    results,
+    refreshed: 0,
+    failed: 0,
+    background: missing.length > 0,
+    alreadyRunning: alreadyRunning && missing.length > 0,
+    results: [] as { jobId: string; ok: boolean; error?: string }[],
   }
 }

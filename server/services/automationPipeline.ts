@@ -235,7 +235,13 @@ async function runPrefillJob(jobId: string) {
 
     db.prepare('UPDATE reel_jobs SET caption = ?, thumbnail_path = ? WHERE id = ?').run(caption, thumbPath, jobId)
     db.prepare("UPDATE reel_jobs SET status = 'queued' WHERE id = ?").run(jobId)
-    await syncQueueMediaToR2(pageId, jobId, cleanedPath, thumbPath)
+    try {
+      await syncQueueMediaToR2(pageId, jobId, cleanedPath, thumbPath)
+      appendJobLog(jobId, 'r2', 'Uploaded to CDN buffer')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      appendJobLog(jobId, 'r2', `CDN upload failed — local copy kept: ${message}`, 'warn')
+    }
     appendJobLog(jobId, 'queued', 'Reel ready in publish queue')
     handlePrefillSuccess(pageId)
   } catch (err) {
