@@ -93,9 +93,9 @@ async function downloadAndClean(
     sourceAccountId: sourceId,
     platform: source.platform as string,
     username: source.username as string,
+    jobId,
   })
 
-  db.prepare('UPDATE reel_jobs SET source_reel_id = ? WHERE id = ?').run(discovered.reelId, jobId)
   appendJobLog(jobId, 'discover', `Found reel ${discovered.reelId}`, 'info', { url: discovered.sourceUrl, mock: discovered.mock })
 
   appendJobLog(jobId, 'download', 'Downloading video')

@@ -2,7 +2,7 @@ import { execFile } from 'child_process'
 import crypto from 'crypto'
 import { promisify } from 'util'
 import { db } from '../db.js'
-import { isReelAlreadyPosted } from './dedup.js'
+import { isReelConsumedByPage, tryReserveReelForJob } from './dedup.js'
 import { execYtDlpWithProxyFallback } from '../utils/ytdlpRunner.js'
 
 const execFileAsync = promisify(execFile)
@@ -55,7 +55,7 @@ export async function listCandidateReels(feedUrl: string, limit = 20): Promise<{
   for (let i = 0; i < lines.length; i += 2) {
     const id = lines[i]?.trim()
     const url = lines[i + 1]?.trim()
-    if (id && url) results.push({ id, url })
+    if (id && url && !results.some((r) => r.id === id)) results.push({ id, url })
   }
 
   return results
@@ -89,6 +89,7 @@ export async function discoverNextReel(params: {
   sourceAccountId: string
   platform: string
   username: string
+  jobId: string
 }): Promise<{ reelId: string; sourceUrl: string; mock: boolean }> {
   const feedUrl = platformFeedUrl(params.platform, params.username)
   const listLimit = Number(process.env.PREFILL_DISCOVERY_LIST_LIMIT ?? 50)
@@ -97,7 +98,7 @@ export async function discoverNextReel(params: {
     try {
       const candidates = await listCandidateReels(feedUrl, listLimit)
       for (const c of candidates) {
-        if (!isReelAlreadyPosted(params.pageId, c.id)) {
+        if (tryReserveReelForJob(params.pageId, params.jobId, c.id)) {
           return { reelId: c.id, sourceUrl: c.url, mock: false }
         }
       }
@@ -109,8 +110,8 @@ export async function discoverNextReel(params: {
   }
 
   const mock = mockReelForToday(params.pageId, params.sourceAccountId)
-  if (isReelAlreadyPosted(params.pageId, mock.id)) {
-    throw new Error('Daily mock reel already posted for this page')
+  if (!tryReserveReelForJob(params.pageId, params.jobId, mock.id)) {
+    throw new Error('No new reels available for this page right now')
   }
   return { reelId: mock.id, sourceUrl: mock.url, mock: true }
 }

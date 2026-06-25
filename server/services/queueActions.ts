@@ -12,6 +12,7 @@ import {
 import { getAgencyPage } from './pageDetail.js'
 import { isR2Enabled, downloadQueueFile } from './r2Storage.js'
 import { deleteQueueR2Media, syncQueueMediaToR2, syncQueueThumbToR2 } from './queueMediaSync.js'
+import { recordSkippedReel } from './dedup.js'
 
 export function getQueuedJobForPage(jobId: string, pageId: string, agencyId: string) {
   const page = getAgencyPage(pageId, agencyId)
@@ -35,6 +36,19 @@ export function updateQueuedCaption(jobId: string, pageId: string, agencyId: str
 export async function removeQueuedJob(jobId: string, pageId: string, agencyId: string) {
   const job = getQueuedJobForPage(jobId, pageId, agencyId)
   if (!job) throw new Error('Queued reel not found')
+
+  const sourceReelId = job.source_reel_id as string | null
+  if (sourceReelId) {
+    recordSkippedReel({
+      agencyId,
+      pageId,
+      sourceAccountId: (job.source_account_id as string | null) ?? null,
+      sourceReelId,
+      sourceUrl: (job.source_url as string | null) ?? null,
+      jobId,
+    })
+  }
+
   await deleteQueueR2Media(job)
   cleanupJobFiles(agencyId, jobId)
   db.prepare('DELETE FROM reel_jobs WHERE id = ?').run(jobId)
