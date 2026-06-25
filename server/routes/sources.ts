@@ -4,7 +4,9 @@ import { db } from '../db.js'
 import { authMiddleware, requireVerified } from '../middleware/auth.js'
 import { agencyMiddleware, requireRole } from '../middleware/agency.js'
 import { tokensForPlatform } from '../utils/helpers.js'
+import { isSourceActiveFlag } from '../utils/sourceActive.js'
 import { revivePagesForSource } from '../services/scrapeStatus.js'
+import type { AgencyRequest } from '../utils/agency.js'
 
 export const sourcesRouter = Router()
 sourcesRouter.use(authMiddleware, requireVerified, agencyMiddleware)
@@ -12,12 +14,15 @@ sourcesRouter.use(authMiddleware, requireVerified, agencyMiddleware)
 const PLATFORMS = ['instagram', 'tiktok', 'youtube', 'facebook']
 
 function mapSource(row: Record<string, unknown>) {
+  const failures = Number(row.consecutive_failures ?? 0)
+  const active = isSourceActiveFlag(row.is_active)
   return {
     id: row.id,
     platform: row.platform,
     username: row.username,
     tokensPerReel: row.tokens_per_reel,
-    isActive: Boolean(row.is_active),
+    isActive: active,
+    autoDisabled: !active && failures >= Number(process.env.OPS_SELF_HEAL_SOURCE_FAIL_MAX ?? 8),
     createdAt: row.created_at,
   }
 }
@@ -65,12 +70,16 @@ sourcesRouter.patch('/:id', requireRole('owner', 'admin'), (req: AgencyRequest, 
   }
 
   if (typeof isActive === 'boolean') {
-    db.prepare('UPDATE source_accounts SET is_active = ? WHERE id = ?').run(isActive ? 1 : 0, req.params.id)
     if (isActive) {
+      db.prepare(`
+        UPDATE source_accounts SET is_active = 1, consecutive_failures = 0 WHERE id = ?
+      `).run(req.params.id)
       const revived = revivePagesForSource(req.params.id, req.agency!.id)
       if (revived > 0) {
         console.log(`[sources] Re-enabled ${req.params.id}: revived prefill on ${revived} page(s)`)
       }
+    } else {
+      db.prepare('UPDATE source_accounts SET is_active = 0 WHERE id = ?').run(req.params.id)
     }
   }
 

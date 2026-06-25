@@ -15,6 +15,7 @@ import { applySelfHealingOnJobFailure, resetPageFailureStreak, resetSourceFailur
 import { isPlatformFlagEnabled, isAgencyInMaintenance } from './platformSettings.js'
 import { resolvePublishVideoPath } from './queueActions.js'
 import { deleteQueueR2Media, syncQueueMediaToR2 } from './queueMediaSync.js'
+import { isSourceActiveFlag } from '../utils/sourceActive.js'
 import {
   handlePrefillDiscoveryFailure,
   handlePrefillSuccess,
@@ -74,7 +75,7 @@ function validateJobContext(job: JobRow, options?: { skipQuota?: boolean }) {
   const source = db.prepare('SELECT * FROM source_accounts WHERE id = ? AND agency_id = ?').get(sourceId, agencyId) as
     | JobRow
     | undefined
-  if (!source || !source.is_active) throw new Error('Source account inactive')
+  if (!source || !isSourceActiveFlag(source.is_active)) throw new Error('Source account inactive')
 
   return { userId, agencyId, pageId, page, sourceId, source }
 }

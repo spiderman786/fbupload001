@@ -31,7 +31,7 @@ export async function syncPagePrefillQueue(pageId: string, agencyId: string): Pr
 
   const resolved = resolvePrefillPage(pageId)
   if (!resolved.eligible) {
-    notePrefillBlocked(pageId, resolved.message)
+    notePrefillBlocked(pageId, resolved.message, resolved.reason)
     return { trimmed, created: 0, target, skipped: resolved.reason }
   }
 

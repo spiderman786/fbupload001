@@ -2,6 +2,7 @@ import { db } from '../db.js'
 import { appendJobLog } from './jobLog.js'
 import { isPlatformFlagEnabled } from './platformSettings.js'
 import { applyPageHealthFromError } from './pageHealth.js'
+import { isSourceActiveFlag } from '../utils/sourceActive.js'
 
 const PAGE_FAIL_MAX = Number(process.env.OPS_SELF_HEAL_PAGE_FAIL_MAX ?? 5)
 const SOURCE_FAIL_MAX = Number(process.env.OPS_SELF_HEAL_SOURCE_FAIL_MAX ?? 8)
@@ -45,12 +46,11 @@ export function applySelfHealingOnJobFailure(jobId: string, errorMessage: string
     if (source) {
       const failures = source.consecutive_failures + 1
       db.prepare('UPDATE source_accounts SET consecutive_failures = ? WHERE id = ?').run(failures, source.id)
-      if (failures >= SOURCE_FAIL_MAX && source.is_active) {
-        db.prepare('UPDATE source_accounts SET is_active = 0 WHERE id = ?').run(source.id)
+      if (failures >= SOURCE_FAIL_MAX && isSourceActiveFlag(source.is_active)) {
         appendJobLog(
           jobId,
           'self_heal',
-          `Auto-disabled source @${source.username} after ${failures} download failures`,
+          `Source @${source.username} has ${failures} download failures — disable manually under Source Accounts if needed`,
           'warn',
         )
       }

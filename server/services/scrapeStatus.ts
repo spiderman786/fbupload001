@@ -1,6 +1,6 @@
 import { db } from '../db.js'
 import { applyPageHealthFromError, inferHealthStatusFromError } from './pageHealth.js'
-import { resolvePrefillPage } from './reelQueue.js'
+import { resolvePrefillPage, type PrefillSkipReason } from './reelQueue.js'
 
 export type ScrapeStatusKey =
   | 'none'
@@ -66,7 +66,6 @@ function countInflightPrefill(pageId: string): number {
 
 export function getPageScrapeInfo(pageId: string): PageScrapeInfo | null {
   maybeRecoverStaleScrapePending(pageId)
-  reconcileStaleScrapeError(pageId)
 
   const row = db
     .prepare(`
@@ -91,16 +90,28 @@ export function getPageScrapeInfo(pageId: string): PageScrapeInfo | null {
 
   const inflight = countInflightPrefill(pageId)
   const totalScraped = countTotalScraped(pageId, row.source_account_id)
-  let status: ScrapeStatusKey = 'idle'
+  const resolved = resolvePrefillPage(pageId)
+
+  if (!resolved.eligible) {
+    return {
+      status: 'scraping_error',
+      label: STATUS_LABELS.scraping_error,
+      totalScraped,
+      catalogTotal: row.catalog_total != null ? Number(row.catalog_total) : null,
+      errorMessage: resolved.message,
+      inflightDownloads: inflight,
+    }
+  }
 
   if (row.scrape_error) {
-    status = 'scraping_error'
-  } else if (inflight > 0) {
+    clearScrapeError(pageId)
+  }
+
+  let status: ScrapeStatusKey = 'idle'
+  if (inflight > 0) {
     status = 'pending_scrap'
   } else if (row.scrape_status === 'scraping_pending') {
     status = 'scraping_pending'
-  } else {
-    status = 'idle'
   }
 
   return {
@@ -108,7 +119,7 @@ export function getPageScrapeInfo(pageId: string): PageScrapeInfo | null {
     label: STATUS_LABELS[status],
     totalScraped,
     catalogTotal: row.catalog_total != null ? Number(row.catalog_total) : null,
-    errorMessage: row.scrape_error,
+    errorMessage: null,
     inflightDownloads: inflight,
   }
 }
@@ -128,35 +139,6 @@ export function clearScrapeError(pageId: string) {
   `).run(pageId)
 }
 
-/** Drop stale scrape errors when the underlying blocker (e.g. disabled source) was fixed. */
-export function reconcileStaleScrapeError(pageId: string) {
-  const assignment = db
-    .prepare(`
-      SELECT a.scrape_error, p.agency_id
-      FROM page_source_assignments a
-      JOIN facebook_pages p ON p.id = a.page_id
-      WHERE a.page_id = ?
-    `)
-    .get(pageId) as { scrape_error: string | null; agency_id: string } | undefined
-
-  if (!assignment?.scrape_error) return
-
-  const resolved = resolvePrefillPage(pageId)
-  if (resolved.eligible) {
-    clearScrapeError(pageId)
-    void import('./prefillScheduler.js').then(({ syncPagePrefillQueue }) =>
-      syncPagePrefillQueue(pageId, assignment.agency_id).catch((err) =>
-        console.warn('[scrape] reconcile prefill failed:', pageId, err instanceof Error ? err.message : err),
-      ),
-    )
-    return
-  }
-
-  if (assignment.scrape_error !== resolved.message) {
-    notePrefillBlocked(pageId, resolved.message)
-  }
-}
-
 export function revivePagesForSource(sourceAccountId: string, agencyId: string) {
   const pages = db
     .prepare(`
@@ -168,11 +150,13 @@ export function revivePagesForSource(sourceAccountId: string, agencyId: string) 
   for (const { page_id: pageId } of pages) {
     clearScrapeError(pageId)
     markSourceScrapingPending(pageId)
-    void import('./prefillScheduler.js').then(({ syncPagePrefillQueue }) =>
-      syncPagePrefillQueue(pageId, agencyId).catch((err) =>
-        console.warn('[scrape] revive prefill failed:', pageId, err instanceof Error ? err.message : err),
-      ),
-    )
+    void import('./reelQueue.js').then(({ createPrefillJob, resolvePrefillPage }) => {
+      void import('./jobQueue.js').then(({ enqueueJob }) => {
+        const resolved = resolvePrefillPage(pageId)
+        if (!resolved.eligible) return
+        enqueueJob(createPrefillJob(resolved.page.agency_id, resolved.page.user_id, pageId))
+      })
+    })
   }
 
   return pages.length
@@ -243,7 +227,10 @@ export function handlePrefillSuccess(pageId: string) {
   `).run(pageId)
 }
 
-export function notePrefillBlocked(pageId: string, message: string) {
+const TRANSIENT_PREFILL_BLOCKS: PrefillSkipReason[] = ['source_inactive', 'page_paused', 'zero_target', 'no_source']
+
+export function notePrefillBlocked(pageId: string, message: string, reason?: PrefillSkipReason) {
+  if (reason && TRANSIENT_PREFILL_BLOCKS.includes(reason)) return
   db.prepare(`
     UPDATE page_source_assignments
     SET scrape_status = 'scraping_error', scrape_error = ?

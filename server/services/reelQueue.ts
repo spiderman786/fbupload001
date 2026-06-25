@@ -1,6 +1,7 @@
 import { v4 as uuid } from 'uuid'
 import { db } from '../db.js'
 import { getPageAutomationSettings } from './pageAutomationSettings.js'
+import { isSourceActiveFlag } from '../utils/sourceActive.js'
 
 export type QueueJobType = 'direct' | 'inapp' | 'scheduled' | 'prefill'
 
@@ -158,12 +159,12 @@ export function resolvePrefillPage(pageId: string):
       message: 'Page automation is paused — turn automation on to download reels',
     }
   }
-  if (!row.source_active) {
+  if (!isSourceActiveFlag(row.source_active)) {
     const handle = row.source_username?.replace(/^@/, '') ?? 'creator'
     return {
       eligible: false,
       reason: 'source_inactive',
-      message: `Source @${handle} assigned to this page is disabled — enable that account under Sources`,
+      message: `Source @${handle} is disabled — click Enable under Source Accounts, then refresh this page`,
     }
   }
   if (row.health_status !== 'completed') {

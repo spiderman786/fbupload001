@@ -71,7 +71,7 @@ export function SourcesPage({ embedded = false, onSourcesChanged }: { embedded?:
     try {
       const { source: updated } = await api.sources.update(source.id, { isActive: !source.isActive })
       setSources((prev) => prev.map((s) => (s.id === source.id ? updated : s)))
-      toast.success(updated.isActive ? 'Source enabled' : 'Source disabled')
+      toast.success(updated.isActive ? 'Source enabled — download queue will restart' : 'Source disabled')
       onSourcesChanged?.()
     } catch (err) {
       toast.error(getApiError(err, 'Failed to update source'))
@@ -160,7 +160,10 @@ export function SourcesPage({ embedded = false, onSourcesChanged }: { embedded?:
             <div key={source.id} className="marketing-card flex items-center justify-between gap-4">
               <div>
                 <p className="font-medium">{source.username}</p>
-                <p className="text-sm capitalize text-muted-foreground">{source.platform}</p>
+                <p className="text-sm capitalize text-muted-foreground">
+                  {source.platform}
+                  {source.autoDisabled ? ' · auto-disabled after download failures' : ''}
+                </p>
               </div>
               <div className="flex items-center gap-3">
                 <span className="rounded-full border border-border bg-muted/40 px-3 py-1 text-xs font-medium">

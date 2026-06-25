@@ -738,6 +738,7 @@ export type SourceAccount = {
   username: string
   tokensPerReel: number
   isActive: boolean
+  autoDisabled?: boolean
   createdAt: string
 }
 
