@@ -81,7 +81,7 @@ export function SignupPage() {
         <div className="space-y-2">
           <label htmlFor="agency-name" className="text-sm font-medium">Agency name</label>
           <input id="agency-name" type="text" placeholder="My Media Agency" value={agencyName} onChange={(e) => setAgencyName(e.target.value)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm shadow-xs outline-none focus:border-primary focus:ring-[3px] focus:ring-primary/20" />
-          <p className="text-xs text-muted-foreground">Your team workspace — you join as <span className="font-medium text-foreground">Admin</span> with full access. Invite staff from Settings → Team.</p>
+          <p className="text-xs text-muted-foreground">Your team workspace — you join as <span className="font-medium text-foreground">Admin</span> with full automation access. Proxy pool and token crediting are owner-only; you can request tokens via WhatsApp.</p>
         </div>
 
         <div className="space-y-2">

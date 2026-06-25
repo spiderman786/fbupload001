@@ -15,7 +15,7 @@ proxyPoolRouter.get(
   authMiddleware,
   requireVerified,
   agencyMiddleware,
-  requireRole('owner', 'admin'),
+  requireRole('owner'),
   (_req, res) => {
     res.json(getProxyPoolStats())
   },
@@ -26,7 +26,7 @@ proxyPoolRouter.get(
   authMiddleware,
   requireVerified,
   agencyMiddleware,
-  requireRole('owner', 'admin'),
+  requireRole('owner'),
   (_req, res) => {
     res.json(getProxyPoolFileInfo())
   },
@@ -37,7 +37,7 @@ proxyPoolRouter.post(
   authMiddleware,
   requireVerified,
   agencyMiddleware,
-  requireRole('owner', 'admin'),
+  requireRole('owner'),
   (req, res) => {
     const content = typeof req.body?.content === 'string' ? req.body.content : ''
     if (!content.trim()) {
@@ -59,7 +59,7 @@ proxyPoolRouter.post(
   authMiddleware,
   requireVerified,
   agencyMiddleware,
-  requireRole('owner', 'admin'),
+  requireRole('owner'),
   (_req, res) => {
     reloadProxyPool()
     res.json({ stats: getProxyPoolStats() })

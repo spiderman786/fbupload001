@@ -8,7 +8,7 @@ import { getApiError } from '../lib/apiError'
 
 export function DashboardLayout() {
   const { user, agency, agencies, role, platformAdmin, logout, switchAgency } = useAuth()
-  const { isAdmin } = useAgencyRole()
+  const { isOwner } = useAgencyRole()
   const toast = useToast()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -20,7 +20,7 @@ export function DashboardLayout() {
   })
 
   function visibleNavItems(items: NavItem[]) {
-    return items.filter((item) => !item.ownerOnly || isAdmin)
+    return items.filter((item) => !item.ownerOnly || isOwner)
   }
 
   async function handleLogout() {

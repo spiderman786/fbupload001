@@ -9,11 +9,31 @@ import type { AgencyRequest } from '../utils/agency.js'
 export const tokensRouter = Router()
 tokensRouter.use(authMiddleware, requireVerified, agencyMiddleware)
 
+function getAgencyOwnerEmail(agencyId: string): string | null {
+  const row = db
+    .prepare(`
+      SELECT u.email
+      FROM users u
+      JOIN agency_members m ON m.user_id = u.id
+      WHERE m.agency_id = ? AND m.role = 'owner'
+      LIMIT 1
+    `)
+    .get(agencyId) as { email: string } | undefined
+  return row?.email ?? null
+}
+
 tokensRouter.get('/balance', (req: AgencyRequest, res) => {
   const agency = db.prepare('SELECT token_balance FROM agencies WHERE id = ?').get(req.agency!.id) as {
     token_balance: number
   }
-  res.json({ balance: agency.token_balance, costPerToken: TOKEN_COST_PKR })
+  const role = req.agency!.role
+  res.json({
+    balance: agency.token_balance,
+    costPerToken: TOKEN_COST_PKR,
+    canCredit: role === 'owner',
+    canRequest: role === 'owner' || role === 'admin',
+    ownerEmail: getAgencyOwnerEmail(req.agency!.id),
+  })
 })
 
 tokensRouter.get('/', (req: AgencyRequest, res) => {
@@ -41,21 +61,31 @@ tokensRouter.post('/request', requireRole('owner', 'admin'), (req: AgencyRequest
   }
 
   const user = req.user!
+  const role = req.agency!.role
+  const ownerEmail = getAgencyOwnerEmail(req.agency!.id)
   const totalPkr = amount * TOKEN_COST_PKR
   const whatsapp = (req.agency?.whatsappNumber ?? process.env.WHATSAPP_NUMBER ?? '923080752936').replace(/\D+/g, '')
-  const message = encodeURIComponent(
-    `Hi, I'd like to purchase ${amount} tokens (Rs ${totalPkr}) for agency "${req.agency!.name}" (${user.email}). ${note ?? ''}`,
-  )
+
+  const requestLine =
+    role === 'admin'
+      ? `Hi, I'm ${user.email} (agency admin). Requesting ${amount} tokens (Rs ${totalPkr}) for agency "${req.agency!.name}".${ownerEmail ? ` Agency owner: ${ownerEmail}.` : ''} Please approve this purchase.${note ? ` Note: ${note}` : ''}`
+      : `Hi, I'd like to purchase ${amount} tokens (Rs ${totalPkr}) for agency "${req.agency!.name}" (${user.email}). ${note ?? ''}`
+
+  const message = encodeURIComponent(requestLine.trim())
 
   res.json({
-    message: 'Token purchase request created. Contact support via WhatsApp to complete payment.',
+    message:
+      role === 'admin'
+        ? 'Token request ready. Send via WhatsApp — only the agency owner or platform support can credit tokens after payment.'
+        : 'Token purchase request created. Contact support via WhatsApp to complete payment.',
     whatsappUrl: `https://wa.me/${whatsapp}?text=${message}`,
     amount,
     totalPkr,
+    ownerEmail,
   })
 })
 
-tokensRouter.post('/credit', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
+tokensRouter.post('/credit', requireRole('owner'), (req: AgencyRequest, res) => {
   const { amount, note } = req.body ?? {}
   if (!amount || amount < 1) {
     res.status(400).json({ error: 'Amount must be at least 1' })
@@ -75,7 +105,7 @@ tokensRouter.post('/credit', requireRole('owner', 'admin'), (req: AgencyRequest,
   res.json({ balance: balance.token_balance, message: 'Tokens credited' })
 })
 
-tokensRouter.post('/credit-member', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
+tokensRouter.post('/credit-member', requireRole('owner'), (req: AgencyRequest, res) => {
   const { amount, memberEmail, note } = req.body ?? {}
   if (!amount || amount < 1) {
     res.status(400).json({ error: 'Amount must be at least 1' })

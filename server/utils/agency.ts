@@ -41,6 +41,18 @@ export function canWriteResources(role: AgencyRole): boolean {
   return role === 'owner' || role === 'admin'
 }
 
+export function canManageProxyPool(role: AgencyRole): boolean {
+  return role === 'owner'
+}
+
+export function canCreditTokens(role: AgencyRole): boolean {
+  return role === 'owner'
+}
+
+export function canRequestTokens(role: AgencyRole): boolean {
+  return role === 'owner' || role === 'admin'
+}
+
 export function canRunAutomation(role: AgencyRole): boolean {
   return role === 'owner' || role === 'admin' || role === 'staff'
 }

@@ -151,13 +151,23 @@ export const api = {
     delete: (id: string) => request<{ message: string }>(`/schedule/${id}`, { method: 'DELETE' }),
   },
   tokens: {
-    balance: () => request<{ balance: number; costPerToken: number }>('/tokens/balance'),
+    balance: () =>
+      request<{
+        balance: number
+        costPerToken: number
+        canCredit?: boolean
+        canRequest?: boolean
+        ownerEmail?: string | null
+      }>('/tokens/balance'),
     transactions: () => request<{ transactions: TokenTransaction[] }>('/tokens'),
     request: (amount: number, note?: string) =>
-      request<{ whatsappUrl: string; amount: number; totalPkr: number; message: string }>('/tokens/request', {
-        method: 'POST',
-        body: JSON.stringify({ amount, note }),
-      }),
+      request<{ whatsappUrl: string; amount: number; totalPkr: number; message: string; ownerEmail?: string | null }>(
+        '/tokens/request',
+        {
+          method: 'POST',
+          body: JSON.stringify({ amount, note }),
+        },
+      ),
     credit: (amount: number, note?: string) =>
       request<{ balance: number; message: string }>('/tokens/credit', {
         method: 'POST',

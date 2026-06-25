@@ -108,12 +108,17 @@ export function useAuth() {
 
 export function useAgencyRole() {
   const { role, agency } = useAuth()
+  const isOwner = role === 'owner'
+  const isAdmin = isOwner || role === 'admin'
   return {
     role,
     agency,
-    isOwner: role === 'owner',
-    isAdmin: role === 'owner' || role === 'admin',
+    isOwner,
+    isAdmin,
     isStaff: role === 'staff',
-    canWrite: role === 'owner' || role === 'admin',
+    canWrite: isOwner || role === 'admin',
+    canManageProxyPool: isOwner,
+    canCreditTokens: isOwner,
+    canRequestTokens: isOwner || role === 'admin',
   }
 }
