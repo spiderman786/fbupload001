@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import express from 'express'
+import { isR2Enabled } from './services/r2Storage.js'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import path from 'path'
@@ -49,7 +50,11 @@ app.use(express.json())
 app.use(cookieParser())
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() })
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    r2: isR2Enabled(),
+  })
 })
 
 app.use('/api/auth', authRouter)
