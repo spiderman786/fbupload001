@@ -55,7 +55,7 @@ tokensRouter.post('/request', requireRole('owner', 'admin'), (req: AgencyRequest
   })
 })
 
-tokensRouter.post('/credit', requireRole('owner'), (req: AgencyRequest, res) => {
+tokensRouter.post('/credit', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
   const { amount, note } = req.body ?? {}
   if (!amount || amount < 1) {
     res.status(400).json({ error: 'Amount must be at least 1' })

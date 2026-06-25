@@ -11,8 +11,8 @@ export function parsePagination(query: Record<string, unknown>) {
   return { page, perPage, offset }
 }
 
-/** Agency owners may connect and automate any number of pages. */
+/** Agency admins may connect and automate any number of pages. */
 export function assertOwnerUnlimitedPages(role: string, _currentCount: number, _adding = 0) {
-  if (role !== 'owner') return
-  // No cap for owners — automation scales with tokens and Facebook API limits.
+  if (role === 'owner' || role === 'admin') return
+  // No cap for admins — automation scales with tokens and Facebook API limits.
 }

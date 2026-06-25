@@ -29,7 +29,7 @@ export const COOKIE_AGENCY_OPTIONS = {
 export type AgencyRequest = AuthRequest & { agency?: AgencySession }
 
 export function canManageTeam(role: AgencyRole): boolean {
-  return role === 'owner'
+  return role === 'owner' || role === 'admin'
 }
 
 export function canInvite(role: AgencyRole): boolean {
@@ -137,7 +137,7 @@ export function createAgencyForUser(
     uuid(),
     agencyId,
     userId,
-    'owner',
+    'admin',
   )
   return { agencyId, subdomain }
 }

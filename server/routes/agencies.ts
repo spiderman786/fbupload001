@@ -272,7 +272,7 @@ agenciesRouter.delete('/invites/:id', (req: AgencyRequest, res) => {
 
 agenciesRouter.patch('/members/:userId', (req: AgencyRequest, res) => {
   if (!canManageTeam(req.agency!.role)) {
-    res.status(403).json({ error: 'Only the owner can change member roles' })
+    res.status(403).json({ error: 'Only admins can change member roles' })
     return
   }
 
@@ -330,8 +330,8 @@ agenciesRouter.delete('/members/:userId', (req: AgencyRequest, res) => {
     return
   }
 
-  if (member.role === 'admin' && req.agency!.role !== 'owner') {
-    res.status(403).json({ error: 'Only the owner can remove admins' })
+  if (member.role === 'admin' && req.agency!.role !== 'owner' && req.agency!.role !== 'admin') {
+    res.status(403).json({ error: 'Only admins can remove other admins' })
     return
   }
 
@@ -346,7 +346,7 @@ agenciesRouter.delete('/members/:userId', (req: AgencyRequest, res) => {
 
 agenciesRouter.post('/leave', (req: AgencyRequest, res) => {
   if (req.agency!.role === 'owner') {
-    res.status(400).json({ error: 'Owner cannot leave — transfer ownership or delete agency first' })
+    res.status(400).json({ error: 'Transfer agency ownership before leaving' })
     return
   }
 

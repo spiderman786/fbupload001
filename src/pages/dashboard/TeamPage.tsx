@@ -8,7 +8,7 @@ import { getApiError } from '../../lib/apiError'
 export function TeamPage() {
   const toast = useToast()
   const { agency, user, setSession } = useAuth()
-  const { isOwner, isAdmin } = useAgencyRole()
+  const { isAdmin } = useAgencyRole()
   const [members, setMembers] = useState<Awaited<ReturnType<typeof api.agencies.members>>['members']>([])
   const [invites, setInvites] = useState<Awaited<ReturnType<typeof api.agencies.invites>>['invites']>([])
   const [loading, setLoading] = useState(true)
@@ -117,8 +117,7 @@ export function TeamPage() {
       <div className="rounded-xl border border-border bg-card p-4 text-sm">
         <p className="font-medium">Roles</p>
         <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-          <li><span className="font-medium text-foreground">Owner</span> — full access, billing, team management</li>
-          <li><span className="font-medium text-foreground">Admin</span> — pages, sources, BYOC, schedules, invites staff</li>
+          <li><span className="font-medium text-foreground">Admin</span> — full access, team management, pages & automation</li>
           <li><span className="font-medium text-foreground">Staff</span> — run automation, view jobs & dashboard</li>
         </ul>
       </div>
@@ -173,7 +172,7 @@ export function TeamPage() {
                 className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
               >
                 <option value="staff">Staff</option>
-                {isOwner && <option value="admin">Admin</option>}
+                {isAdmin && <option value="admin">Admin</option>}
               </select>
             </div>
           </div>
@@ -208,7 +207,7 @@ export function TeamPage() {
                   <p className="text-xs text-muted-foreground">{m.email}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {isOwner && m.role !== 'owner' && m.id !== user?.id ? (
+                  {isAdmin && m.role !== 'owner' && m.id !== user?.id ? (
                     <select
                       value={m.role}
                       onChange={(e) => handleRoleChange(m.id, e.target.value as AgencyRole)}

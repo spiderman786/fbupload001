@@ -207,7 +207,7 @@ automationRouter.post('/ai-post', requireRole('owner', 'admin'), (req: AgencyReq
   })
 })
 
-automationRouter.post('/payout', requireRole('owner'), (req: AgencyRequest, res) => {
+automationRouter.post('/payout', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
   const { pageId, amount, recipientId } = req.body ?? {}
   if (!pageId || !amount) {
     res.status(400).json({ error: 'pageId and amount are required' })

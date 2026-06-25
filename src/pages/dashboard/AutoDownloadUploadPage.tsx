@@ -27,7 +27,7 @@ function formatSyncLabel(iso: string | null | undefined): string {
 
 export function AutoDownloadUploadPage() {
   const toast = useToast()
-  const { isOwner, canWrite } = useAgencyRole()
+  const { isAdmin, canWrite } = useAgencyRole()
   const autoSynced = useRef(false)
   const [tab, setTab] = useState<Tab>('pages')
   const [pages, setPages] = useState<AutomationPage[]>([])
@@ -171,9 +171,9 @@ export function AutoDownloadUploadPage() {
           <h1 className="font-display text-2xl font-bold">Auto Download/Upload</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Connected Facebook pages for automated reel download and posting.
-            {isOwner && (
+            {isAdmin && (
               <span className="block text-xs text-primary/90">
-                Owner account: no page limit — connect any number via Single, Bulk, or CSV.
+                Admin account: no page limit — connect any number via Single, Bulk, or CSV.
               </span>
             )}
           </p>

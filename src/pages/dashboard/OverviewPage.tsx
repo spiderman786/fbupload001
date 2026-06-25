@@ -41,7 +41,7 @@ type AttentionPage = {
 
 export function OverviewPage() {
   const { user } = useAuth()
-  const { isOwner } = useAgencyRole()
+  const { isAdmin } = useAgencyRole()
   const toast = useToast()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [attention, setAttention] = useState<AttentionPage[]>([])
@@ -119,7 +119,7 @@ export function OverviewPage() {
         />
       )}
 
-      {isOwner && (
+      {isAdmin && (
         <section className="rounded-xl border-2 border-primary/25 bg-primary/5 p-5">
           <div className="mb-3 flex items-center gap-2">
             <Server className="h-5 w-5 text-primary" />
@@ -247,7 +247,7 @@ export function OverviewPage() {
       <section>
         <h2 className="mb-4 text-xs font-semibold tracking-[0.12em] text-muted-foreground uppercase">Quick Links</h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {QUICK_LINKS.filter((link) => !('ownerOnly' in link && link.ownerOnly) || isOwner).map((link) => (
+          {QUICK_LINKS.filter((link) => !('ownerOnly' in link && link.ownerOnly) || isAdmin).map((link) => (
             <Link
               key={link.to}
               to={link.to}
