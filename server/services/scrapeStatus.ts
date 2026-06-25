@@ -1,6 +1,7 @@
 import { db } from '../db.js'
 import { applyPageHealthFromError, inferHealthStatusFromError } from './pageHealth.js'
 import { resolvePrefillPage, type PrefillSkipReason } from './reelQueue.js'
+import { healSourceAssignment, relinkAssignmentsToSource } from './sourceAccounts.js'
 
 export type ScrapeStatusKey =
   | 'none'
@@ -64,7 +65,10 @@ function countInflightPrefill(pageId: string): number {
   ).c
 }
 
-export function getPageScrapeInfo(pageId: string): PageScrapeInfo | null {
+export function getPageScrapeInfo(pageId: string, agencyId?: string): PageScrapeInfo | null {
+  if (agencyId) {
+    healSourceAssignment(pageId, agencyId)
+  }
   maybeRecoverStaleScrapePending(pageId)
 
   const row = db
@@ -90,7 +94,7 @@ export function getPageScrapeInfo(pageId: string): PageScrapeInfo | null {
 
   const inflight = countInflightPrefill(pageId)
   const totalScraped = countTotalScraped(pageId, row.source_account_id)
-  const resolved = resolvePrefillPage(pageId)
+  const resolved = resolvePrefillPage(pageId, agencyId)
 
   if (!resolved.eligible) {
     return {
@@ -143,16 +147,17 @@ export function revivePagesForSource(sourceAccountId: string, agencyId: string) 
   const pages = db
     .prepare(`
       SELECT page_id FROM page_source_assignments
-      WHERE source_account_id = ? AND agency_id = ?
+      WHERE source_account_id = ?
     `)
-    .all(sourceAccountId, agencyId) as { page_id: string }[]
+    .all(sourceAccountId) as { page_id: string }[]
 
   for (const { page_id: pageId } of pages) {
     clearScrapeError(pageId)
     markSourceScrapingPending(pageId)
+    healSourceAssignment(pageId, agencyId)
     void import('./reelQueue.js').then(({ createPrefillJob, resolvePrefillPage }) => {
       void import('./jobQueue.js').then(({ enqueueJob }) => {
-        const resolved = resolvePrefillPage(pageId)
+        const resolved = resolvePrefillPage(pageId, agencyId)
         if (!resolved.eligible) return
         enqueueJob(createPrefillJob(resolved.page.agency_id, resolved.page.user_id, pageId))
       })
@@ -160,6 +165,29 @@ export function revivePagesForSource(sourceAccountId: string, agencyId: string) 
   }
 
   return pages.length
+}
+
+export async function retryPageScrape(pageId: string, agencyId: string) {
+  const assignment = db
+    .prepare('SELECT source_account_id FROM page_source_assignments WHERE page_id = ?')
+    .get(pageId) as { source_account_id: string } | undefined
+  if (!assignment) throw new Error('No source assigned to this page')
+
+  healSourceAssignment(pageId, agencyId)
+  const current = db
+    .prepare('SELECT source_account_id FROM page_source_assignments WHERE page_id = ?')
+    .get(pageId) as { source_account_id: string }
+  const sourceId = current.source_account_id
+
+  db.prepare(`
+    UPDATE source_accounts SET is_active = 1, consecutive_failures = 0 WHERE id = ?
+  `).run(sourceId)
+  relinkAssignmentsToSource(sourceId, agencyId)
+  clearScrapeError(pageId)
+  markSourceScrapingPending(pageId)
+
+  const { syncPagePrefillQueue } = await import('./prefillScheduler.js')
+  return syncPagePrefillQueue(pageId, agencyId)
 }
 
 export function markScrapeIdle(pageId: string) {

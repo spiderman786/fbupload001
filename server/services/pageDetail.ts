@@ -4,6 +4,8 @@ import { getPageScrapeInfo } from './scrapeStatus.js'
 import { queueItemHasPreview } from './queueActions.js'
 import { getPageTodayStats, syncPagePostedToday } from '../utils/pageDayStats.js'
 import { getSignedPreviewUrl, isR2Enabled } from './r2Storage.js'
+import { isSourceActiveFlag } from '../utils/sourceActive.js'
+import { healSourceAssignment } from './sourceAccounts.js'
 
 export function getAgencyPage(pageId: string, agencyId: string) {
   return db.prepare('SELECT * FROM facebook_pages WHERE id = ? AND agency_id = ?').get(pageId, agencyId) as
@@ -17,6 +19,7 @@ export function getPageDetail(pageId: string, agencyId: string) {
 
   ensurePageAutomationSettings(pageId)
   const settings = getPageAutomationSettings(pageId)
+  healSourceAssignment(pageId, agencyId)
 
   const assignment = db
     .prepare(`
@@ -76,7 +79,7 @@ export function getPageDetail(pageId: string, agencyId: string) {
     db.prepare('SELECT COUNT(*) as c FROM reel_jobs WHERE target_page_id = ?').get(pageId) as { c: number }
   ).c
 
-  const scrape = getPageScrapeInfo(pageId)
+  const scrape = getPageScrapeInfo(pageId, agencyId)
 
   return {
     page: {
@@ -99,7 +102,7 @@ export function getPageDetail(pageId: string, agencyId: string) {
           id: assignment.id,
           username: assignment.username,
           platform: assignment.platform,
-          isActive: Boolean(assignment.is_active),
+          isActive: isSourceActiveFlag(assignment.is_active),
           scrapeStatus: scrape?.status ?? 'none',
           scrapeLabel: scrape?.label ?? 'No source',
           scrapeError: scrape?.errorMessage ?? null,

@@ -15,7 +15,7 @@ import {
   getPageReelsHistory,
   getAgencyPage,
 } from '../services/pageDetail.js'
-import { getPageScrapeInfo } from '../services/scrapeStatus.js'
+import { getPageScrapeInfo, retryPageScrape } from '../services/scrapeStatus.js'
 import { getPageInsights } from '../services/pageInsights.js'
 import { upsertPageAutomationSettings, getPageAutomationSettings } from '../services/pageAutomationSettings.js'
 import { generateRandomScheduleTimes } from '../services/pageSchedule.js'
@@ -140,7 +140,7 @@ pagesRouter.get('/hub', (req: AgencyRequest, res) => {
 
   let pages = rows.map((row) => {
     const today = todayByPage.get(row.id as string) ?? { posted: 0, failed: 0, pending: 0 }
-    const scrape = getPageScrapeInfo(row.id as string)
+    const scrape = getPageScrapeInfo(row.id as string, req.agency!.id)
     return {
       ...mapPage(row, today),
       sourceUsername: (row.source_username as string | null) ?? null,
@@ -382,6 +382,20 @@ pagesRouter.post('/:pageId/queue/:jobId/refresh', requireRole('owner', 'admin'),
     res.json(result)
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Refresh failed' })
+  }
+})
+
+pagesRouter.post('/:pageId/retry-scrape', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
+  const pageId = req.params.pageId
+  if (!requirePage(req, pageId)) {
+    res.status(404).json({ error: 'Page not found' })
+    return
+  }
+  try {
+    const result = await retryPageScrape(pageId, req.agency!.id)
+    res.json({ message: 'Scrape restarted', ...result })
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Could not restart scrape' })
   }
 })
 

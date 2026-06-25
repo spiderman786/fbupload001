@@ -1,10 +1,10 @@
 import { Router } from 'express'
-import { v4 as uuid } from 'uuid'
 import { db } from '../db.js'
 import { authMiddleware, requireVerified } from '../middleware/auth.js'
 import { agencyMiddleware, requireRole } from '../middleware/agency.js'
-import { tokensForPlatform } from '../utils/helpers.js'
 import { isSourceActiveFlag } from '../utils/sourceActive.js'
+import { findOrCreateSource, relinkAssignmentsToSource } from '../services/sourceAccounts.js'
+import { normalizeSourceUsername } from '../utils/sourceIdentity.js'
 import { revivePagesForSource } from '../services/scrapeStatus.js'
 import type { AgencyRequest } from '../utils/agency.js'
 
@@ -46,15 +46,8 @@ sourcesRouter.post('/', requireRole('owner', 'admin'), (req: AgencyRequest, res)
     return
   }
 
-  const normalized = username.startsWith('@') ? username : `@${username.replace(/^@/, '')}`
-  const id = uuid()
-
-  db.prepare(`
-    INSERT INTO source_accounts (id, user_id, agency_id, platform, username, tokens_per_reel)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, req.user!.id, req.agency!.id, platform, normalized, tokensForPlatform(platform))
-
-  const source = db.prepare('SELECT * FROM source_accounts WHERE id = ?').get(id) as Record<string, unknown>
+  const normalized = normalizeSourceUsername(username)
+  const source = findOrCreateSource(req.agency!.id, req.user!.id, platform, normalized)
   res.status(201).json({ source: mapSource(source) })
 })
 
@@ -74,9 +67,10 @@ sourcesRouter.patch('/:id', requireRole('owner', 'admin'), (req: AgencyRequest, 
       db.prepare(`
         UPDATE source_accounts SET is_active = 1, consecutive_failures = 0 WHERE id = ?
       `).run(req.params.id)
+      const relinked = relinkAssignmentsToSource(req.params.id, req.agency!.id)
       const revived = revivePagesForSource(req.params.id, req.agency!.id)
-      if (revived > 0) {
-        console.log(`[sources] Re-enabled ${req.params.id}: revived prefill on ${revived} page(s)`)
+      if (relinked > 0 || revived > 0) {
+        console.log(`[sources] Re-enabled ${req.params.id}: relinked=${relinked}, revived=${revived}`)
       }
     } else {
       db.prepare('UPDATE source_accounts SET is_active = 0 WHERE id = ?').run(req.params.id)

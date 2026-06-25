@@ -29,7 +29,7 @@ export async function syncPagePrefillQueue(pageId: string, agencyId: string): Pr
   const target = getPageQueueTarget(pageId)
   const trimmed = await trimPageQueueToLimit(pageId, agencyId, target)
 
-  const resolved = resolvePrefillPage(pageId)
+  const resolved = resolvePrefillPage(pageId, agencyId)
   if (!resolved.eligible) {
     notePrefillBlocked(pageId, resolved.message, resolved.reason)
     return { trimmed, created: 0, target, skipped: resolved.reason }
@@ -61,7 +61,7 @@ export async function syncPagePrefillQueue(pageId: string, agencyId: string): Pr
 export async function tickPrefillQueueForPage(pageId: string, agencyId?: string) {
   if (!isPrefillEnabled()) return { trimmed: 0, created: 0, target: 0, skipped: 'prefill_disabled' as const }
 
-  const resolved = resolvePrefillPage(pageId)
+  const resolved = resolvePrefillPage(pageId, agencyId ?? undefined)
   if (!resolved.eligible) {
     return syncPagePrefillQueue(pageId, agencyId ?? '')
   }

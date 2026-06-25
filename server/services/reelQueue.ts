@@ -2,6 +2,8 @@ import { v4 as uuid } from 'uuid'
 import { db } from '../db.js'
 import { getPageAutomationSettings } from './pageAutomationSettings.js'
 import { isSourceActiveFlag } from '../utils/sourceActive.js'
+import { healSourceAssignment } from './sourceAccounts.js'
+import { isSourceActiveFlag } from '../utils/sourceActive.js'
 
 export type QueueJobType = 'direct' | 'inapp' | 'scheduled' | 'prefill'
 
@@ -126,9 +128,13 @@ export type PrefillSkipReason =
   | 'health_blocked'
   | 'zero_target'
 
-export function resolvePrefillPage(pageId: string):
+export function resolvePrefillPage(pageId: string, agencyId?: string):
   | { eligible: true; page: { id: string; agency_id: string; user_id: string } }
   | { eligible: false; reason: PrefillSkipReason; message: string } {
+  if (agencyId) {
+    healSourceAssignment(pageId, agencyId)
+  }
+
   const row = db
     .prepare(`
       SELECT p.id, p.agency_id, p.user_id, p.status, p.health_status, s.is_active as source_active, s.username as source_username

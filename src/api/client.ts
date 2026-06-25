@@ -115,6 +115,10 @@ export const api = {
       request<{ message: string; removed: number; kept: number }>(`/pages/${pageId}/queue/dedupe`, {
         method: 'POST',
       }),
+    retryScrape: (pageId: string) =>
+      request<{ message: string; created: number; target: number }>(`/pages/${pageId}/retry-scrape`, {
+        method: 'POST',
+      }),
     updateAutomationSettings: (
       id: string,
       body: {

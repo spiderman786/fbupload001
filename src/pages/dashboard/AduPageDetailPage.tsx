@@ -112,6 +112,7 @@ export function AduPageDetailPage() {
   const [editSettings, setEditSettings] = useState(false)
   const [form, setForm] = useState({ postsPerDay: 3, postingLogic: 'dailyrandom', timezone: 'America/New_York', scheduleTimes: '' })
   const [switchSourceOpen, setSwitchSourceOpen] = useState(false)
+  const [retryingScrape, setRetryingScrape] = useState(false)
 
   const loadDetail = useCallback(async () => {
     if (!pageId) return
@@ -164,6 +165,25 @@ export function AduPageDetailPage() {
       }).catch(() => {})
     }
   }, [pageId, tab, insightDays, loadQueue])
+
+  async function retryScrape() {
+    if (!pageId || !canWrite) return
+    setRetryingScrape(true)
+    try {
+      const result = await api.pages.retryScrape(pageId)
+      toast.success(
+        result.created > 0
+          ? `Source enabled — started ${result.created} download${result.created !== 1 ? 's' : ''}`
+          : 'Source enabled — scrape restarted',
+      )
+      await loadDetail()
+      await loadQueue()
+    } catch (err) {
+      toast.error(getApiError(err, 'Could not restart scrape'))
+    } finally {
+      setRetryingScrape(false)
+    }
+  }
 
   async function toggleAutomation() {
     if (!pageId || !detail) return
@@ -410,7 +430,12 @@ export function AduPageDetailPage() {
             />
           </div>
 
-          <ScrapeStatusBanner scrape={scrape} totalScraped={stats.total.totalScraped} />
+          <ScrapeStatusBanner
+            scrape={scrape}
+            totalScraped={stats.total.totalScraped}
+            onRetry={canWrite ? retryScrape : undefined}
+            retrying={retryingScrape}
+          />
 
           {pageId ? (
             <ReelsQueueWorkspace
