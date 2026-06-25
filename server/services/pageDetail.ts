@@ -156,6 +156,7 @@ export async function getPageQueue(pageId: string) {
         r.thumbnail_path,
         r.r2_video_key,
         r.r2_thumb_key,
+        r.source_url,
       )
 
       let previewVideoUrl: string | null = null

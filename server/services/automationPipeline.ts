@@ -99,7 +99,14 @@ async function downloadAndClean(
   appendJobLog(jobId, 'discover', `Found reel ${discovered.reelId}`, 'info', { url: discovered.sourceUrl, mock: discovered.mock })
 
   appendJobLog(jobId, 'download', 'Downloading video')
-  const download = await downloadReelFromUrl(agencyId, jobId, discovered.sourceUrl, discovered.reelId, discovered.mock)
+  const download = await downloadReelFromUrl(
+    agencyId,
+    jobId,
+    discovered.sourceUrl,
+    discovered.reelId,
+    discovered.mock,
+    source.platform as string,
+  )
   appendJobLog(jobId, 'download', 'Download complete', 'info', { mock: download.mock })
 
   db.prepare('UPDATE reel_jobs SET source_url = ?, local_file_path = ? WHERE id = ?').run(

@@ -13,6 +13,7 @@ import { getAgencyPage } from './pageDetail.js'
 import { isR2Enabled, downloadQueueFile } from './r2Storage.js'
 import { deleteQueueR2Media, syncQueueMediaToR2, syncQueueThumbToR2 } from './queueMediaSync.js'
 import { recordSkippedReel } from './dedup.js'
+import { canonicalSourceUrl, isMockSourceUrl, normalizeSourceReelId } from '../utils/reelIdentity.js'
 
 export function getQueuedJobForPage(jobId: string, pageId: string, agencyId: string) {
   const page = getAgencyPage(pageId, agencyId)
@@ -20,8 +21,10 @@ export function getQueuedJobForPage(jobId: string, pageId: string, agencyId: str
 
   return db
     .prepare(`
-      SELECT * FROM reel_jobs
-      WHERE id = ? AND target_page_id = ? AND agency_id = ? AND status = 'queued'
+      SELECT r.*, s.platform as source_platform, s.username as source_username
+      FROM reel_jobs r
+      LEFT JOIN source_accounts s ON s.id = r.source_account_id
+      WHERE r.id = ? AND r.target_page_id = ? AND r.agency_id = ? AND r.status = 'queued'
     `)
     .get(jobId, pageId, agencyId) as Record<string, unknown> | undefined
 }
@@ -63,15 +66,17 @@ export async function removeQueuedJob(
 export async function dedupeQueuedJobsForPage(pageId: string, agencyId: string) {
   const jobs = db
     .prepare(`
-      SELECT id, source_reel_id, source_url
-      FROM reel_jobs
-      WHERE target_page_id = ? AND agency_id = ? AND status = 'queued'
-      ORDER BY created_at ASC
+      SELECT r.id, r.source_reel_id, r.source_url, s.platform as source_platform
+      FROM reel_jobs r
+      LEFT JOIN source_accounts s ON s.id = r.source_account_id
+      WHERE r.target_page_id = ? AND r.agency_id = ? AND r.status = 'queued'
+      ORDER BY r.created_at ASC
     `)
     .all(pageId, agencyId) as {
       id: string
       source_reel_id: string | null
       source_url: string | null
+      source_platform: string | null
     }[]
 
   const seenReelIds = new Set<string>()
@@ -79,7 +84,10 @@ export async function dedupeQueuedJobsForPage(pageId: string, agencyId: string) 
   const toRemove: string[] = []
 
   for (const job of jobs) {
-    const reelId = job.source_reel_id?.trim()
+    const platform = job.source_platform ?? 'instagram'
+    const reelId = job.source_reel_id
+      ? normalizeSourceReelId(platform, job.source_reel_id, job.source_url)
+      : null
     const url = job.source_url?.trim()
 
     if (reelId) {
@@ -90,7 +98,7 @@ export async function dedupeQueuedJobsForPage(pageId: string, agencyId: string) 
       seenReelIds.add(reelId)
     }
 
-    if (url && !url.startsWith('mock://')) {
+    if (url && !isMockSourceUrl(url)) {
       if (seenUrls.has(url)) {
         toRemove.push(job.id)
         continue
@@ -188,19 +196,16 @@ export function resolveQueueSourceUrl(job: Record<string, unknown>): string | nu
     username = username ?? source?.username ?? null
   }
 
-  const handle = username?.replace(/^@/, '')
-  switch ((platform ?? '').toLowerCase()) {
-    case 'instagram':
-      return `https://www.instagram.com/reel/${reelId}/`
-    case 'youtube':
-      return `https://www.youtube.com/shorts/${reelId}`
-    case 'facebook':
-      return `https://www.facebook.com/reel/${reelId}`
-    case 'tiktok':
-      if (handle) return `https://www.tiktok.com/@${handle}/video/${reelId}`
-      return `https://www.tiktok.com/video/${reelId}`
-    default:
-      return null
+  if (!reelId) return null
+  return canonicalSourceUrl(platform ?? 'instagram', reelId, existing)
+}
+
+function localMediaExists(filePath: string | null | undefined): boolean {
+  if (!filePath || !fs.existsSync(filePath)) return false
+  try {
+    return fs.statSync(filePath).size > 4096
+  } catch {
+    return false
   }
 }
 
@@ -251,13 +256,19 @@ export function queueItemHasPreview(
   thumbnailPath: unknown,
   r2VideoKey?: unknown,
   r2ThumbKey?: unknown,
+  sourceUrl?: unknown,
 ): { hasPreview: boolean; hasThumbnail: boolean } {
+  if (isMockSourceUrl(typeof sourceUrl === 'string' ? sourceUrl : null)) {
+    return { hasPreview: false, hasThumbnail: false }
+  }
+
   const r2Video = isR2Enabled() && typeof r2VideoKey === 'string' && r2VideoKey.length > 0
   const r2Thumb = isR2Enabled() && typeof r2ThumbKey === 'string' && r2ThumbKey.length > 0
-  const video = r2Video || (typeof cleanedPath === 'string' && cleanedPath && fs.existsSync(cleanedPath))
+  const video =
+    r2Video || (typeof cleanedPath === 'string' && localMediaExists(cleanedPath))
   const thumb =
     r2Thumb ||
-    (typeof thumbnailPath === 'string' && thumbnailPath && fs.existsSync(thumbnailPath)) ||
+    (typeof thumbnailPath === 'string' && localMediaExists(thumbnailPath)) ||
     video
   return { hasPreview: Boolean(video), hasThumbnail: Boolean(thumb) }
 }
@@ -269,8 +280,9 @@ async function persistQueueMedia(
   sourceUrl: string,
   sourceReelId: string,
   existingCaption: string | null,
+  platform = '',
 ) {
-  const download = await downloadReelFromUrl(agencyId, jobId, sourceUrl, sourceReelId, false)
+  const download = await downloadReelFromUrl(agencyId, jobId, sourceUrl, sourceReelId, false, platform)
   const cleanedPath = path.join(path.dirname(download.filePath), 'clean.mp4')
   await stripVideoMetadata(download.filePath, cleanedPath)
 
@@ -301,8 +313,14 @@ async function persistQueueMedia(
     console.warn('[queue] R2 sync failed, local copy kept:', jobId, err instanceof Error ? err.message : err)
   }
 
-  const row = db.prepare('SELECT cleaned_file_path, thumbnail_path, r2_video_key, r2_thumb_key FROM reel_jobs WHERE id = ?').get(jobId) as Record<string, unknown>
-  return queueItemHasPreview(row.cleaned_file_path, row.thumbnail_path, row.r2_video_key, row.r2_thumb_key)
+  const row = db.prepare('SELECT cleaned_file_path, thumbnail_path, r2_video_key, r2_thumb_key, source_url FROM reel_jobs WHERE id = ?').get(jobId) as Record<string, unknown>
+  return queueItemHasPreview(
+    row.cleaned_file_path,
+    row.thumbnail_path,
+    row.r2_video_key,
+    row.r2_thumb_key,
+    row.source_url,
+  )
 }
 
 /** Re-download video or regenerate thumbnail for a queued reel. */
@@ -315,14 +333,24 @@ export async function refreshQueueItemMedia(jobId: string, pageId: string, agenc
     job.thumbnail_path,
     job.r2_video_key,
     job.r2_thumb_key,
+    job.source_url,
   )
   const sourceUrl = resolveQueueSourceUrl(job)
   const sourceReelId = (job.source_reel_id as string) || jobId
+  const platform = (job.source_platform as string) ?? ''
 
   if (!preview.hasPreview) {
     if (!sourceUrl) throw new Error('No source URL — skip this reel to fetch a new one')
     persistResolvedSourceUrl(jobId, job, sourceUrl)
-    const next = await persistQueueMedia(jobId, pageId, agencyId, sourceUrl, sourceReelId, job.caption as string | null)
+    const next = await persistQueueMedia(
+      jobId,
+      pageId,
+      agencyId,
+      sourceUrl,
+      sourceReelId,
+      job.caption as string | null,
+      platform,
+    )
     return { jobId, ...next, refreshed: 'video' as const }
   }
 
@@ -346,7 +374,15 @@ export async function refreshQueueItemMedia(jobId: string, pageId: string, agenc
       }
     }
     if (sourceUrl) {
-      const next = await persistQueueMedia(jobId, pageId, agencyId, sourceUrl, sourceReelId, job.caption as string | null)
+      const next = await persistQueueMedia(
+        jobId,
+        pageId,
+        agencyId,
+        sourceUrl,
+        sourceReelId,
+        job.caption as string | null,
+        platform,
+      )
       return { jobId, ...next, refreshed: 'video' as const }
     }
     throw new Error('Could not generate thumbnail')
@@ -391,6 +427,7 @@ export async function refreshMissingQueuePreviews(pageId: string, agencyId: stri
       row.thumbnail_path,
       row.r2_video_key,
       row.r2_thumb_key,
+      row.source_url,
     )
     return !preview.hasPreview || !preview.hasThumbnail
   })

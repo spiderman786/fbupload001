@@ -1,5 +1,8 @@
 import { v4 as uuid } from 'uuid'
 import { db } from '../db.js'
+import { isMockSourceUrl } from '../utils/reelIdentity.js'
+
+const ACTIVE_JOB_STATUSES = "('pending', 'downloading', 'queued', 'publishing', 'failed')"
 
 export function isReelAlreadyPosted(pageId: string, sourceReelId: string): boolean {
   const row = db
@@ -15,15 +18,42 @@ export function isReelPostedForSource(sourceAccountId: string, sourceReelId: str
   return Boolean(row)
 }
 
+function isSourceUrlTakenOnPage(pageId: string, sourceUrl: string, excludeJobId?: string): boolean {
+  if (isMockSourceUrl(sourceUrl)) return false
+
+  const posted = db
+    .prepare('SELECT id FROM posted_reels WHERE page_id = ? AND source_url = ? LIMIT 1')
+    .get(pageId, sourceUrl)
+  if (posted) return true
+
+  const row = db
+    .prepare(`
+      SELECT id FROM reel_jobs
+      WHERE target_page_id = ? AND source_url = ?
+        AND status IN ${ACTIVE_JOB_STATUSES}
+        AND (? IS NULL OR id != ?)
+      LIMIT 1
+    `)
+    .get(pageId, sourceUrl, excludeJobId ?? null, excludeJobId ?? null)
+  return Boolean(row)
+}
+
 /** True when this page already posted, skipped, queued, or is downloading this source reel. */
-export function isReelConsumedByPage(pageId: string, sourceReelId: string, excludeJobId?: string): boolean {
+export function isReelConsumedByPage(
+  pageId: string,
+  sourceReelId: string,
+  excludeJobId?: string,
+  sourceUrl?: string | null,
+): boolean {
   if (isReelAlreadyPosted(pageId, sourceReelId)) return true
+
+  if (sourceUrl && isSourceUrlTakenOnPage(pageId, sourceUrl, excludeJobId)) return true
 
   const row = db
     .prepare(`
       SELECT id FROM reel_jobs
       WHERE target_page_id = ? AND source_reel_id = ?
-        AND status IN ('pending', 'downloading', 'queued', 'publishing', 'failed')
+        AND status IN ${ACTIVE_JOB_STATUSES}
         AND (? IS NULL OR id != ?)
       LIMIT 1
     `)
@@ -32,15 +62,20 @@ export function isReelConsumedByPage(pageId: string, sourceReelId: string, exclu
 }
 
 /** Atomically claim a reel id for a job so parallel prefills cannot pick the same video. */
-export function tryReserveReelForJob(pageId: string, jobId: string, sourceReelId: string): boolean {
+export function tryReserveReelForJob(
+  pageId: string,
+  jobId: string,
+  sourceReelId: string,
+  sourceUrl?: string | null,
+): boolean {
   return db.transaction(() => {
-    if (isReelConsumedByPage(pageId, sourceReelId, jobId)) return false
+    if (isReelConsumedByPage(pageId, sourceReelId, jobId, sourceUrl)) return false
     const result = db
       .prepare(`
-        UPDATE reel_jobs SET source_reel_id = ?
+        UPDATE reel_jobs SET source_reel_id = ?, source_url = COALESCE(?, source_url)
         WHERE id = ? AND (source_reel_id IS NULL OR source_reel_id = ?)
       `)
-      .run(sourceReelId, jobId, sourceReelId)
+      .run(sourceReelId, sourceUrl ?? null, jobId, sourceReelId)
     return result.changes > 0
   })()
 }

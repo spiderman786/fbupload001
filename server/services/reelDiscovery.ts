@@ -4,24 +4,15 @@ import { promisify } from 'util'
 import { db } from '../db.js'
 import { isReelConsumedByPage, tryReserveReelForJob } from './dedup.js'
 import { execYtDlpWithProxyFallback } from '../utils/ytdlpRunner.js'
+import {
+  canonicalSourceUrl,
+  normalizeSourceReelId,
+  ytDlpPlatformArgs,
+} from '../utils/reelIdentity.js'
 
 const execFileAsync = promisify(execFile)
 
-export function platformFeedUrl(platform: string, username: string): string {
-  const handle = username.replace(/^@/, '')
-  switch (platform) {
-    case 'instagram':
-      return `https://www.instagram.com/${handle}/reels/`
-    case 'tiktok':
-      return `https://www.tiktok.com/@${handle}`
-    case 'youtube':
-      return `https://www.youtube.com/@${handle}/shorts`
-    case 'facebook':
-      return `https://www.facebook.com/${handle}/reels/`
-    default:
-      return handle
-  }
-}
+export { platformFeedUrl } from '../utils/reelIdentity.js'
 
 async function hasYtDlp(): Promise<boolean> {
   try {
@@ -32,7 +23,11 @@ async function hasYtDlp(): Promise<boolean> {
   }
 }
 
-export async function listCandidateReels(feedUrl: string, limit = 20): Promise<{ id: string; url: string }[]> {
+export async function listCandidateReels(
+  feedUrl: string,
+  limit = 20,
+  platform = '',
+): Promise<{ id: string; url: string }[]> {
   const baseArgs = [
     feedUrl,
     '--flat-playlist',
@@ -40,6 +35,7 @@ export async function listCandidateReels(feedUrl: string, limit = 20): Promise<{
     '--print', '%(url)s',
     '--playlist-items', `1:${limit}`,
     '--no-warnings',
+    ...ytDlpPlatformArgs(platform, feedUrl),
   ]
 
   const { stdout, usedProxy, proxyLabel } = await execYtDlpWithProxyFallback(baseArgs, {
@@ -70,7 +66,7 @@ export async function countCatalogReels(platform: string, username: string, limi
   if (!(await hasYtDlp())) return 0
   try {
     const feedUrl = platformFeedUrl(platform, username)
-    const candidates = await listCandidateReels(feedUrl, limit)
+    const candidates = await listCandidateReels(feedUrl, limit, platform)
     return candidates.length
   } catch (err) {
     console.warn('[catalog] probe failed:', err)
@@ -96,10 +92,12 @@ export async function discoverNextReel(params: {
 
   if (await hasYtDlp()) {
     try {
-      const candidates = await listCandidateReels(feedUrl, listLimit)
+      const candidates = await listCandidateReels(feedUrl, listLimit, params.platform)
       for (const c of candidates) {
-        if (tryReserveReelForJob(params.pageId, params.jobId, c.id)) {
-          return { reelId: c.id, sourceUrl: c.url, mock: false }
+        const reelId = normalizeSourceReelId(params.platform, c.id, c.url)
+        const sourceUrl = canonicalSourceUrl(params.platform, reelId, c.url)
+        if (tryReserveReelForJob(params.pageId, params.jobId, reelId, sourceUrl)) {
+          return { reelId, sourceUrl, mock: false }
         }
       }
       throw new Error('No new reels found on source (all recent items already posted to this page)')

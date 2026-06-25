@@ -4,6 +4,7 @@ import path from 'path'
 import { promisify } from 'util'
 import { fileURLToPath } from 'url'
 import { execYtDlpWithProxyFallback } from '../utils/ytdlpRunner.js'
+import { downloadUrlCandidates, isMockSourceUrl, platformFeedUrl, ytDlpPlatformArgs } from '../utils/reelIdentity.js'
 
 const execFileAsync = promisify(execFile)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -27,19 +28,7 @@ function ensureDir(dir: string) {
 }
 
 function platformUrl(platform: string, username: string): string {
-  const handle = username.replace(/^@/, '')
-  switch (platform) {
-    case 'instagram':
-      return `https://www.instagram.com/${handle}/reels/`
-    case 'tiktok':
-      return `https://www.tiktok.com/@${handle}`
-    case 'youtube':
-      return handle.startsWith('@') ? `https://www.youtube.com/${handle}/shorts` : `https://www.youtube.com/@${handle}/shorts`
-    case 'facebook':
-      return `https://www.facebook.com/${handle}/reels/`
-    default:
-      return handle
-  }
+  return platformFeedUrl(platform, username)
 }
 
 async function hasYtDlp(): Promise<boolean> {
@@ -57,12 +46,21 @@ function cleanupPartialRawFiles(dir: string) {
   }
 }
 
-async function downloadWithYtDlp(url: string, outPath: string): Promise<void> {
+async function downloadWithYtDlp(url: string, outPath: string, platform = ''): Promise<void> {
   const dir = path.dirname(outPath)
   const template = path.join(dir, 'raw.%(ext)s')
   cleanupPartialRawFiles(dir)
 
-  const baseArgs = [url, '-f', 'best[ext=mp4]/best', '--no-playlist', '-o', template, '--no-warnings']
+  const baseArgs = [
+    url,
+    '-f',
+    'best[ext=mp4]/best',
+    '--no-playlist',
+    '-o',
+    template,
+    '--no-warnings',
+    ...ytDlpPlatformArgs(platform, url),
+  ]
   const { usedProxy, proxyLabel } = await execYtDlpWithProxyFallback(baseArgs, { timeout: 180_000 })
 
   if (usedProxy) console.log(`[downloader] downloaded via proxy ${proxyLabel ?? 'pool'}`)
@@ -71,6 +69,15 @@ async function downloadWithYtDlp(url: string, outPath: string): Promise<void> {
   if (!files.length) throw new Error('yt-dlp did not produce a file')
   const downloaded = path.join(dir, files[0]!)
   if (downloaded !== outPath) fs.renameSync(downloaded, outPath)
+}
+
+function localVideoIsPlayable(filePath: string): boolean {
+  if (!fs.existsSync(filePath)) return false
+  try {
+    return fs.statSync(filePath).size > 4096
+  } catch {
+    return false
+  }
 }
 
 function writeMockVideo(outPath: string) {
@@ -87,23 +94,34 @@ export async function downloadReelFromUrl(
   sourceUrl: string,
   sourceReelId: string,
   mock: boolean,
+  platform = '',
 ): Promise<DownloadResult> {
   ensureDir(DOWNLOADS_DIR)
   const jobDir = path.join(DOWNLOADS_DIR, tenantId, jobId)
   ensureDir(jobDir)
   const outPath = path.join(jobDir, 'raw.mp4')
 
-  if (!mock && (await hasYtDlp()) && !sourceUrl.startsWith('mock://')) {
-    try {
-      await downloadWithYtDlp(sourceUrl, outPath)
-      return { filePath: outPath, sourceUrl, sourceReelId, mock: false }
-    } catch (err) {
-      console.warn('[downloader] yt-dlp download failed:', err)
+  if (!mock && (await hasYtDlp()) && !isMockSourceUrl(sourceUrl)) {
+    const candidates = downloadUrlCandidates(platform, sourceReelId, sourceUrl)
+    for (const url of candidates) {
+      try {
+        await downloadWithYtDlp(url, outPath, platform)
+        if (localVideoIsPlayable(outPath)) {
+          return { filePath: outPath, sourceUrl: url, sourceReelId, mock: false }
+        }
+        if (fs.existsSync(outPath)) fs.unlinkSync(outPath)
+      } catch (err) {
+        console.warn('[downloader] yt-dlp download failed for', url, err)
+      }
     }
   }
 
-  writeMockVideo(outPath)
-  return { filePath: outPath, sourceUrl, sourceReelId, mock: true }
+  if (mock) {
+    writeMockVideo(outPath)
+    return { filePath: outPath, sourceUrl, sourceReelId, mock: true }
+  }
+
+  throw new Error(`Failed to download reel from ${platform || 'source'}`)
 }
 
 /** Fetch title, description, and thumbnail URL via yt-dlp. */
@@ -112,7 +130,7 @@ export async function fetchReelMetadata(sourceUrl: string): Promise<ReelMetadata
   if (!(await hasYtDlp())) return null
 
   try {
-    const baseArgs = [sourceUrl, '--dump-single-json', '--no-playlist', '--no-warnings']
+    const baseArgs = [sourceUrl, '--dump-single-json', '--no-playlist', '--no-warnings', ...ytDlpPlatformArgs('', sourceUrl)]
     const { stdout } = await execYtDlpWithProxyFallback(baseArgs, { timeout: 90_000, maxBuffer: 4 * 1024 * 1024 })
     const data = JSON.parse(stdout) as {
       title?: string
