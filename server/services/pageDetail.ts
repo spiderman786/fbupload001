@@ -162,10 +162,10 @@ export async function getPageQueue(pageId: string) {
       let previewVideoUrl: string | null = null
       let previewThumbUrl: string | null = null
       if (isR2Enabled()) {
-        if (typeof r.r2_video_key === 'string' && r.r2_video_key) {
+        if (preview.hasPreview && typeof r.r2_video_key === 'string' && r.r2_video_key) {
           previewVideoUrl = await getSignedPreviewUrl(r.r2_video_key)
         }
-        if (typeof r.r2_thumb_key === 'string' && r.r2_thumb_key) {
+        if (preview.hasThumbnail && typeof r.r2_thumb_key === 'string' && r.r2_thumb_key) {
           previewThumbUrl = await getSignedPreviewUrl(r.r2_thumb_key)
         }
       }

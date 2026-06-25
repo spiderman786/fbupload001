@@ -8,6 +8,7 @@ import {
   canonicalSourceUrl,
   normalizeSourceReelId,
   platformFeedUrl,
+  platformFeedUrls,
   ytDlpPlatformArgs,
 } from '../utils/reelIdentity.js'
 
@@ -88,24 +89,36 @@ export async function discoverNextReel(params: {
   username: string
   jobId: string
 }): Promise<{ reelId: string; sourceUrl: string; mock: boolean }> {
-  const feedUrl = platformFeedUrl(params.platform, params.username)
   const listLimit = Number(process.env.PREFILL_DISCOVERY_LIST_LIMIT ?? 50)
+  const feedUrls = platformFeedUrls(params.platform, params.username)
+  const errors: string[] = []
 
   if (await hasYtDlp()) {
-    try {
-      const candidates = await listCandidateReels(feedUrl, listLimit, params.platform)
-      for (const c of candidates) {
-        const reelId = normalizeSourceReelId(params.platform, c.id, c.url)
-        const sourceUrl = canonicalSourceUrl(params.platform, reelId, c.url)
-        if (tryReserveReelForJob(params.pageId, params.jobId, reelId, sourceUrl)) {
-          return { reelId, sourceUrl, mock: false }
+    for (const feedUrl of feedUrls) {
+      try {
+        const candidates = await listCandidateReels(feedUrl, listLimit, params.platform)
+        for (const c of candidates) {
+          const reelId = normalizeSourceReelId(params.platform, c.id, c.url)
+          const sourceUrl = canonicalSourceUrl(params.platform, reelId, c.url)
+          if (tryReserveReelForJob(params.pageId, params.jobId, reelId, sourceUrl)) {
+            return { reelId, sourceUrl, mock: false }
+          }
         }
+        if (candidates.length) {
+          throw new Error('No new reels found on source (all recent items already posted to this page)')
+        }
+        errors.push(`${feedUrl}: empty feed`)
+      } catch (err) {
+        if (err instanceof Error && err.message.includes('already posted')) throw err
+        errors.push(`${feedUrl}: ${err instanceof Error ? err.message : String(err)}`)
+        console.warn('[discovery] feed listing failed:', feedUrl, err)
       }
-      throw new Error('No new reels found on source (all recent items already posted to this page)')
-    } catch (err) {
-      if (err instanceof Error && err.message.includes('already posted')) throw err
-      console.warn('[discovery] yt-dlp listing failed, using mock reel:', err)
     }
+    throw new Error(`Could not list reels from @${params.username} (${params.platform}): ${errors.join(' | ')}`)
+  }
+
+  if (process.env.ALLOW_MOCK_REELS !== 'true') {
+    throw new Error('yt-dlp is not available — cannot download reels')
   }
 
   const mock = mockReelForToday(params.pageId, params.sourceAccountId)

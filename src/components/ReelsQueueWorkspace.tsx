@@ -679,10 +679,18 @@ export function ReelsQueueWorkspace({
       const result = await api.pages.refreshMissingQueuePreviews(pageId)
       setGridVersion((v) => v + 1)
       if (result.background) {
+        const purgedNote =
+          result.purged && result.purged > 0
+            ? ` Removed ${result.purged} placeholder reel${result.purged !== 1 ? 's' : ''}.`
+            : ''
         toast.success(
           result.alreadyRunning
             ? 'Preview repair already in progress'
-            : `Repairing ${result.attempted} preview${result.attempted !== 1 ? 's' : ''} — queue will update automatically`,
+            : `Repairing ${result.attempted} preview${result.attempted !== 1 ? 's' : ''} — queue will update automatically.${purgedNote}`,
+        )
+      } else if (result.purged && result.purged > 0) {
+        toast.success(
+          `Removed ${result.purged} placeholder reel${result.purged !== 1 ? 's' : ''} and refilling queue`,
         )
       } else {
         toast.success(`Refreshed ${result.refreshed} of ${result.attempted} preview${result.attempted !== 1 ? 's' : ''}`)

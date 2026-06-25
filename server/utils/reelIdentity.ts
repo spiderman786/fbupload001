@@ -4,6 +4,18 @@ export function isMockSourceUrl(url: string | null | undefined): boolean {
   return Boolean(url?.startsWith('mock://'))
 }
 
+export function facebookFeedUrls(username: string): string[] {
+  const handle = username.replace(/^@/, '')
+  if (/^\d+$/.test(handle)) {
+    return [
+      `https://www.facebook.com/profile.php?id=${handle}&sk=reels_tab`,
+      `https://www.facebook.com/${handle}/reels/`,
+      `https://m.facebook.com/profile.php?id=${handle}&sk=reels_tab`,
+    ]
+  }
+  return [`https://www.facebook.com/${handle}/reels/`]
+}
+
 export function platformFeedUrl(platform: string, username: string): string {
   const handle = username.replace(/^@/, '')
   switch (platform.toLowerCase()) {
@@ -14,13 +26,16 @@ export function platformFeedUrl(platform: string, username: string): string {
     case 'youtube':
       return `https://www.youtube.com/@${handle}/shorts`
     case 'facebook':
-      if (/^\d+$/.test(handle)) {
-        return `https://www.facebook.com/profile.php?id=${handle}&sk=reels_tab`
-      }
-      return `https://www.facebook.com/${handle}/reels/`
+      return facebookFeedUrls(username)[0]!
     default:
       return handle
   }
+}
+
+/** All feed URLs to try when listing reels (Facebook often needs alternates). */
+export function platformFeedUrls(platform: string, username: string): string[] {
+  if (platform.toLowerCase() === 'facebook') return facebookFeedUrls(username)
+  return [platformFeedUrl(platform, username)]
 }
 
 function extractFromUrl(url: string, pattern: RegExp): string | null {

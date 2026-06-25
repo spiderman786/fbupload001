@@ -15,6 +15,7 @@ import {
   Share2,
   TrendingUp,
   User,
+  ExternalLink,
 } from 'lucide-react'
 import { api, type PageDetail, type PageInsightsPayload, type PageQueueItem } from '../../api/client'
 import { AutomationStatusBadge } from '../../components/HealthStatusBadge'
@@ -22,6 +23,7 @@ import { ReelsQueueWorkspace } from '../../components/ReelsQueueWorkspace'
 import { ScrapeStatusBanner } from '../../components/ScrapeStatusBanner'
 import { SwitchSourceModal } from '../../components/SwitchSourceModal'
 import { formatAddedDate, formatDurationSince } from '../../lib/formatDuration'
+import { facebookPagePublicUrl, sourcePublicUrl } from '../../lib/publicProfileUrl'
 import { useToast } from '../../context/ToastContext'
 import { useAgencyRole } from '../../context/AuthContext'
 import { getApiError } from '../../lib/apiError'
@@ -277,20 +279,36 @@ export function AduPageDetailPage() {
                 Starting {page.reelsStarted.toLocaleString()} · Added {formatAddedDate(page.createdAt)} ·{' '}
                 {formatDurationSince(page.createdAt)}
               </p>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-2.5 py-1 text-xs">
-                  <Share2 className="h-3.5 w-3.5 text-primary" />
-                  Facebook Page
-                </span>
-                {source ? (
-                  <span className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-2.5 py-1 text-xs font-medium">
-                    {source.platform === 'tiktok' ? (
-                      <Music2 className="h-3.5 w-3.5 text-primary" />
-                    ) : (
-                      <Share2 className="h-3.5 w-3.5 text-primary" />
-                    )}
-                    {platformLabel(source.platform)}: @{source.username.replace(/^@/, '')}
+              <div className="mt-3 flex max-w-md flex-col gap-2">
+                <a
+                  href={facebookPagePublicUrl(page.metaPageId)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-between gap-2 rounded-md border border-border bg-muted/60 px-2.5 py-1.5 text-xs transition hover:border-primary/30 hover:bg-muted"
+                >
+                  <span className="inline-flex items-center gap-1 font-medium">
+                    <Share2 className="h-3.5 w-3.5 text-primary" />
+                    Facebook Page
                   </span>
+                  <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
+                </a>
+                {source ? (
+                  <a
+                    href={sourcePublicUrl(source.platform, source.username)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-between gap-2 rounded-md border border-border bg-muted/60 px-2.5 py-1.5 text-xs font-medium transition hover:border-primary/30 hover:bg-muted"
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      {source.platform === 'tiktok' ? (
+                        <Music2 className="h-3.5 w-3.5 text-primary" />
+                      ) : (
+                        <Share2 className="h-3.5 w-3.5 text-primary" />
+                      )}
+                      {platformLabel(source.platform)}: @{source.username.replace(/^@/, '')}
+                    </span>
+                    <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
+                  </a>
                 ) : null}
               </div>
               {facebookIdentity ? (

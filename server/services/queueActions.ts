@@ -178,7 +178,7 @@ export function resolveQueueSourceUrl(job: Record<string, unknown>): string | nu
     .prepare(`
       SELECT source_url FROM posted_reels
       WHERE source_reel_id = ? AND source_url IS NOT NULL AND source_url != ''
-      ORDER BY created_at DESC
+      ORDER BY posted_at DESC
       LIMIT 1
     `)
     .get(reelId) as { source_url: string } | undefined
@@ -323,6 +323,63 @@ async function persistQueueMedia(
   )
 }
 
+export async function purgeMockQueuedJobsForPage(pageId: string, agencyId: string) {
+  const jobs = db
+    .prepare(`
+      SELECT id FROM reel_jobs
+      WHERE target_page_id = ? AND agency_id = ? AND status = 'queued'
+        AND source_url LIKE 'mock://%'
+    `)
+    .all(pageId, agencyId) as { id: string }[]
+
+  for (const job of jobs) {
+    await removeQueuedJob(job.id, pageId, agencyId, { recordSkip: false })
+  }
+  return jobs.length
+}
+
+async function replaceMockQueueItem(
+  jobId: string,
+  pageId: string,
+  agencyId: string,
+  job: Record<string, unknown>,
+) {
+  const sourceAccountId = job.source_account_id as string | null
+  if (!sourceAccountId) throw new Error('No source assigned — cannot replace placeholder reel')
+
+  const source = db
+    .prepare('SELECT platform, username FROM source_accounts WHERE id = ?')
+    .get(sourceAccountId) as { platform: string; username: string } | undefined
+  if (!source) throw new Error('Source account missing')
+
+  await deleteQueueR2Media(job)
+  cleanupJobFiles(agencyId, jobId)
+  db.prepare(`
+    UPDATE reel_jobs SET source_reel_id = NULL, source_url = NULL,
+      cleaned_file_path = NULL, thumbnail_path = NULL,
+      r2_video_key = NULL, r2_thumb_key = NULL
+    WHERE id = ?
+  `).run(jobId)
+
+  const { discoverNextReel } = await import('./reelDiscovery.js')
+  const discovered = await discoverNextReel({
+    pageId,
+    sourceAccountId,
+    platform: source.platform,
+    username: source.username,
+    jobId,
+  })
+
+  return persistQueueMedia(
+    jobId,
+    pageId,
+    agencyId,
+    discovered.sourceUrl,
+    discovered.reelId,
+    job.caption as string | null,
+    source.platform,
+  )
+}
 /** Re-download video or regenerate thumbnail for a queued reel. */
 export async function refreshQueueItemMedia(jobId: string, pageId: string, agencyId: string) {
   const job = getQueuedJobForPage(jobId, pageId, agencyId)
@@ -340,7 +397,10 @@ export async function refreshQueueItemMedia(jobId: string, pageId: string, agenc
   const platform = (job.source_platform as string) ?? ''
 
   if (!preview.hasPreview) {
-    if (!sourceUrl) throw new Error('No source URL — skip this reel to fetch a new one')
+    if (isMockSourceUrl(job.source_url as string) || !sourceUrl) {
+      const next = await replaceMockQueueItem(jobId, pageId, agencyId, job)
+      return { jobId, ...next, refreshed: 'video' as const }
+    }
     persistResolvedSourceUrl(jobId, job, sourceUrl)
     const next = await persistQueueMedia(
       jobId,
@@ -408,6 +468,8 @@ async function processMissingQueuePreviews(
 }
 
 export async function refreshMissingQueuePreviews(pageId: string, agencyId: string) {
+  const purged = await purgeMockQueuedJobsForPage(pageId, agencyId)
+
   const rows = db
     .prepare(`
       SELECT r.id, r.cleaned_file_path, r.thumbnail_path, r.r2_video_key, r.r2_thumb_key,
@@ -435,15 +497,29 @@ export async function refreshMissingQueuePreviews(pageId: string, agencyId: stri
   const alreadyRunning = refreshInFlight.has(pageId)
   if (missing.length && !alreadyRunning) {
     refreshInFlight.add(pageId)
-    void processMissingQueuePreviews(pageId, agencyId, missing as { id: string }[]).finally(() => {
+    void processMissingQueuePreviews(pageId, agencyId, missing as { id: string }[]).finally(async () => {
       refreshInFlight.delete(pageId)
+      try {
+        const { syncPagePrefillQueue } = await import('./prefillScheduler.js')
+        await syncPagePrefillQueue(pageId, agencyId)
+      } catch (err) {
+        console.warn('[queue] prefill after preview refresh failed:', err instanceof Error ? err.message : err)
+      }
     })
+  } else if (purged > 0) {
+    try {
+      const { syncPagePrefillQueue } = await import('./prefillScheduler.js')
+      await syncPagePrefillQueue(pageId, agencyId)
+    } catch (err) {
+      console.warn('[queue] prefill after mock purge failed:', err instanceof Error ? err.message : err)
+    }
   }
 
   return {
     attempted: missing.length,
     refreshed: 0,
     failed: 0,
+    purged,
     background: missing.length > 0,
     alreadyRunning: alreadyRunning && missing.length > 0,
     results: [] as { jobId: string; ok: boolean; error?: string }[],

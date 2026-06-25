@@ -106,6 +106,7 @@ export const api = {
         attempted: number
         refreshed: number
         failed: number
+        purged?: number
         background?: boolean
         alreadyRunning?: boolean
         results: { jobId: string; ok: boolean; error?: string }[]

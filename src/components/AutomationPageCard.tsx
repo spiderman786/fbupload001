@@ -1,8 +1,9 @@
-import { ChevronRight, Download, Loader2, Music2, Share2, Trash2 } from 'lucide-react'
+import { ChevronRight, Download, ExternalLink, Loader2, Music2, Share2, Trash2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import type { AutomationPage } from '../api/client'
 import { AutomationStatusBadge } from './HealthStatusBadge'
 import { formatAddedDate, formatDurationSince } from '../lib/formatDuration'
+import { facebookPagePublicUrl, sourcePublicUrl } from '../lib/publicProfileUrl'
 
 type Props = {
   page: AutomationPage
@@ -142,35 +143,51 @@ export function AutomationPageCard({
           </p>
 
           <div className="mt-3 space-y-2 border-t border-border pt-3">
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              {page.facebookAccountName ? (
-                <span className="text-muted-foreground">
-                  via <span className="font-medium text-foreground">{page.facebookAccountName}</span>
-                </span>
-              ) : null}
-              <span className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-2 py-0.5 text-muted-foreground">
-                <Share2 className="h-3 w-3 text-primary" />
+            {page.facebookAccountName ? (
+              <p className="text-xs text-muted-foreground">
+                via <span className="font-medium text-foreground">{page.facebookAccountName}</span>
+              </p>
+            ) : null}
+
+            <a
+              href={facebookPagePublicUrl(page.metaPageId)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs transition hover:border-primary/30 hover:bg-muted/40"
+            >
+              <span className="inline-flex items-center gap-1.5 font-medium">
+                <Share2 className="h-3.5 w-3.5 text-primary" />
                 Facebook Page
               </span>
-            </div>
+              <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            </a>
 
             {page.sourceUsername ? (
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2">
-                <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+              <a
+                href={sourcePublicUrl(sourcePlatform ?? 'instagram', page.sourceUsername)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs transition hover:border-primary/30 hover:bg-muted/40"
+              >
+                <span className="inline-flex min-w-0 items-center gap-1.5 font-medium">
                   {sourcePlatform === 'tiktok' ? (
-                    <Music2 className="h-3.5 w-3.5 text-primary" />
+                    <Music2 className="h-3.5 w-3.5 shrink-0 text-primary" />
                   ) : (
-                    <Share2 className="h-3.5 w-3.5 text-primary" />
+                    <Share2 className="h-3.5 w-3.5 shrink-0 text-primary" />
                   )}
-                  {sourcePlatform ? `${platformLabel(sourcePlatform)}: ` : ''}@{page.sourceUsername.replace(/^@/, '')}
+                  <span className="truncate">
+                    {sourcePlatform ? `${platformLabel(sourcePlatform)}: ` : ''}@
+                    {page.sourceUsername.replace(/^@/, '')}
+                  </span>
                 </span>
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                   {scrapeLine()}
                   <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-primary">
                     Synced
                   </span>
+                  <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
                 </div>
-              </div>
+              </a>
             ) : onAssignSource && sources && sources.length > 0 ? (
               <div className="space-y-1">
                 <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">

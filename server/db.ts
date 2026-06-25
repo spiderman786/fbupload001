@@ -298,6 +298,9 @@ function migrate() {
   for (const [col, type] of jobMigrations) {
     if (!jobNames.has(col)) db.exec(`ALTER TABLE reel_jobs ADD COLUMN ${col} ${type}`)
   }
+  if (!jobNames.has('created_at')) {
+    db.exec(`ALTER TABLE reel_jobs ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now'))`)
+  }
 
   const slotCols = db.prepare("PRAGMA table_info(schedule_slots)").all() as { name: string }[]
   const slotNames = new Set(slotCols.map((c) => c.name))
