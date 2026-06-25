@@ -11,7 +11,7 @@ import {
   type AuthRequest,
 } from '../middleware/auth.js'
 import { generateVerificationCode, isGmail } from '../utils/helpers.js'
-import { sendVerificationEmail } from '../services/email.js'
+import { sendVerificationEmail, sendPasswordResetEmail } from '../services/email.js'
 import {
   buildSessionPayload,
   assertAgencySubdomainMember,
@@ -273,12 +273,73 @@ authRouter.patch('/me', authMiddleware, requireVerified, async (req: AuthRequest
   res.json({ user: sanitizeUser(updated) })
 })
 
-authRouter.post('/forgot-password', (req, res) => {
+authRouter.post('/forgot-password', async (req, res) => {
   const { email } = req.body ?? {}
   if (!email) {
     res.status(400).json({ error: 'Email is required' })
     return
   }
+
+  const normalized = email.trim().toLowerCase()
+  const user = db.prepare('SELECT id, email_verified FROM users WHERE email = ?').get(normalized) as
+    | { id: string; email_verified: number }
+    | undefined
+
+  if (user) {
+    const code = generateVerificationCode()
+    const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+    db.prepare(`
+      UPDATE users SET password_reset_token = ?, password_reset_expires = ? WHERE id = ?
+    `).run(code, expires, user.id)
+
+    try {
+      await sendPasswordResetEmail(normalized, code)
+    } catch (err) {
+      console.error('[auth] password reset email failed:', err)
+      res.status(503).json({
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Failed to send reset email. Please check SMTP configuration.',
+      })
+      return
+    }
+  }
+
   // Always return success to prevent email enumeration
-  res.json({ message: 'If an account exists, a reset link has been sent' })
+  res.json({ message: 'If an account exists, a reset code has been sent to your email.' })
+})
+
+authRouter.post('/reset-password', async (req, res) => {
+  const { email, code, password } = req.body ?? {}
+  if (!email || !code || !password) {
+    res.status(400).json({ error: 'Email, code, and new password are required' })
+    return
+  }
+  if (password.length < 6) {
+    res.status(400).json({ error: 'Password must be at least 6 characters' })
+    return
+  }
+
+  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email.trim().toLowerCase()) as
+    | import('../db.js').UserRow
+    | undefined
+
+  if (!user || user.password_reset_token !== String(code).trim()) {
+    res.status(400).json({ error: 'Invalid or expired reset code' })
+    return
+  }
+  if (user.password_reset_expires && new Date(user.password_reset_expires) < new Date()) {
+    res.status(400).json({ error: 'Reset code has expired. Request a new one.' })
+    return
+  }
+
+  const hash = await bcrypt.hash(password, 10)
+  db.prepare(`
+    UPDATE users
+    SET password_hash = ?, password_reset_token = NULL, password_reset_expires = NULL
+    WHERE id = ?
+  `).run(hash, user.id)
+
+  res.json({ message: 'Password updated. You can sign in now.' })
 })

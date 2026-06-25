@@ -34,6 +34,10 @@ export const api = {
       request<{ message: string }>('/auth/send-verification', { method: 'POST', body: JSON.stringify({ email }) }),
     login: (body: { email: string; password: string }) =>
       request<SessionResponse>('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
+    forgotPassword: (email: string) =>
+      request<{ message: string }>('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
+    resetPassword: (body: { email: string; code: string; password: string }) =>
+      request<{ message: string }>('/auth/reset-password', { method: 'POST', body: JSON.stringify(body) }),
     logout: () => request<{ message: string }>('/auth/logout', { method: 'POST' }),
     me: () => request<{ user: User }>('/auth/me'),
     updateProfile: (body: Partial<SignupBody & { currentPassword?: string; newPassword?: string }>) =>

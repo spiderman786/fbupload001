@@ -346,6 +346,17 @@ function migrate() {
   migrateAgencies()
   migrateMultiByoc()
   migrateOps()
+  migratePasswordReset()
+}
+
+function migratePasswordReset() {
+  const cols = db.prepare('PRAGMA table_info(users)').all() as { name: string }[]
+  if (!cols.some((c) => c.name === 'password_reset_token')) {
+    db.exec(`ALTER TABLE users ADD COLUMN password_reset_token TEXT`)
+  }
+  if (!cols.some((c) => c.name === 'password_reset_expires')) {
+    db.exec(`ALTER TABLE users ADD COLUMN password_reset_expires TEXT`)
+  }
 }
 
 function migrateOps() {
@@ -600,5 +611,7 @@ export type UserRow = {
   email_verified: number
   verification_code: string | null
   verification_expires: string | null
+  password_reset_token: string | null
+  password_reset_expires: string | null
   created_at: string
 }

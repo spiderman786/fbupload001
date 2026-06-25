@@ -8,7 +8,8 @@ export function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const from = (location.state as { from?: string })?.from ?? '/agency'
+  const from = (location.state as { from?: string; message?: string })?.from ?? '/agency'
+  const successMessage = (location.state as { message?: string })?.message ?? ''
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -60,7 +61,9 @@ export function LoginPage() {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <label htmlFor="password" className="text-sm font-medium">Password</label>
-            <a href="#" className="text-sm font-medium text-primary hover:underline">Forgot password?</a>
+            <Link to="/forgot-password" className="text-sm font-medium text-primary hover:underline">
+              Forgot password?
+            </Link>
           </div>
           <input
             id="password"
@@ -71,6 +74,10 @@ export function LoginPage() {
             className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm shadow-xs outline-none focus:border-primary focus:ring-[3px] focus:ring-primary/20"
           />
         </div>
+
+        {successMessage && (
+          <p className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary">{successMessage}</p>
+        )}
 
         {error && <p className="text-sm text-red-600">{error}</p>}
 

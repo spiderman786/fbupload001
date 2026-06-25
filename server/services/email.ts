@@ -234,6 +234,28 @@ export async function sendVerificationEmail(email: string, code: string): Promis
   await sendViaSmtp(smtp, email, subject, body)
 }
 
+export async function sendPasswordResetEmail(email: string, code: string): Promise<void> {
+  const smtp = getSmtpConfig()
+  const resetUrl = `${(process.env.CLIENT_URL ?? 'http://localhost:5173').replace(/\/$/, '')}/reset-password`
+  if (!smtp) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'Email delivery is not configured. Set SMTP_PROVIDER (gmail/outlook) or SMTP_HOST, plus SMTP_USER/SMTP_PASS.',
+      )
+    }
+    console.log('\n========================================')
+    console.log(`  PASSWORD RESET for ${email}`)
+    console.log(`  Code: ${code}`)
+    console.log(`  Reset page: ${resetUrl}`)
+    console.log('========================================\n')
+    return
+  }
+
+  const subject = 'Reset your FBupload Plus password'
+  const body = `Your password reset code is: ${code}\n\nEnter this code at ${resetUrl}\n\nThis code expires in 1 hour.\n\nIf you did not request this, you can ignore this email.`
+  await sendViaSmtp(smtp, email, subject, body)
+}
+
 export async function sendOpsAlertEmail(recipients: string[], alertType: string, message: string): Promise<void> {
   const smtp = getSmtpConfig()
   const subject = `[FBupload Plus Ops] ${alertType}`
