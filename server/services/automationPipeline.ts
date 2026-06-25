@@ -224,8 +224,19 @@ async function publishCleanedFile(
 async function runPrefillJob(jobId: string) {
   appendJobLog(jobId, 'start', 'Prefill download started')
   const job = loadJob(jobId)
-  const ctx = validateJobContext(job, { skipQuota: true })
-  const { agencyId, pageId, sourceId, source } = ctx
+  const pageId = job.target_page_id as string
+  let ctx: ReturnType<typeof validateJobContext>
+
+  try {
+    ctx = validateJobContext(job, { skipQuota: true })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const sourceId = (job.source_account_id as string | null) ?? ''
+    handlePrefillDiscoveryFailure(pageId, sourceId, message)
+    throw err
+  }
+
+  const { agencyId, sourceId, source } = ctx
 
   db.prepare("UPDATE reel_jobs SET status = 'downloading' WHERE id = ?").run(jobId)
   markScrapeIdle(pageId)

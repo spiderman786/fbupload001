@@ -117,3 +117,69 @@ export function listActivePagesWithSource() {
     `)
     .all() as { id: string; agency_id: string; user_id: string }[]
 }
+
+export type PrefillSkipReason =
+  | 'no_source'
+  | 'page_paused'
+  | 'source_inactive'
+  | 'health_blocked'
+  | 'zero_target'
+
+export function resolvePrefillPage(pageId: string):
+  | { eligible: true; page: { id: string; agency_id: string; user_id: string } }
+  | { eligible: false; reason: PrefillSkipReason; message: string } {
+  const row = db
+    .prepare(`
+      SELECT p.id, p.agency_id, p.user_id, p.status, p.health_status, s.is_active as source_active
+      FROM facebook_pages p
+      LEFT JOIN page_source_assignments a ON a.page_id = p.id
+      LEFT JOIN source_accounts s ON s.id = a.source_account_id
+      WHERE p.id = ?
+    `)
+    .get(pageId) as
+    | {
+        id: string
+        agency_id: string
+        user_id: string
+        status: string
+        health_status: string
+        source_active: number | null
+      }
+    | undefined
+
+  if (!row?.id || row.source_active == null) {
+    return { eligible: false, reason: 'no_source', message: 'No source assigned — assign a creator to start scraping' }
+  }
+  if (row.status !== 'active') {
+    return {
+      eligible: false,
+      reason: 'page_paused',
+      message: 'Page automation is paused — turn automation on to download reels',
+    }
+  }
+  if (!row.source_active) {
+    return {
+      eligible: false,
+      reason: 'source_inactive',
+      message: 'Source account is disabled — re-enable it under Sources',
+    }
+  }
+  if (row.health_status !== 'completed') {
+    return {
+      eligible: false,
+      reason: 'health_blocked',
+      message: `Page needs attention (${row.health_status}) before scraping can continue`,
+    }
+  }
+
+  const target = getPageQueueTarget(pageId)
+  if (target <= 0) {
+    return {
+      eligible: false,
+      reason: 'zero_target',
+      message: 'Posts per day is set to 0 — increase it in Settings to fill the download queue',
+    }
+  }
+
+  return { eligible: true, page: { id: row.id, agency_id: row.agency_id, user_id: row.user_id } }
+}

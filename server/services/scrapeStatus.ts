@@ -64,6 +64,8 @@ function countInflightPrefill(pageId: string): number {
 }
 
 export function getPageScrapeInfo(pageId: string): PageScrapeInfo | null {
+  maybeRecoverStaleScrapePending(pageId)
+
   const row = db
     .prepare(`
       SELECT a.source_account_id, a.scrape_status, a.scrape_error, a.catalog_total
@@ -189,6 +191,47 @@ export function handlePrefillSuccess(pageId: string) {
   `).run(pageId)
 }
 
+export function notePrefillBlocked(pageId: string, message: string) {
+  db.prepare(`
+    UPDATE page_source_assignments
+    SET scrape_status = 'scraping_error', scrape_error = ?
+    WHERE page_id = ?
+  `).run(message.slice(0, 500), pageId)
+}
+
+const SCRAPE_PENDING_STALE_MS = Number(process.env.SCRAPE_PENDING_STALE_MS ?? 3 * 60 * 1000)
+
+/** Retry or surface an error when scrape was marked pending but prefill never started. */
+export function maybeRecoverStaleScrapePending(pageId: string) {
+  const row = db
+    .prepare(`
+      SELECT scrape_status, scrape_error, source_assigned_at
+      FROM page_source_assignments
+      WHERE page_id = ?
+    `)
+    .get(pageId) as
+    | { scrape_status: string | null; scrape_error: string | null; source_assigned_at: string | null }
+    | undefined
+
+  if (!row || row.scrape_status !== 'scraping_pending' || row.scrape_error) return
+  if (countInflightPrefill(pageId) > 0) return
+
+  const assignedAt = row.source_assigned_at ? Date.parse(row.source_assigned_at.replace(' ', 'T') + 'Z') : NaN
+  const ageMs = Number.isFinite(assignedAt) ? Date.now() - assignedAt : SCRAPE_PENDING_STALE_MS + 1
+  if (ageMs < SCRAPE_PENDING_STALE_MS) return
+
+  const page = db.prepare('SELECT agency_id FROM facebook_pages WHERE id = ?').get(pageId) as
+    | { agency_id: string }
+    | undefined
+  if (!page) return
+
+  void import('./prefillScheduler.js').then(({ syncPagePrefillQueue }) =>
+    syncPagePrefillQueue(pageId, page.agency_id).catch((err) =>
+      console.warn('[scrape] stale recovery failed:', pageId, err instanceof Error ? err.message : err),
+    ),
+  )
+}
+
 export function reactivateSourceForRescrape(pageId: string) {
   db.prepare(`
     UPDATE page_source_assignments
@@ -199,10 +242,10 @@ export function reactivateSourceForRescrape(pageId: string) {
   void import('./reelDiscovery.js').then(({ probeSourceCatalog }) =>
     probeSourceCatalog(pageId).catch((err) => console.warn('[catalog] probe failed:', err)),
   )
-  void import('./prefillScheduler.js').then(async ({ tickPrefillQueueForPage }) => {
+  void import('./prefillScheduler.js').then(async ({ syncPagePrefillQueue }) => {
     const row = db.prepare('SELECT agency_id FROM facebook_pages WHERE id = ?').get(pageId) as
       | { agency_id: string }
       | undefined
-    if (row) tickPrefillQueueForPage(pageId, row.agency_id)
+    if (row) await syncPagePrefillQueue(pageId, row.agency_id)
   })
 }
