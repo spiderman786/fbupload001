@@ -6,8 +6,9 @@ type AuthContextValue = {
   agency: AgencyInfo | null
   agencies: AgencyInfo[]
   role: AgencyInfo['role'] | null
+  platformAdmin: boolean
   loading: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string) => Promise<SessionResponse>
   logout: () => Promise<void>
   refreshUser: () => Promise<void>
   switchAgency: (agencyId: string) => Promise<void>
@@ -22,26 +23,30 @@ function applySession(setters: {
   setUser: (u: User | null) => void
   setAgency: (a: AgencyInfo | null) => void
   setAgencies: (a: AgencyInfo[]) => void
+  setPlatformAdmin: (v: boolean) => void
 }, session: SessionResponse | null) {
   if (!session) {
     setters.setUser(null)
     setters.setAgency(null)
     setters.setAgencies([])
+    setters.setPlatformAdmin(false)
     return
   }
   setters.setUser(session.user)
   setters.setAgency(session.agency)
   setters.setAgencies(session.agencies)
+  setters.setPlatformAdmin(Boolean(session.platformAdmin))
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [agency, setAgency] = useState<AgencyInfo | null>(null)
   const [agencies, setAgencies] = useState<AgencyInfo[]>([])
+  const [platformAdmin, setPlatformAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
 
   const setSession = useCallback((session: SessionResponse) => {
-    applySession({ setUser, setAgency, setAgencies }, session)
+    applySession({ setUser, setAgency, setAgencies, setPlatformAdmin }, session)
   }, [])
 
   const refreshUser = useCallback(async () => {
@@ -49,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const session = await api.auth.session()
       setSession(session)
     } catch {
-      applySession({ setUser, setAgency, setAgencies }, null)
+      applySession({ setUser, setAgency, setAgencies, setPlatformAdmin }, null)
     }
   }, [setSession])
 
@@ -60,11 +65,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     const session = await api.auth.login({ email, password })
     setSession(session)
+    return session
   }
 
   const logout = async () => {
     await api.auth.logout()
-    applySession({ setUser, setAgency, setAgencies }, null)
+    applySession({ setUser, setAgency, setAgencies, setPlatformAdmin }, null)
   }
 
   const switchAgency = async (agencyId: string) => {
@@ -79,6 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         agency,
         agencies,
         role: agency?.role ?? null,
+        platformAdmin,
         loading,
         login,
         logout,

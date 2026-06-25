@@ -549,6 +549,7 @@ export type SessionResponse = {
   user: User
   agency: AgencyInfo | null
   agencies: AgencyInfo[]
+  platformAdmin?: boolean
 }
 
 export type User = {

@@ -95,18 +95,29 @@ export function OpsLayout() {
 }
 
 export function OpsGate({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth()
-  const [allowed, setAllowed] = React.useState<boolean | null>(null)
+  const { user, loading, platformAdmin } = useAuth()
+  const [checked, setChecked] = React.useState(false)
+  const [allowed, setAllowed] = React.useState(false)
 
   React.useEffect(() => {
     if (!user) {
       setAllowed(false)
+      setChecked(true)
       return
     }
-    api.ops.me().then((r) => setAllowed(r.platformAdmin)).catch(() => setAllowed(false))
-  }, [user])
+    if (platformAdmin) {
+      setAllowed(true)
+      setChecked(true)
+      return
+    }
+    api.ops
+      .me()
+      .then((r) => setAllowed(r.platformAdmin))
+      .catch(() => setAllowed(false))
+      .finally(() => setChecked(true))
+  }, [user, platformAdmin])
 
-  if (loading || allowed === null) {
+  if (loading || !checked) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-slate-950">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent" />
@@ -114,6 +125,24 @@ export function OpsGate({ children }: { children: React.ReactNode }) {
     )
   }
   if (!user) return <Navigate to="/login" replace />
-  if (!allowed) return <Navigate to="/dashboard" replace />
+  if (!allowed) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-slate-950 p-6 text-slate-100">
+        <div className="max-w-md rounded-xl border border-slate-800 bg-slate-900 p-6 text-center">
+          <Shield className="mx-auto h-10 w-10 text-amber-400" />
+          <h1 className="mt-4 text-lg font-semibold">Platform Ops access denied</h1>
+          <p className="mt-2 text-sm text-slate-400">
+            Ops is only for platform administrators. Your Gmail must be listed in{' '}
+            <code className="rounded bg-slate-800 px-1 py-0.5 text-xs">PLATFORM_ADMIN_EMAILS</code> on the server
+            (Railway variables).
+          </p>
+          <p className="mt-3 text-xs text-slate-500">Signed in as {user.email}</p>
+          <Link to="/dashboard" className="mt-5 inline-block rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500">
+            Back to agency dashboard
+          </Link>
+        </div>
+      </div>
+    )
+  }
   return <>{children}</>
 }

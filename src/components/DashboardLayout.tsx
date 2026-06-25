@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { ChevronDown, ChevronRight, Coins, LogOut, Menu, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Coins, LogOut, Menu, Shield, X } from 'lucide-react'
 import { DASHBOARD_NAV, PLATFORM_ICONS, type NavItem } from '../config/dashboardNav'
 import { useAuth, useAgencyRole } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { getApiError } from '../lib/apiError'
 
 export function DashboardLayout() {
-  const { user, agency, agencies, role, logout, switchAgency } = useAuth()
+  const { user, agency, agencies, role, platformAdmin, logout, switchAgency } = useAuth()
   const { isOwner } = useAgencyRole()
   const toast = useToast()
   const navigate = useNavigate()
@@ -150,6 +150,15 @@ export function DashboardLayout() {
               {(agency?.tokenBalance ?? user?.tokenBalance ?? 0).toLocaleString()} tokens
             </div>
           </div>
+          {platformAdmin ? (
+            <Link
+              to="/ops"
+              className="mb-2 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50"
+            >
+              <Shield className="h-4 w-4" />
+              Platform Ops
+            </Link>
+          ) : null}
           <button
             onClick={handleLogout}
             className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-medium text-muted-foreground hover:bg-muted"

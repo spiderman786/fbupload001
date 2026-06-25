@@ -3,10 +3,13 @@ import { v4 as uuid } from 'uuid'
 import { db } from '../db.js'
 
 export function getPlatformAdminEmails(): string[] {
-  return (process.env.PLATFORM_ADMIN_EMAILS ?? '')
+  const emails = (process.env.PLATFORM_ADMIN_EMAILS ?? '')
     .split(/[,;\s]+/)
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean)
+  const seed = process.env.PLATFORM_ADMIN_SEED_EMAIL?.trim().toLowerCase()
+  if (seed && !emails.includes(seed)) emails.push(seed)
+  return emails
 }
 
 export function isPlatformAdminEmail(email: string): boolean {

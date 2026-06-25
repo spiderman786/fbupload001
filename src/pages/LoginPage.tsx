@@ -3,7 +3,6 @@ import { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { AuthLayout } from '../components/AuthLayout'
 import { useAuth } from '../context/AuthContext'
-import { api } from '../api/client'
 
 export function LoginPage() {
   const { login } = useAuth()
@@ -21,13 +20,8 @@ export function LoginPage() {
     setLoading(true)
     setError('')
     try {
-      await login(email, password)
-      try {
-        const { platformAdmin } = await api.ops.me()
-        navigate(platformAdmin ? '/ops' : from)
-      } catch {
-        navigate(from)
-      }
+      const session = await login(email, password)
+      navigate(session.platformAdmin ? '/ops' : from)
     } catch (err) {
       const data = err as { error?: string; needsVerification?: boolean; email?: string }
       if (data.needsVerification && data.email) {
