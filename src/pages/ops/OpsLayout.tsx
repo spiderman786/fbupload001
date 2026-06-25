@@ -132,9 +132,9 @@ export function OpsGate({ children }: { children: React.ReactNode }) {
           <Shield className="mx-auto h-10 w-10 text-amber-400" />
           <h1 className="mt-4 text-lg font-semibold">Platform Ops access denied</h1>
           <p className="mt-2 text-sm text-slate-400">
-            Ops is only for platform administrators. Your Gmail must be listed in{' '}
-            <code className="rounded bg-slate-800 px-1 py-0.5 text-xs">PLATFORM_ADMIN_EMAILS</code> on the server
-            (Railway variables).
+            Ops is restricted to platform administrators. Set{' '}
+            <code className="rounded bg-slate-800 px-1 py-0.5 text-xs">PLATFORM_ADMIN_EMAILS</code> on the server to
+            your Gmail, or leave it unset so agency admins can access Ops.
           </p>
           <p className="mt-3 text-xs text-slate-500">Signed in as {user.email}</p>
           <Link to="/dashboard" className="mt-5 inline-block rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500">

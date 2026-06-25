@@ -20,7 +20,7 @@ import { agenciesRouter } from './routes/agencies.js'
 import { initProxyPool, getProxyPoolStats } from './services/proxyPool.js'
 import { proxyPoolRouter } from './routes/proxyPool.js'
 import { opsRouter } from './routes/ops.js'
-import { seedPlatformAdmin } from './services/platformAdmin.js'
+import { seedPlatformAdmin, logPlatformAdminMode } from './services/platformAdmin.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const dataDir = path.join(__dirname, '..', 'data')
@@ -28,6 +28,7 @@ if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
 
 initDb()
 await seedPlatformAdmin()
+logPlatformAdminMode()
 initProxyPool()
 
 const app = express()

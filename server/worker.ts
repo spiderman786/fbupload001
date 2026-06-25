@@ -5,10 +5,11 @@ import { startScheduler } from './services/scheduler.js'
 import { startPrefillScheduler } from './services/prefillScheduler.js'
 import { initProxyPool, getProxyPoolStats } from './services/proxyPool.js'
 import { runOpsAlertChecks } from './services/opsAlerts.js'
-import { seedPlatformAdmin } from './services/platformAdmin.js'
+import { seedPlatformAdmin, logPlatformAdminMode } from './services/platformAdmin.js'
 
 initDb()
 await seedPlatformAdmin()
+logPlatformAdminMode()
 initProxyPool()
 startJobQueue()
 startScheduler()

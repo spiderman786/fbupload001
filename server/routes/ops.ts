@@ -5,7 +5,7 @@ import path from 'path'
 import { db } from '../db.js'
 import { authMiddleware, requireVerified } from '../middleware/auth.js'
 import { requirePlatformAdmin, type PlatformAdminRequest } from '../middleware/platformAdmin.js'
-import { isPlatformAdminEmail } from '../services/platformAdmin.js'
+import { isPlatformAdmin } from '../services/platformAdmin.js'
 import { getJobLogs } from '../services/jobLog.js'
 import { writeOpsAudit, listOpsAudit } from '../services/opsAudit.js'
 import { listRecentAlerts, runOpsAlertChecks } from '../services/opsAlerts.js'
@@ -24,7 +24,7 @@ export const opsRouter = Router()
 const guard = [authMiddleware, requireVerified, requirePlatformAdmin] as const
 
 opsRouter.get('/me', authMiddleware, requireVerified, (req: PlatformAdminRequest, res) => {
-  res.json({ platformAdmin: Boolean(req.user && isPlatformAdminEmail(req.user.email)) })
+  res.json({ platformAdmin: Boolean(req.user && isPlatformAdmin(req.user.id, req.user.email)) })
 })
 
 opsRouter.get('/overview', ...guard, (_req, res) => {
@@ -97,9 +97,10 @@ opsRouter.get('/agencies/:id', ...guard, (req, res) => {
   const sources = db.prepare('SELECT * FROM source_accounts WHERE agency_id = ?').all(req.params.id)
   const members = db
     .prepare(`
-      SELECT u.email, u.full_name, m.role, m.created_at
+      SELECT u.id as user_id, u.email, u.full_name, m.role, m.created_at
       FROM agency_members m JOIN users u ON u.id = m.user_id
       WHERE m.agency_id = ?
+      ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, u.email
     `)
     .all(req.params.id)
   const notes = db
@@ -110,6 +111,43 @@ opsRouter.get('/agencies/:id', ...guard, (req, res) => {
     `)
     .all(req.params.id)
   res.json({ agency, pages, sources, members, notes })
+})
+
+opsRouter.patch('/agencies/:id/members/:userId', ...guard, (req: PlatformAdminRequest, res) => {
+  const { role } = req.body ?? {}
+  if (!role || !['owner', 'admin', 'staff'].includes(role)) {
+    res.status(400).json({ error: 'Role must be owner, admin, or staff' })
+    return
+  }
+
+  const member = db
+    .prepare('SELECT role FROM agency_members WHERE agency_id = ? AND user_id = ?')
+    .get(req.params.id, req.params.userId) as { role: string } | undefined
+
+  if (!member) {
+    res.status(404).json({ error: 'Member not found' })
+    return
+  }
+  if (member.role === role) {
+    res.json({ message: 'Role unchanged', role })
+    return
+  }
+
+  db.prepare('UPDATE agency_members SET role = ? WHERE agency_id = ? AND user_id = ?').run(
+    role,
+    req.params.id,
+    req.params.userId,
+  )
+
+  const user = db.prepare('SELECT email FROM users WHERE id = ?').get(req.params.userId) as { email: string }
+  writeOpsAudit(req.user!.id, 'change_member_role', 'agency_member', req.params.userId, {
+    agencyId: req.params.id,
+    email: user.email,
+    from: member.role,
+    to: role,
+  })
+
+  res.json({ message: 'Role updated', role })
 })
 
 opsRouter.post('/agencies/:id/notes', ...guard, (req: PlatformAdminRequest, res) => {

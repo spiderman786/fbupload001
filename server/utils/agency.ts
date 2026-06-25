@@ -2,6 +2,7 @@ import { v4 as uuid } from 'uuid'
 import type { Response } from 'express'
 import { db } from '../db.js'
 import { sanitizeUser, type AuthRequest } from '../middleware/auth.js'
+import { isPlatformAdmin } from '../services/platformAdmin.js'
 
 export type AgencyRole = 'owner' | 'admin' | 'staff'
 
@@ -149,8 +150,6 @@ export function getAgencySubdomainUrl(subdomain: string): string | null {
   return `${protocol}://${subdomain}.${baseDomain}/agency`
 }
 
-import { isPlatformAdminEmail } from '../services/platformAdmin.js'
-
 export function buildSessionPayload(userId: string, agencyIdHint?: string | null) {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as import('../db.js').UserRow
   const agency = resolveAgency(userId, agencyIdHint)
@@ -160,7 +159,7 @@ export function buildSessionPayload(userId: string, agencyIdHint?: string | null
     user: sanitizeUser(user, agency?.tokenBalance ?? 0),
     agency,
     agencies,
-    platformAdmin: isPlatformAdminEmail(user.email),
+    platformAdmin: isPlatformAdmin(user.id, user.email),
   }
 }
 

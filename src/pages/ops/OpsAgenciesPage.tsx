@@ -242,6 +242,17 @@ export function OpsAgencyDetailPage() {
     }
   }
 
+  async function handleMemberRole(userId: string, role: 'owner' | 'admin' | 'staff') {
+    if (!id) return
+    try {
+      await api.ops.setMemberRole(id, userId, role)
+      toast.success(`Role updated to ${role}`)
+      load()
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to update role'))
+    }
+  }
+
   if (loading) return <p className="text-slate-400">Loading…</p>
   if (!agency) return <p className="text-red-400">Agency not found</p>
 
@@ -315,10 +326,23 @@ export function OpsAgencyDetailPage() {
 
       <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
         <h2 className="font-medium">Members</h2>
-        <ul className="mt-2 space-y-1 text-sm">
+        <p className="mt-1 text-xs text-slate-500">Change agency access role (e.g. owner → admin).</p>
+        <ul className="mt-3 space-y-2 text-sm">
           {members.map((m) => (
-            <li key={m.email} className="text-slate-300">
-              {m.email} <span className="text-slate-500">({m.role})</span>
+            <li key={m.user_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-950/50 px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-slate-200">{m.email}</p>
+                {m.full_name ? <p className="truncate text-xs text-slate-500">{m.full_name}</p> : null}
+              </div>
+              <select
+                value={m.role}
+                onChange={(e) => handleMemberRole(m.user_id, e.target.value as 'owner' | 'admin' | 'staff')}
+                className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm capitalize"
+              >
+                <option value="owner">Owner</option>
+                <option value="admin">Admin</option>
+                <option value="staff">Staff</option>
+              </select>
             </li>
           ))}
         </ul>

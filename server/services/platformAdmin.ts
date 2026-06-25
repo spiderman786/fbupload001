@@ -2,26 +2,60 @@ import bcrypt from 'bcryptjs'
 import { v4 as uuid } from 'uuid'
 import { db } from '../db.js'
 
-export function getPlatformAdminEmails(): string[] {
+const PLACEHOLDER_ADMIN_EMAILS = new Set(['admin@fbuploadplus.com', 'admin@example.com'])
+
+export function getPlatformAdminEmailsFromEnv(): string[] {
   const emails = (process.env.PLATFORM_ADMIN_EMAILS ?? '')
     .split(/[,;\s]+/)
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean)
+    .filter((e) => !PLACEHOLDER_ADMIN_EMAILS.has(e))
+
   const seed = process.env.PLATFORM_ADMIN_SEED_EMAIL?.trim().toLowerCase()
-  if (seed && !emails.includes(seed)) emails.push(seed)
+  if (seed && !PLACEHOLDER_ADMIN_EMAILS.has(seed) && !emails.includes(seed)) {
+    emails.push(seed)
+  }
+
   return emails
 }
 
+export function isPlatformAdminStrictMode(): boolean {
+  return getPlatformAdminEmailsFromEnv().length > 0
+}
+
+/** Platform Ops access: explicit allowlist when configured, otherwise any agency admin/owner. */
+export function isPlatformAdmin(userId: string, email: string): boolean {
+  const normalized = email.trim().toLowerCase()
+  const allowlist = getPlatformAdminEmailsFromEnv()
+
+  if (allowlist.length > 0) {
+    return allowlist.includes(normalized)
+  }
+
+  const member = db
+    .prepare(`
+      SELECT 1 FROM agency_members
+      WHERE user_id = ? AND role IN ('owner', 'admin')
+      LIMIT 1
+    `)
+    .get(userId)
+
+  return Boolean(member)
+}
+
+/** @deprecated use isPlatformAdmin(userId, email) */
 export function isPlatformAdminEmail(email: string): boolean {
-  const admins = getPlatformAdminEmails()
-  if (!admins.length) return false
-  return admins.includes(email.trim().toLowerCase())
+  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email.trim().toLowerCase()) as
+    | { id: string }
+    | undefined
+  if (!user) return false
+  return isPlatformAdmin(user.id, email)
 }
 
 export async function seedPlatformAdmin(): Promise<void> {
   const email = process.env.PLATFORM_ADMIN_SEED_EMAIL?.trim().toLowerCase()
   const password = process.env.PLATFORM_ADMIN_SEED_PASSWORD
-  if (!email || !password) return
+  if (!email || !password || PLACEHOLDER_ADMIN_EMAILS.has(email)) return
 
   const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email) as { id: string } | undefined
   if (existing) {
@@ -47,8 +81,17 @@ export async function seedPlatformAdmin(): Promise<void> {
     uuid(),
     agencyId,
     id,
-    'owner',
+    'admin',
   )
 
   console.log(`[ops] Created platform admin ${email}`)
+}
+
+export function logPlatformAdminMode(): void {
+  const allowlist = getPlatformAdminEmailsFromEnv()
+  if (allowlist.length > 0) {
+    console.log(`[ops] Strict allowlist mode (${allowlist.length} email${allowlist.length === 1 ? '' : 's'})`)
+    return
+  }
+  console.log('[ops] Open agency-admin mode (set PLATFORM_ADMIN_EMAILS to restrict /ops to specific emails)')
 }

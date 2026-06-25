@@ -478,6 +478,11 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ note }),
       }),
+    setMemberRole: (agencyId: string, userId: string, role: 'owner' | 'admin' | 'staff') =>
+      request<{ message: string; role: string }>(`/ops/agencies/${agencyId}/members/${userId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ role }),
+      }),
     pages: (params?: { status?: string; health?: string }) => {
       const q = new URLSearchParams()
       if (params?.status) q.set('status', params.status)
@@ -791,7 +796,7 @@ export type OpsAgency = {
   healthStatus?: 'healthy' | 'warning' | 'critical' | null
 }
 
-export type OpsMember = { email: string; full_name: string; role: string; created_at: string }
+export type OpsMember = { user_id: string; email: string; full_name: string; role: string; created_at: string }
 export type OpsNote = { id: string; note: string; admin_email: string; created_at: string }
 
 export type OpsPage = {
