@@ -11,7 +11,7 @@ import {
   type PrefillSkipReason,
 } from './reelQueue.js'
 import { trimPageQueueToLimit } from './queueActions.js'
-import { markScrapeIdle, notePrefillBlocked } from './scrapeStatus.js'
+import { clearScrapeError, markScrapeIdle, notePrefillBlocked } from './scrapeStatus.js'
 
 let prefilling = false
 
@@ -30,7 +30,7 @@ export async function syncPagePrefillQueue(pageId: string, agencyId: string): Pr
   const trimmed = await trimPageQueueToLimit(pageId, agencyId, target)
 
   const resolved = resolvePrefillPage(pageId, agencyId)
-  if (!resolved.eligible) {
+  if (resolved.eligible === false) {
     notePrefillBlocked(pageId, resolved.message, resolved.reason)
     return { trimmed, created: 0, target, skipped: resolved.reason }
   }

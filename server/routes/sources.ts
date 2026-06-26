@@ -8,6 +8,7 @@ import { normalizeSourceUsername } from '../utils/sourceIdentity.js'
 import { revivePagesForSource } from '../services/scrapeStatus.js'
 import type { AgencyRequest } from '../utils/agency.js'
 
+import { routeParam } from '../utils/routeParam.js'
 export const sourcesRouter = Router()
 sourcesRouter.use(authMiddleware, requireVerified, agencyMiddleware)
 
@@ -55,7 +56,7 @@ sourcesRouter.patch('/:id', requireRole('owner', 'admin'), (req: AgencyRequest, 
   const { isActive } = req.body ?? {}
   const existing = db
     .prepare('SELECT * FROM source_accounts WHERE id = ? AND agency_id = ?')
-    .get(req.params.id, req.agency!.id)
+    .get(routeParam(req.params.id), req.agency!.id)
 
   if (!existing) {
     res.status(404).json({ error: 'Source not found' })
@@ -66,25 +67,25 @@ sourcesRouter.patch('/:id', requireRole('owner', 'admin'), (req: AgencyRequest, 
     if (isActive) {
       db.prepare(`
         UPDATE source_accounts SET is_active = 1, consecutive_failures = 0 WHERE id = ?
-      `).run(req.params.id)
-      const relinked = relinkAssignmentsToSource(req.params.id, req.agency!.id)
-      const revived = revivePagesForSource(req.params.id, req.agency!.id)
+      `).run(routeParam(req.params.id))
+      const relinked = relinkAssignmentsToSource(routeParam(req.params.id), req.agency!.id)
+      const revived = revivePagesForSource(routeParam(req.params.id), req.agency!.id)
       if (relinked > 0 || revived > 0) {
-        console.log(`[sources] Re-enabled ${req.params.id}: relinked=${relinked}, revived=${revived}`)
+        console.log(`[sources] Re-enabled ${routeParam(req.params.id)}: relinked=${relinked}, revived=${revived}`)
       }
     } else {
-      db.prepare('UPDATE source_accounts SET is_active = 0 WHERE id = ?').run(req.params.id)
+      db.prepare('UPDATE source_accounts SET is_active = 0 WHERE id = ?').run(routeParam(req.params.id))
     }
   }
 
-  const updated = db.prepare('SELECT * FROM source_accounts WHERE id = ?').get(req.params.id) as Record<string, unknown>
+  const updated = db.prepare('SELECT * FROM source_accounts WHERE id = ?').get(routeParam(req.params.id)) as Record<string, unknown>
   res.json({ source: mapSource(updated) })
 })
 
 sourcesRouter.delete('/:id', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
   const result = db
     .prepare('DELETE FROM source_accounts WHERE id = ? AND agency_id = ?')
-    .run(req.params.id, req.agency!.id)
+    .run(routeParam(req.params.id), req.agency!.id)
   if (result.changes === 0) {
     res.status(404).json({ error: 'Source not found' })
     return

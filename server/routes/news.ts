@@ -8,10 +8,11 @@ import { agencyMiddleware, requireRole } from '../middleware/agency.js'
 import type { AgencyRequest } from '../utils/agency.js'
 import { composeTemplatePreview } from '../services/news/imageCompositor.js'
 import { getCompositorQueueStats } from '../services/news/compositorQueue.js'
-import { pollAllFeeds, pollFeed, processRssArticle, publishNewsItem } from '../services/news/newsPipeline.js'
+import { pollFeedsForAgency, pollFeed, publishNewsItem } from '../services/news/newsPipeline.js'
 import { fetchRssFeed } from '../services/news/rssFetcher.js'
-import { DEFAULT_COLORS, DEFAULT_FONTS, parseBrandType, parseJsonArray, resolveFonts, type NewsFonts } from '../services/news/types.js'
+import { DEFAULT_COLORS, parseBrandType, parseJsonArray, resolveFonts, type NewsFonts } from '../services/news/types.js'
 
+import { routeParam } from '../utils/routeParam.js'
 const newsLogosDir = path.join(process.cwd(), 'data', 'news-logos')
 
 function ensureNewsLogosDir(agencyId: string) {
@@ -205,7 +206,7 @@ newsRouter.post('/templates/logo', (req: AgencyRequest, res) => {
 newsRouter.post('/templates/:id/duplicate', (req: AgencyRequest, res) => {
   const row = db
     .prepare('SELECT * FROM news_templates WHERE id = ? AND agency_id = ?')
-    .get(req.params.id, req.agency!.id) as Record<string, unknown> | undefined
+    .get(routeParam(req.params.id), req.agency!.id) as Record<string, unknown> | undefined
   if (!row) {
     res.status(404).json({ error: 'Template not found' })
     return
@@ -383,7 +384,7 @@ newsRouter.post('/templates', (req: AgencyRequest, res) => {
 newsRouter.patch('/templates/:id', (req: AgencyRequest, res) => {
   const row = db
     .prepare('SELECT * FROM news_templates WHERE id = ? AND agency_id = ?')
-    .get(req.params.id, req.agency!.id) as Record<string, unknown> | undefined
+    .get(routeParam(req.params.id), req.agency!.id) as Record<string, unknown> | undefined
   if (!row) {
     res.status(404).json({ error: 'Template not found' })
     return
@@ -413,10 +414,10 @@ newsRouter.patch('/templates/:id', (req: AgencyRequest, res) => {
     defaultHashtags ? JSON.stringify(defaultHashtags) : null,
     brandType ? parseBrandType(brandType) : null,
     aiTonePrompt ?? null,
-    req.params.id,
+    routeParam(req.params.id),
   )
 
-  const updated = db.prepare('SELECT * FROM news_templates WHERE id = ?').get(req.params.id) as Record<string, unknown>
+  const updated = db.prepare('SELECT * FROM news_templates WHERE id = ?').get(routeParam(req.params.id)) as Record<string, unknown>
   res.json({ template: mapTemplate(updated) })
 })
 
@@ -454,7 +455,7 @@ newsRouter.post('/feeds', (req: AgencyRequest, res) => {
 newsRouter.delete('/feeds/:id', (req: AgencyRequest, res) => {
   const result = db
     .prepare('DELETE FROM rss_feeds WHERE id = ? AND agency_id = ?')
-    .run(req.params.id, req.agency!.id)
+    .run(routeParam(req.params.id), req.agency!.id)
   if (result.changes === 0) {
     res.status(404).json({ error: 'Feed not found' })
     return
@@ -465,13 +466,13 @@ newsRouter.delete('/feeds/:id', (req: AgencyRequest, res) => {
 newsRouter.put('/page-settings/:pageId', (req: AgencyRequest, res) => {
   const page = db
     .prepare('SELECT id FROM facebook_pages WHERE id = ? AND agency_id = ?')
-    .get(req.params.pageId, req.agency!.id)
+    .get(routeParam(req.params.pageId), req.agency!.id)
   if (!page) {
     res.status(404).json({ error: 'Page not found' })
     return
   }
 
-  const existing = db.prepare('SELECT * FROM page_news_settings WHERE page_id = ?').get(req.params.pageId) as
+  const existing = db.prepare('SELECT * FROM page_news_settings WHERE page_id = ?').get(routeParam(req.params.pageId)) as
     | Record<string, unknown>
     | undefined
 
@@ -517,7 +518,7 @@ newsRouter.put('/page-settings/:pageId', (req: AgencyRequest, res) => {
       is_active = excluded.is_active,
       updated_at = datetime('now')
   `).run(
-    req.params.pageId,
+    routeParam(req.params.pageId),
     req.agency!.id,
     merged.templateId,
     merged.autoPublish,
@@ -535,9 +536,9 @@ newsRouter.put('/page-settings/:pageId', (req: AgencyRequest, res) => {
   res.json({ message: 'Page news settings saved' })
 })
 
-newsRouter.post('/poll', async (_req: AgencyRequest, res) => {
+newsRouter.post('/poll', async (req: AgencyRequest, res) => {
   try {
-    const result = await pollAllFeeds()
+    const result = await pollFeedsForAgency(req.agency!.id)
     res.json({ message: `Polled ${result.feeds} feeds`, ...result })
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Poll failed' })
@@ -547,13 +548,13 @@ newsRouter.post('/poll', async (_req: AgencyRequest, res) => {
 newsRouter.post('/feeds/:id/poll', async (req: AgencyRequest, res) => {
   const feed = db
     .prepare('SELECT id FROM rss_feeds WHERE id = ? AND agency_id = ?')
-    .get(req.params.id, req.agency!.id)
+    .get(routeParam(req.params.id), req.agency!.id)
   if (!feed) {
     res.status(404).json({ error: 'Feed not found' })
     return
   }
   try {
-    const created = await pollFeed(req.params.id)
+    const created = await pollFeed(routeParam(req.params.id))
     res.json({ message: `Created ${created} items`, created })
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Poll failed' })
@@ -563,13 +564,13 @@ newsRouter.post('/feeds/:id/poll', async (req: AgencyRequest, res) => {
 newsRouter.post('/items/:id/publish', async (req: AgencyRequest, res) => {
   const item = db
     .prepare('SELECT id FROM news_items WHERE id = ? AND agency_id = ?')
-    .get(req.params.id, req.agency!.id)
+    .get(routeParam(req.params.id), req.agency!.id)
   if (!item) {
     res.status(404).json({ error: 'Item not found' })
     return
   }
   try {
-    const result = await publishNewsItem(req.params.id)
+    const result = await publishNewsItem(routeParam(req.params.id))
     res.json({ message: 'Published', ...result })
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Publish failed' })
@@ -579,7 +580,7 @@ newsRouter.post('/items/:id/publish', async (req: AgencyRequest, res) => {
 newsRouter.post('/items/:id/skip', (req: AgencyRequest, res) => {
   const result = db
     .prepare(`UPDATE news_items SET status = 'skipped' WHERE id = ? AND agency_id = ? AND status = 'ready'`)
-    .run(req.params.id, req.agency!.id)
+    .run(routeParam(req.params.id), req.agency!.id)
   if (result.changes === 0) {
     res.status(404).json({ error: 'Item not found or not skippable' })
     return
@@ -590,7 +591,7 @@ newsRouter.post('/items/:id/skip', (req: AgencyRequest, res) => {
 newsRouter.get('/items/:id/preview', (req: AgencyRequest, res) => {
   const item = db
     .prepare('SELECT generated_image_path FROM news_items WHERE id = ? AND agency_id = ?')
-    .get(req.params.id, req.agency!.id) as { generated_image_path: string | null } | undefined
+    .get(routeParam(req.params.id), req.agency!.id) as { generated_image_path: string | null } | undefined
   if (!item?.generated_image_path || !fs.existsSync(item.generated_image_path)) {
     res.status(404).json({ error: 'Preview not found' })
     return

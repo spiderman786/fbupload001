@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { authMiddleware, requireVerified } from '../middleware/auth.js'
 import { agencyMiddleware, requireRole } from '../middleware/agency.js'
+import { requirePlatformAdmin } from '../middleware/platformAdmin.js'
 import {
   getProxyPoolFileInfo,
   getProxyPoolStats,
@@ -32,12 +33,12 @@ proxyPoolRouter.get(
   },
 )
 
+/** Global proxy pool — platform admin only (shared across all tenants). */
 proxyPoolRouter.post(
   '/upload',
   authMiddleware,
   requireVerified,
-  agencyMiddleware,
-  requireRole('owner'),
+  requirePlatformAdmin,
   (req, res) => {
     const content = typeof req.body?.content === 'string' ? req.body.content : ''
     if (!content.trim()) {
@@ -58,8 +59,7 @@ proxyPoolRouter.post(
   '/reload',
   authMiddleware,
   requireVerified,
-  agencyMiddleware,
-  requireRole('owner'),
+  requirePlatformAdmin,
   (_req, res) => {
     reloadProxyPool()
     res.json({ stats: getProxyPoolStats() })

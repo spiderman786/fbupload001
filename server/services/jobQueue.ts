@@ -23,7 +23,12 @@ function claimNextJobId(): string | null {
       `)
       .get() as { id: string } | undefined
 
-    if (publishing) return publishing.id
+    if (publishing) {
+      const claimed = db
+        .prepare(`UPDATE reel_jobs SET status = 'downloading' WHERE id = ? AND status = 'publishing'`)
+        .run(publishing.id)
+      if (claimed.changes > 0) return publishing.id
+    }
 
     const pending = db
       .prepare(`

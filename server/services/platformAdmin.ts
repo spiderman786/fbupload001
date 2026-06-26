@@ -43,6 +43,10 @@ export function isPlatformAdmin(userId: string, email: string): boolean {
     return allowlist.includes(normalized)
   }
 
+  if (process.env.NODE_ENV === 'production') {
+    return false
+  }
+
   return hasAgencyOwnerRole(userId)
 }
 

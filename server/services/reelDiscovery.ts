@@ -2,7 +2,7 @@ import { execFile } from 'child_process'
 import crypto from 'crypto'
 import { promisify } from 'util'
 import { db } from '../db.js'
-import { isReelConsumedByPage, tryReserveReelForJob } from './dedup.js'
+import { tryReserveReelForJob } from './dedup.js'
 import { execYtDlpWithProxyFallback } from '../utils/ytdlpRunner.js'
 import {
   canonicalSourceUrl,

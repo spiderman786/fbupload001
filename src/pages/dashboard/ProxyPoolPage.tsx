@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { RefreshCw, Server } from 'lucide-react'
 import { ProxyPoolUploadPanel } from '../../components/ProxyPoolUploadPanel'
 import { api } from '../../api/client'
+import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
 import { getApiError } from '../../lib/apiError'
 
@@ -10,10 +11,11 @@ type ProxyStats = Awaited<ReturnType<typeof api.proxyPool.stats>>
 
 export function ProxyPoolPage() {
   const toast = useToast()
+  const { platformAdmin } = useAuth()
   const [stats, setStats] = useState<ProxyStats | null>(null)
   const [loading, setLoading] = useState(true)
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true)
     try {
       setStats(await api.proxyPool.stats())
@@ -22,11 +24,11 @@ export function ProxyPoolPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [toast])
 
   useEffect(() => {
-    load()
-  }, [])
+    void load()
+  }, [load])
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -54,7 +56,14 @@ export function ProxyPoolPage() {
 
       <div className="rounded-xl border-2 border-primary/25 bg-primary/5 p-5">
         <h2 className="mb-3 text-lg font-semibold">Step 1 — Upload your proxy list</h2>
-        <ProxyPoolUploadPanel onUploaded={load} />
+        {platformAdmin ? (
+          <ProxyPoolUploadPanel onUploaded={load} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Proxy uploads are managed by your platform administrator. Contact support if downloads fail due to missing
+            proxies.
+          </p>
+        )}
       </div>
 
       {loading && !stats ? (

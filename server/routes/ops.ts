@@ -19,6 +19,7 @@ import { getAllPlatformSettings, setPlatformSetting, setAgencyMaintenance, type 
 import { pollLiveEvents } from '../services/opsLiveFeed.js'
 import { explainJobFailure } from '../services/jobExplain.js'
 
+import { routeParam } from '../utils/routeParam.js'
 export const opsRouter = Router()
 
 const guard = [authMiddleware, requireVerified, requirePlatformAdmin] as const
@@ -88,13 +89,13 @@ opsRouter.get('/agencies', ...guard, (_req, res) => {
 })
 
 opsRouter.get('/agencies/:id', ...guard, (req, res) => {
-  const agency = db.prepare('SELECT * FROM agencies WHERE id = ?').get(req.params.id)
+  const agency = db.prepare('SELECT * FROM agencies WHERE id = ?').get(routeParam(req.params.id))
   if (!agency) {
     res.status(404).json({ error: 'Agency not found' })
     return
   }
-  const pages = db.prepare('SELECT * FROM facebook_pages WHERE agency_id = ?').all(req.params.id)
-  const sources = db.prepare('SELECT * FROM source_accounts WHERE agency_id = ?').all(req.params.id)
+  const pages = db.prepare('SELECT * FROM facebook_pages WHERE agency_id = ?').all(routeParam(req.params.id))
+  const sources = db.prepare('SELECT * FROM source_accounts WHERE agency_id = ?').all(routeParam(req.params.id))
   const members = db
     .prepare(`
       SELECT u.id as user_id, u.email, u.full_name, m.role, m.created_at
@@ -102,14 +103,14 @@ opsRouter.get('/agencies/:id', ...guard, (req, res) => {
       WHERE m.agency_id = ?
       ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, u.email
     `)
-    .all(req.params.id)
+    .all(routeParam(req.params.id))
   const notes = db
     .prepare(`
       SELECT n.*, u.email as admin_email FROM agency_ops_notes n
       JOIN users u ON u.id = n.admin_user_id
       WHERE n.agency_id = ? ORDER BY n.created_at DESC LIMIT 20
     `)
-    .all(req.params.id)
+    .all(routeParam(req.params.id))
   res.json({ agency, pages, sources, members, notes })
 })
 
@@ -122,7 +123,7 @@ opsRouter.patch('/agencies/:id/members/:userId', ...guard, (req: PlatformAdminRe
 
   const member = db
     .prepare('SELECT role FROM agency_members WHERE agency_id = ? AND user_id = ?')
-    .get(req.params.id, req.params.userId) as { role: string } | undefined
+    .get(routeParam(req.params.id), routeParam(req.params.userId)) as { role: string } | undefined
 
   if (!member) {
     res.status(404).json({ error: 'Member not found' })
@@ -135,13 +136,13 @@ opsRouter.patch('/agencies/:id/members/:userId', ...guard, (req: PlatformAdminRe
 
   db.prepare('UPDATE agency_members SET role = ? WHERE agency_id = ? AND user_id = ?').run(
     role,
-    req.params.id,
-    req.params.userId,
+    routeParam(req.params.id),
+    routeParam(req.params.userId),
   )
 
-  const user = db.prepare('SELECT email FROM users WHERE id = ?').get(req.params.userId) as { email: string }
-  writeOpsAudit(req.user!.id, 'change_member_role', 'agency_member', req.params.userId, {
-    agencyId: req.params.id,
+  const user = db.prepare('SELECT email FROM users WHERE id = ?').get(routeParam(req.params.userId)) as { email: string }
+  writeOpsAudit(req.user!.id, 'change_member_role', 'agency_member', routeParam(req.params.userId), {
+    agencyId: routeParam(req.params.id),
     email: user.email,
     from: member.role,
     to: role,
@@ -159,11 +160,11 @@ opsRouter.post('/agencies/:id/notes', ...guard, (req: PlatformAdminRequest, res)
   const id = uuid()
   db.prepare('INSERT INTO agency_ops_notes (id, agency_id, admin_user_id, note) VALUES (?, ?, ?, ?)').run(
     id,
-    req.params.id,
+    routeParam(req.params.id),
     req.user!.id,
     note,
   )
-  writeOpsAudit(req.user!.id, 'agency_note', 'agency', req.params.id, { note })
+  writeOpsAudit(req.user!.id, 'agency_note', 'agency', routeParam(req.params.id), { note })
   res.json({ id, note })
 })
 
@@ -173,24 +174,24 @@ opsRouter.post('/agencies/:id/credit-tokens', ...guard, (req: PlatformAdminReque
     res.status(400).json({ error: 'Invalid amount' })
     return
   }
-  const agency = db.prepare('SELECT id, token_balance FROM agencies WHERE id = ?').get(req.params.id) as
+  const agency = db.prepare('SELECT id, token_balance FROM agencies WHERE id = ?').get(routeParam(req.params.id)) as
     | { id: string; token_balance: number }
     | undefined
   if (!agency) {
     res.status(404).json({ error: 'Agency not found' })
     return
   }
-  db.prepare('UPDATE agencies SET token_balance = token_balance + ? WHERE id = ?').run(amount, req.params.id)
+  db.prepare('UPDATE agencies SET token_balance = token_balance + ? WHERE id = ?').run(amount, routeParam(req.params.id))
   const owner = db
     .prepare("SELECT user_id FROM agency_members WHERE agency_id = ? AND role = 'owner' LIMIT 1")
-    .get(req.params.id) as { user_id: string } | undefined
+    .get(routeParam(req.params.id)) as { user_id: string } | undefined
   if (owner) {
     db.prepare(`
       INSERT INTO token_transactions (id, user_id, agency_id, amount, type, note)
       VALUES (?, ?, ?, ?, 'purchase', ?)
-    `).run(uuid(), owner.user_id, req.params.id, amount, `Ops credit by ${req.user!.email}`)
+    `).run(uuid(), owner.user_id, routeParam(req.params.id), amount, `Ops credit by ${req.user!.email}`)
   }
-  writeOpsAudit(req.user!.id, 'credit_tokens', 'agency', req.params.id, { amount })
+  writeOpsAudit(req.user!.id, 'credit_tokens', 'agency', routeParam(req.params.id), { amount })
   res.json({ tokenBalance: agency.token_balance + amount })
 })
 
@@ -201,8 +202,8 @@ opsRouter.delete('/agencies/:id', ...guard, (req: PlatformAdminRequest, res) => 
     return
   }
   try {
-    deleteAgency(req.params.id, confirmName)
-    writeOpsAudit(req.user!.id, 'delete_agency', 'agency', req.params.id, { confirmName })
+    deleteAgency(routeParam(req.params.id), confirmName)
+    writeOpsAudit(req.user!.id, 'delete_agency', 'agency', routeParam(req.params.id), { confirmName })
     res.json({ ok: true })
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Delete failed' })
@@ -210,14 +211,14 @@ opsRouter.delete('/agencies/:id', ...guard, (req: PlatformAdminRequest, res) => 
 })
 
 opsRouter.post('/agencies/:id/pause-pages', ...guard, (req: PlatformAdminRequest, res) => {
-  const count = pauseAllAgencyPages(req.params.id)
-  writeOpsAudit(req.user!.id, 'pause_all_pages', 'agency', req.params.id, { count })
+  const count = pauseAllAgencyPages(routeParam(req.params.id))
+  writeOpsAudit(req.user!.id, 'pause_all_pages', 'agency', routeParam(req.params.id), { count })
   res.json({ paused: count })
 })
 
 opsRouter.patch('/agencies/:id/parent', ...guard, (req: PlatformAdminRequest, res) => {
   const parentAgencyId = req.body?.parentAgencyId as string | null | undefined
-  if (parentAgencyId === req.params.id) {
+  if (parentAgencyId === routeParam(req.params.id)) {
     res.status(400).json({ error: 'Agency cannot be its own parent' })
     return
   }
@@ -228,15 +229,15 @@ opsRouter.patch('/agencies/:id/parent', ...guard, (req: PlatformAdminRequest, re
       return
     }
   }
-  db.prepare('UPDATE agencies SET parent_agency_id = ? WHERE id = ?').run(parentAgencyId ?? null, req.params.id)
-  writeOpsAudit(req.user!.id, 'set_parent_agency', 'agency', req.params.id, { parentAgencyId: parentAgencyId ?? null })
+  db.prepare('UPDATE agencies SET parent_agency_id = ? WHERE id = ?').run(parentAgencyId ?? null, routeParam(req.params.id))
+  writeOpsAudit(req.user!.id, 'set_parent_agency', 'agency', routeParam(req.params.id), { parentAgencyId: parentAgencyId ?? null })
   res.json({ ok: true })
 })
 
 opsRouter.patch('/agencies/:id/maintenance', ...guard, (req: PlatformAdminRequest, res) => {
   const enabled = Boolean(req.body?.enabled)
-  setAgencyMaintenance(req.params.id, enabled)
-  writeOpsAudit(req.user!.id, 'agency_maintenance', 'agency', req.params.id, { enabled })
+  setAgencyMaintenance(routeParam(req.params.id), enabled)
+  writeOpsAudit(req.user!.id, 'agency_maintenance', 'agency', routeParam(req.params.id), { enabled })
   res.json({ maintenance: enabled })
 })
 
@@ -300,8 +301,8 @@ opsRouter.patch('/pages/:id', ...guard, (req: PlatformAdminRequest, res) => {
     res.status(400).json({ error: 'Invalid status' })
     return
   }
-  if (status) db.prepare('UPDATE facebook_pages SET status = ? WHERE id = ?').run(status, req.params.id)
-  writeOpsAudit(req.user!.id, 'update_page', 'page', req.params.id, { status })
+  if (status) db.prepare('UPDATE facebook_pages SET status = ? WHERE id = ?').run(status, routeParam(req.params.id))
+  writeOpsAudit(req.user!.id, 'update_page', 'page', routeParam(req.params.id), { status })
   res.json({ ok: true })
 })
 
@@ -337,32 +338,35 @@ opsRouter.get('/jobs/error-groups', ...guard, (req, res) => {
 opsRouter.post('/jobs/bulk-retry', ...guard, (req: PlatformAdminRequest, res) => {
   const errorMessage = req.body?.errorMessage as string | undefined
   const jobIds = req.body?.jobIds as string[] | undefined
-  let ids: string[] = []
 
-  if (Array.isArray(jobIds) && jobIds.length) {
-    ids = jobIds.slice(0, 200)
-  } else if (errorMessage) {
-    ids = (
-      db
-        .prepare(`
-          SELECT id FROM reel_jobs
-          WHERE status = 'failed' AND error_message = ?
-          ORDER BY created_at DESC LIMIT 200
-        `)
-        .all(errorMessage) as { id: string }[]
-    ).map((r) => r.id)
-  } else {
+  const ids: string[] = Array.isArray(jobIds) && jobIds.length
+    ? jobIds.slice(0, 200)
+    : errorMessage
+      ? (
+          db
+            .prepare(`
+              SELECT id FROM reel_jobs
+              WHERE status = 'failed' AND error_message = ?
+              ORDER BY created_at DESC LIMIT 200
+            `)
+            .all(errorMessage) as { id: string }[]
+        ).map((r) => r.id)
+      : []
+
+  if (!ids.length) {
     res.status(400).json({ error: 'jobIds or errorMessage required' })
     return
   }
 
   let retried = 0
   for (const id of ids) {
-    db.prepare(`
+    const result = db.prepare(`
       UPDATE reel_jobs SET status = 'pending', error_message = NULL, completed_at = NULL WHERE id = ? AND status = 'failed'
     `).run(id)
-    enqueueJob(id)
-    retried++
+    if (result.changes > 0) {
+      enqueueJob(id)
+      retried++
+    }
   }
   writeOpsAudit(req.user!.id, 'bulk_retry_jobs', 'job', ids[0] ?? '', { count: retried, errorMessage })
   res.json({ retried })
@@ -378,30 +382,36 @@ opsRouter.get('/jobs/:id', ...guard, (req, res) => {
       LEFT JOIN agencies a ON a.id = r.agency_id
       WHERE r.id = ?
     `)
-    .get(req.params.id)
+    .get(routeParam(req.params.id))
   if (!job) {
     res.status(404).json({ error: 'Job not found' })
     return
   }
-  res.json({ job, logs: getJobLogs(req.params.id) })
+  res.json({ job, logs: getJobLogs(routeParam(req.params.id)) })
 })
 
 opsRouter.post('/jobs/:id/retry', ...guard, (req: PlatformAdminRequest, res) => {
-  const job = db.prepare('SELECT id FROM reel_jobs WHERE id = ?').get(req.params.id)
+  const job = db.prepare('SELECT id, status FROM reel_jobs WHERE id = ?').get(routeParam(req.params.id)) as
+    | { id: string; status: string }
+    | undefined
   if (!job) {
     res.status(404).json({ error: 'Job not found' })
     return
   }
+  if (job.status !== 'failed') {
+    res.status(400).json({ error: 'Only failed jobs can be retried' })
+    return
+  }
   db.prepare(`
-    UPDATE reel_jobs SET status = 'pending', error_message = NULL, completed_at = NULL WHERE id = ?
-  `).run(req.params.id)
-  enqueueJob(req.params.id)
-  writeOpsAudit(req.user!.id, 'retry_job', 'job', req.params.id)
+    UPDATE reel_jobs SET status = 'pending', error_message = NULL, completed_at = NULL WHERE id = ? AND status = 'failed'
+  `).run(routeParam(req.params.id))
+  enqueueJob(routeParam(req.params.id))
+  writeOpsAudit(req.user!.id, 'retry_job', 'job', routeParam(req.params.id))
   res.json({ ok: true })
 })
 
 opsRouter.get('/jobs/:id/explain', ...guard, (req, res) => {
-  const explanation = explainJobFailure(req.params.id)
+  const explanation = explainJobFailure(routeParam(req.params.id))
   if (!explanation) {
     res.status(404).json({ error: 'Job not failed or not found' })
     return
@@ -495,14 +505,14 @@ opsRouter.get('/system', ...guard, (_req, res) => {
 })
 
 opsRouter.post('/impersonate/:agencyId', ...guard, (req: PlatformAdminRequest, res) => {
-  const agency = db.prepare('SELECT id FROM agencies WHERE id = ?').get(req.params.agencyId)
+  const agency = db.prepare('SELECT id FROM agencies WHERE id = ?').get(routeParam(req.params.agencyId))
   if (!agency) {
     res.status(404).json({ error: 'Agency not found' })
     return
   }
-  writeOpsAudit(req.user!.id, 'impersonate', 'agency', req.params.agencyId)
-  setAgencyCookie(res, req.params.agencyId)
-  res.json(buildSessionPayload(req.user!.id, req.params.agencyId))
+  writeOpsAudit(req.user!.id, 'impersonate', 'agency', routeParam(req.params.agencyId))
+  setAgencyCookie(res, routeParam(req.params.agencyId))
+  res.json(buildSessionPayload(req.user!.id, routeParam(req.params.agencyId)))
 })
 
 opsRouter.get('/search', ...guard, (req, res) => {

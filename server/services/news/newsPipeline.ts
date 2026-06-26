@@ -211,6 +211,21 @@ export async function pollFeed(feedId: string): Promise<number> {
   }
 }
 
+export async function pollFeedsForAgency(agencyId: string): Promise<{ feeds: number; created: number }> {
+  const feeds = db
+    .prepare('SELECT id FROM rss_feeds WHERE is_active = 1 AND agency_id = ?')
+    .all(agencyId) as { id: string }[]
+  let created = 0
+  for (const feed of feeds) {
+    try {
+      created += await pollFeed(feed.id)
+    } catch (err) {
+      console.error(`[news] Feed poll failed ${feed.id}:`, err)
+    }
+  }
+  return { feeds: feeds.length, created }
+}
+
 export async function pollAllFeeds(): Promise<{ feeds: number; created: number }> {
   const feeds = db.prepare('SELECT id FROM rss_feeds WHERE is_active = 1').all() as { id: string }[]
   let created = 0

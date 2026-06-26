@@ -195,7 +195,7 @@ export async function connectSpecificPagesForAgency(
   options?: { skipFollowerSync?: boolean },
 ) {
   const wanted = [...new Set(pageIds.map((p) => String(p).trim()).filter(Boolean))]
-  if (!wanted.size) return []
+  if (!wanted.length) return []
 
   const fromGraph = await fetchPagesByMetaIds(agencyId, accessToken, wanted)
   if (fromGraph.length === 0) {

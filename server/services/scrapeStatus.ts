@@ -97,7 +97,7 @@ export function getPageScrapeInfo(pageId: string, agencyId?: string): PageScrape
   const totalScraped = countTotalScraped(pageId, row.source_account_id)
   const resolved = resolvePrefillPage(pageId, agencyId)
 
-  if (!resolved.eligible) {
+  if (resolved.eligible === false) {
     return {
       status: 'scraping_error',
       label: STATUS_LABELS.scraping_error,
@@ -108,8 +108,8 @@ export function getPageScrapeInfo(pageId: string, agencyId?: string): PageScrape
     }
   }
 
-  if (row.scrape_error) {
-    clearScrapeError(pageId)
+  if (resolved.eligible) {
+    // Stale DB scrape_error is ignored; clearScrapeError runs only when prefill actually starts.
   }
 
   let status: ScrapeStatusKey = 'idle'

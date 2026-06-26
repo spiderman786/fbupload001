@@ -1,5 +1,4 @@
 import fs from 'fs'
-import path from 'path'
 import { db } from '../db.js'
 
 const GRAPH = 'https://graph.facebook.com/v21.0'

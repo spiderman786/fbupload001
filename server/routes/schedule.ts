@@ -7,6 +7,7 @@ import type { AgencyRequest } from '../utils/agency.js'
 import { DEFAULT_SCHEDULE_TIMEZONE, getCurrentTimeHHMM } from '../utils/timezone.js'
 import { USA_ENGAGEMENT_PRESETS, getEngagementLabel, getEngagementPreset } from '../config/usaEngagementTimes.js'
 
+import { routeParam } from '../utils/routeParam.js'
 export const scheduleRouter = Router()
 scheduleRouter.use(authMiddleware, requireVerified, agencyMiddleware)
 
@@ -138,7 +139,7 @@ scheduleRouter.patch('/:id', requireRole('owner', 'admin'), (req: AgencyRequest,
   const { time, pageIds, timezone } = req.body ?? {}
   const existing = db
     .prepare('SELECT * FROM schedule_slots WHERE id = ? AND agency_id = ?')
-    .get(req.params.id, req.agency!.id)
+    .get(routeParam(req.params.id), req.agency!.id)
 
   if (!existing) {
     res.status(404).json({ error: 'Schedule slot not found' })
@@ -146,32 +147,32 @@ scheduleRouter.patch('/:id', requireRole('owner', 'admin'), (req: AgencyRequest,
   }
 
   if (time) {
-    db.prepare('UPDATE schedule_slots SET time = ? WHERE id = ?').run(time, req.params.id)
+    db.prepare('UPDATE schedule_slots SET time = ? WHERE id = ?').run(time, routeParam(req.params.id))
   }
 
   if (timezone) {
-    db.prepare('UPDATE schedule_slots SET timezone = ? WHERE id = ?').run(timezone, req.params.id)
+    db.prepare('UPDATE schedule_slots SET timezone = ? WHERE id = ?').run(timezone, routeParam(req.params.id))
   }
 
   if (Array.isArray(pageIds)) {
-    db.prepare('DELETE FROM schedule_slot_pages WHERE slot_id = ?').run(req.params.id)
+    db.prepare('DELETE FROM schedule_slot_pages WHERE slot_id = ?').run(routeParam(req.params.id))
     const insertPage = db.prepare('INSERT INTO schedule_slot_pages (slot_id, page_id) VALUES (?, ?)')
     for (const pageId of pageIds) {
       const page = db
         .prepare('SELECT id FROM facebook_pages WHERE id = ? AND agency_id = ?')
         .get(pageId, req.agency!.id)
-      if (page) insertPage.run(req.params.id, pageId)
+      if (page) insertPage.run(routeParam(req.params.id), pageId)
     }
   }
 
-  const slot = db.prepare('SELECT * FROM schedule_slots WHERE id = ?').get(req.params.id) as Record<string, unknown>
-  res.json({ slot: mapSlot(slot, getSlotPageIds(req.params.id)) })
+  const slot = db.prepare('SELECT * FROM schedule_slots WHERE id = ?').get(routeParam(req.params.id)) as Record<string, unknown>
+  res.json({ slot: mapSlot(slot, getSlotPageIds(routeParam(req.params.id))) })
 })
 
 scheduleRouter.delete('/:id', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
   const result = db
     .prepare('DELETE FROM schedule_slots WHERE id = ? AND agency_id = ?')
-    .run(req.params.id, req.agency!.id)
+    .run(routeParam(req.params.id), req.agency!.id)
   if (result.changes === 0) {
     res.status(404).json({ error: 'Schedule slot not found' })
     return

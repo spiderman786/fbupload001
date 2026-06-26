@@ -12,6 +12,7 @@ import { markSourceScrapingPending, reactivateSourceForRescrape } from '../servi
 import { probeSourceCatalog } from '../services/reelDiscovery.js'
 import type { AgencyRequest } from '../utils/agency.js'
 
+import { routeParam } from '../utils/routeParam.js'
 export const automationRouter = Router()
 automationRouter.use(authMiddleware, requireVerified, agencyMiddleware)
 
@@ -43,7 +44,7 @@ automationRouter.put('/assignments/:pageId', requireRole('owner', 'admin'), asyn
   }
   const page = db
     .prepare('SELECT id FROM facebook_pages WHERE id = ? AND agency_id = ?')
-    .get(req.params.pageId, req.agency!.id)
+    .get(routeParam(req.params.pageId), req.agency!.id)
   if (!page) {
     res.status(404).json({ error: 'Page not found' })
     return
@@ -59,20 +60,20 @@ automationRouter.put('/assignments/:pageId', requireRole('owner', 'admin'), asyn
 
   const previous = db
     .prepare('SELECT source_account_id FROM page_source_assignments WHERE page_id = ? AND agency_id = ?')
-    .get(req.params.pageId, req.agency!.id) as { source_account_id: string } | undefined
+    .get(routeParam(req.params.pageId), req.agency!.id) as { source_account_id: string } | undefined
 
   db.prepare(`
     INSERT INTO page_source_assignments (page_id, source_account_id, user_id, agency_id)
     VALUES (?, ?, ?, ?)
     ON CONFLICT(page_id) DO UPDATE SET source_account_id = excluded.source_account_id, agency_id = excluded.agency_id
-  `).run(req.params.pageId, sourceId, req.user!.id, req.agency!.id)
+  `).run(routeParam(req.params.pageId), sourceId, req.user!.id, req.agency!.id)
 
   if (previous && previous.source_account_id === sourceId) {
     const pageHealth = db
       .prepare('SELECT health_status FROM facebook_pages WHERE id = ?')
-      .get(req.params.pageId) as { health_status: string } | undefined
+      .get(routeParam(req.params.pageId)) as { health_status: string } | undefined
     if (pageHealth?.health_status === 'source_exhausted') {
-      reactivateSourceForRescrape(req.params.pageId)
+      reactivateSourceForRescrape(routeParam(req.params.pageId))
       void tickPrefillQueue()
       res.json({ message: 'Source re-sync started — scraping creator again' })
       return
@@ -80,13 +81,13 @@ automationRouter.put('/assignments/:pageId', requireRole('owner', 'admin'), asyn
   }
 
   if (!previous || previous.source_account_id !== sourceId) {
-    await purgeQueuedJobsForPage(req.params.pageId, req.agency!.id)
-    markSourceScrapingPending(req.params.pageId)
-    db.prepare('UPDATE page_source_assignments SET catalog_total = NULL WHERE page_id = ?').run(req.params.pageId)
-    void probeSourceCatalog(req.params.pageId).catch((err) =>
+    await purgeQueuedJobsForPage(routeParam(req.params.pageId), req.agency!.id)
+    markSourceScrapingPending(routeParam(req.params.pageId))
+    db.prepare('UPDATE page_source_assignments SET catalog_total = NULL WHERE page_id = ?').run(routeParam(req.params.pageId))
+    void probeSourceCatalog(routeParam(req.params.pageId)).catch((err) =>
       console.warn('[catalog] probe failed:', err instanceof Error ? err.message : err),
     )
-    await syncPagePrefillQueue(req.params.pageId, req.agency!.id)
+    await syncPagePrefillQueue(routeParam(req.params.pageId), req.agency!.id)
   } else {
     void tickPrefillQueue()
   }
@@ -96,7 +97,7 @@ automationRouter.put('/assignments/:pageId', requireRole('owner', 'admin'), asyn
 
 automationRouter.delete('/assignments/:pageId', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
   db.prepare('DELETE FROM page_source_assignments WHERE page_id = ? AND agency_id = ?').run(
-    req.params.pageId,
+    routeParam(req.params.pageId),
     req.agency!.id,
   )
   res.json({ message: 'Assignment removed' })
@@ -121,7 +122,7 @@ automationRouter.get('/posts/:pageId', requireRole('owner', 'admin'), async (req
   try {
     const page = db
       .prepare('SELECT meta_page_id, page_access_token, facebook_account_id FROM facebook_pages WHERE id = ? AND agency_id = ?')
-      .get(req.params.pageId, req.agency!.id) as Record<string, unknown> | undefined
+      .get(routeParam(req.params.pageId), req.agency!.id) as Record<string, unknown> | undefined
 
     if (!page) {
       res.status(404).json({ error: 'Page not found' })

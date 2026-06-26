@@ -34,6 +34,7 @@ import { getPageQuota } from '../services/pageQuota.js'
 import path from 'path'
 import { getSignedPreviewUrl, isR2Enabled, pipeQueueFileToResponse } from '../services/r2Storage.js'
 
+import { routeParam } from '../utils/routeParam.js'
 export const pagesRouter = Router()
 pagesRouter.use(authMiddleware, requireVerified, agencyMiddleware)
 
@@ -69,7 +70,7 @@ pagesRouter.get('/', (req: AgencyRequest, res) => {
   const rows = db
     .prepare('SELECT * FROM facebook_pages WHERE agency_id = ? ORDER BY created_at DESC')
     .all(req.agency!.id) as Record<string, unknown>[]
-  res.json({ pages: rows.map(mapPage) })
+  res.json({ pages: rows.map((row) => mapPage(row)) })
 })
 
 pagesRouter.get('/hub', (req: AgencyRequest, res) => {
@@ -229,7 +230,7 @@ function requirePage(req: AgencyRequest, pageId: string) {
 }
 
 pagesRouter.get('/:id/detail', (req: AgencyRequest, res) => {
-  const detail = getPageDetail(req.params.id, req.agency!.id)
+  const detail = getPageDetail(routeParam(req.params.id), req.agency!.id)
   if (!detail) {
     res.status(404).json({ error: 'Page not found' })
     return
@@ -238,53 +239,53 @@ pagesRouter.get('/:id/detail', (req: AgencyRequest, res) => {
 })
 
 pagesRouter.get('/:id/insights', async (req: AgencyRequest, res) => {
-  if (!requirePage(req, req.params.id)) {
+  if (!requirePage(req, routeParam(req.params.id))) {
     res.status(404).json({ error: 'Page not found' })
     return
   }
   const days = Math.min(90, Math.max(7, Number(req.query.days) || 28))
-  const settings = getPageAutomationSettings(req.params.id)
-  const insights = await getPageInsights(req.params.id, days, settings.hashtags)
+  const settings = getPageAutomationSettings(routeParam(req.params.id))
+  const insights = await getPageInsights(routeParam(req.params.id), days, settings.hashtags)
   res.json({ insights })
 })
 
 pagesRouter.get('/:id/queue', async (req: AgencyRequest, res) => {
-  if (!requirePage(req, req.params.id)) {
+  if (!requirePage(req, routeParam(req.params.id))) {
     res.status(404).json({ error: 'Page not found' })
     return
   }
-  res.json({ queue: await getPageQueue(req.params.id) })
+  res.json({ queue: await getPageQueue(routeParam(req.params.id)) })
 })
 
 pagesRouter.get('/:id/failed-posts', (req: AgencyRequest, res) => {
-  if (!requirePage(req, req.params.id)) {
+  if (!requirePage(req, routeParam(req.params.id))) {
     res.status(404).json({ error: 'Page not found' })
     return
   }
   res.json({
-    posts: getPageFailedPosts(req.params.id),
-    reasons: getPageFailedReasons(req.params.id),
+    posts: getPageFailedPosts(routeParam(req.params.id)),
+    reasons: getPageFailedReasons(routeParam(req.params.id)),
   })
 })
 
 pagesRouter.get('/:id/reels', async (req: AgencyRequest, res) => {
-  if (!requirePage(req, req.params.id)) {
+  if (!requirePage(req, routeParam(req.params.id))) {
     res.status(404).json({ error: 'Page not found' })
     return
   }
   res.json({
-    queue: await getPageQueue(req.params.id),
-    history: getPageReelsHistory(req.params.id),
+    queue: await getPageQueue(routeParam(req.params.id)),
+    history: getPageReelsHistory(routeParam(req.params.id)),
   })
 })
 
 pagesRouter.get('/:pageId/queue/:jobId/preview', async (req: AgencyRequest, res) => {
-  const pageId = req.params.pageId
+  const pageId = routeParam(req.params.pageId)
   if (!requirePage(req, pageId)) {
     res.status(404).json({ error: 'Page not found' })
     return
   }
-  const job = getQueuedJobForPage(req.params.jobId, pageId, req.agency!.id)
+  const job = getQueuedJobForPage(routeParam(req.params.jobId), pageId, req.agency!.id)
   if (!job) {
     res.status(404).json({ error: 'Queued reel not found' })
     return
@@ -315,9 +316,9 @@ pagesRouter.get('/:pageId/queue/:jobId/preview', async (req: AgencyRequest, res)
     }
   }
 
-  let filePath =
+  const filePath =
     kind === 'thumbnail'
-      ? await ensureQueueThumbnail(job, req.params.jobId)
+      ? await ensureQueueThumbnail(job, routeParam(req.params.jobId))
       : resolveQueueMediaPath(job, 'video')
   if (!filePath) {
     res.status(404).json({ error: 'Media not available' })
@@ -337,7 +338,7 @@ pagesRouter.get('/:pageId/queue/:jobId/preview', async (req: AgencyRequest, res)
 })
 
 pagesRouter.patch('/:pageId/queue/:jobId', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
-  const pageId = req.params.pageId
+  const pageId = routeParam(req.params.pageId)
   if (!requirePage(req, pageId)) {
     res.status(404).json({ error: 'Page not found' })
     return
@@ -348,7 +349,7 @@ pagesRouter.patch('/:pageId/queue/:jobId', requireRole('owner', 'admin'), (req: 
     return
   }
   try {
-    const saved = updateQueuedCaption(req.params.jobId, pageId, req.agency!.id, caption)
+    const saved = updateQueuedCaption(routeParam(req.params.jobId), pageId, req.agency!.id, caption)
     res.json({ caption: saved })
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Update failed' })
@@ -356,13 +357,13 @@ pagesRouter.patch('/:pageId/queue/:jobId', requireRole('owner', 'admin'), (req: 
 })
 
 pagesRouter.delete('/:pageId/queue/:jobId', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
-  const pageId = req.params.pageId
+  const pageId = routeParam(req.params.pageId)
   if (!requirePage(req, pageId)) {
     res.status(404).json({ error: 'Page not found' })
     return
   }
   try {
-    await removeQueuedJob(req.params.jobId, pageId, req.agency!.id)
+    await removeQueuedJob(routeParam(req.params.jobId), pageId, req.agency!.id)
     const { tickPrefillQueue } = await import('../services/prefillScheduler.js')
     tickPrefillQueue()
     res.json({ message: 'Removed from queue' })
@@ -372,13 +373,13 @@ pagesRouter.delete('/:pageId/queue/:jobId', requireRole('owner', 'admin'), async
 })
 
 pagesRouter.post('/:pageId/queue/:jobId/refresh', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
-  const pageId = req.params.pageId
+  const pageId = routeParam(req.params.pageId)
   if (!requirePage(req, pageId)) {
     res.status(404).json({ error: 'Page not found' })
     return
   }
   try {
-    const result = await refreshQueueItemMedia(req.params.jobId, pageId, req.agency!.id)
+    const result = await refreshQueueItemMedia(routeParam(req.params.jobId), pageId, req.agency!.id)
     res.json(result)
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Refresh failed' })
@@ -386,7 +387,7 @@ pagesRouter.post('/:pageId/queue/:jobId/refresh', requireRole('owner', 'admin'),
 })
 
 pagesRouter.post('/:pageId/retry-scrape', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
-  const pageId = req.params.pageId
+  const pageId = routeParam(req.params.pageId)
   if (!requirePage(req, pageId)) {
     res.status(404).json({ error: 'Page not found' })
     return
@@ -400,7 +401,7 @@ pagesRouter.post('/:pageId/retry-scrape', requireRole('owner', 'admin'), async (
 })
 
 pagesRouter.post('/:pageId/queue/refresh-missing', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
-  const pageId = req.params.pageId
+  const pageId = routeParam(req.params.pageId)
   if (!requirePage(req, pageId)) {
     res.status(404).json({ error: 'Page not found' })
     return
@@ -414,7 +415,7 @@ pagesRouter.post('/:pageId/queue/refresh-missing', requireRole('owner', 'admin')
 })
 
 pagesRouter.post('/:pageId/queue/dedupe', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
-  const pageId = req.params.pageId
+  const pageId = routeParam(req.params.pageId)
   if (!requirePage(req, pageId)) {
     res.status(404).json({ error: 'Page not found' })
     return
@@ -430,13 +431,13 @@ pagesRouter.post('/:pageId/queue/dedupe', requireRole('owner', 'admin'), async (
 })
 
 pagesRouter.post('/:pageId/queue/:jobId/skip', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
-  const pageId = req.params.pageId
+  const pageId = routeParam(req.params.pageId)
   if (!requirePage(req, pageId)) {
     res.status(404).json({ error: 'Page not found' })
     return
   }
   try {
-    await removeQueuedJob(req.params.jobId, pageId, req.agency!.id)
+    await removeQueuedJob(routeParam(req.params.jobId), pageId, req.agency!.id)
     const { tickPrefillQueue } = await import('../services/prefillScheduler.js')
     tickPrefillQueue()
     res.json({ message: 'Skipped — next reel will pre-download' })
@@ -446,11 +447,11 @@ pagesRouter.post('/:pageId/queue/:jobId/skip', requireRole('owner', 'admin'), as
 })
 
 pagesRouter.patch('/:id/automation-settings', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
-  if (!requirePage(req, req.params.id)) {
+  if (!requirePage(req, routeParam(req.params.id))) {
     res.status(404).json({ error: 'Page not found' })
     return
   }
-  const pageId = req.params.id
+  const pageId = routeParam(req.params.id)
   const { postsPerDay, postingLogic, timezone, scheduleTimes, hashtags, regenerateRandomTimes } = req.body ?? {}
   const current = getPageAutomationSettings(pageId)
   let nextTimes = Array.isArray(scheduleTimes) ? scheduleTimes.map(String) : undefined
@@ -487,7 +488,7 @@ pagesRouter.patch('/:id', requireRole('owner', 'admin'), async (req: AgencyReque
   const { status, dailyReelLimit } = req.body ?? {}
   const page = db
     .prepare('SELECT * FROM facebook_pages WHERE id = ? AND agency_id = ?')
-    .get(req.params.id, req.agency!.id)
+    .get(routeParam(req.params.id), req.agency!.id)
 
   if (!page) {
     res.status(404).json({ error: 'Page not found' })
@@ -508,27 +509,27 @@ pagesRouter.patch('/:id', requireRole('owner', 'admin'), async (req: AgencyReque
       res.status(400).json({ error: 'Daily reel limit must be between 1 and 24' })
       return
     }
-    db.prepare('UPDATE facebook_pages SET daily_reel_limit = ? WHERE id = ?').run(limit, req.params.id)
-    db.prepare('UPDATE page_automation_settings SET posts_per_day = ? WHERE page_id = ?').run(limit, req.params.id)
+    db.prepare('UPDATE facebook_pages SET daily_reel_limit = ? WHERE id = ?').run(limit, routeParam(req.params.id))
+    db.prepare('UPDATE page_automation_settings SET posts_per_day = ? WHERE page_id = ?').run(limit, routeParam(req.params.id))
 
     if (limit !== previousLimit) {
       const { syncPagePrefillQueue } = await import('../services/prefillScheduler.js')
-      queueSync = await syncPagePrefillQueue(req.params.id, req.agency!.id)
+      queueSync = await syncPagePrefillQueue(routeParam(req.params.id), req.agency!.id)
     }
   }
 
   if (status) {
-    db.prepare('UPDATE facebook_pages SET status = ? WHERE id = ?').run(status, req.params.id)
+    db.prepare('UPDATE facebook_pages SET status = ? WHERE id = ?').run(status, routeParam(req.params.id))
   }
 
-  const updated = db.prepare('SELECT * FROM facebook_pages WHERE id = ?').get(req.params.id) as Record<string, unknown>
+  const updated = db.prepare('SELECT * FROM facebook_pages WHERE id = ?').get(routeParam(req.params.id)) as Record<string, unknown>
   res.json({ page: mapPage(updated), queueSync })
 })
 
 pagesRouter.delete('/:id', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
   const result = db
     .prepare('DELETE FROM facebook_pages WHERE id = ? AND agency_id = ?')
-    .run(req.params.id, req.agency!.id)
+    .run(routeParam(req.params.id), req.agency!.id)
   if (result.changes === 0) {
     res.status(404).json({ error: 'Page not found' })
     return

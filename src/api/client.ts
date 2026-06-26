@@ -2,6 +2,12 @@ const BASE = '/api'
 
 type ApiError = { error: string; needsVerification?: boolean; email?: string }
 
+let unauthorizedHandler: (() => void) | null = null
+
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  unauthorizedHandler = handler
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     credentials: 'include',
@@ -11,6 +17,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   const data = await res.json().catch(() => ({} as Partial<ApiError>))
   if (!res.ok) {
+    if (res.status === 401 && !path.startsWith('/auth/')) {
+      unauthorizedHandler?.()
+    }
     const message =
       typeof data.error === 'string' && data.error.trim()
         ? data.error

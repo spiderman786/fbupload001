@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
-import { api, type AgencyInfo, type SessionResponse, type User } from '../api/client'
+import { api, setUnauthorizedHandler, type AgencyInfo, type SessionResponse, type User } from '../api/client'
 
 type AuthContextValue = {
   user: User | null
@@ -62,16 +62,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refreshUser().finally(() => setLoading(false))
   }, [refreshUser])
 
-  const login = async (email: string, password: string) => {
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      applySession({ setUser, setAgency, setAgencies, setPlatformAdmin }, null)
+    })
+    return () => setUnauthorizedHandler(null)
+  }, [])
+
+  const login = useCallback(async (email: string, password: string) => {
     const session = await api.auth.login({ email, password })
     setSession(session)
     return session
-  }
+  }, [setSession])
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     await api.auth.logout()
     applySession({ setUser, setAgency, setAgencies, setPlatformAdmin }, null)
-  }
+  }, [])
 
   const switchAgency = async (agencyId: string) => {
     const session = await api.agencies.switch(agencyId)

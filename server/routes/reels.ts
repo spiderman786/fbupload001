@@ -25,8 +25,7 @@ function mapJob(row: Record<string, unknown>) {
     jobType: row.job_type ?? 'scheduled',
     sourceReelId: row.source_reel_id ?? null,
     metadataStripped: Boolean(row.metadata_stripped),
-    localFilePath: row.local_file_path ?? null,
-    cleanedFilePath: row.cleaned_file_path ?? null,
+    hasLocalMedia: Boolean(row.cleaned_file_path ?? row.local_file_path),
   }
 }
 

@@ -103,6 +103,7 @@ export function AduPageDetailPage() {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('automation')
   const [detail, setDetail] = useState<PageDetail | null>(null)
   const [insights, setInsights] = useState<PageInsightsPayload | null>(null)
+  const [insightsError, setInsightsError] = useState<string | null>(null)
   const [insightDays, setInsightDays] = useState(28)
   const [queue, setQueue] = useState<PageQueueItem[]>([])
   const [queueRefreshing, setQueueRefreshing] = useState(false)
@@ -146,6 +147,11 @@ export function AduPageDetailPage() {
     }
   }, [pageId])
 
+  const refreshQueueAndDetail = useCallback(() => {
+    void loadQueue()
+    void loadDetail()
+  }, [loadQueue, loadDetail])
+
   useEffect(() => {
     loadDetail()
   }, [loadDetail])
@@ -153,7 +159,14 @@ export function AduPageDetailPage() {
   useEffect(() => {
     if (!pageId) return
     if (tab === 'insights') {
-      api.pages.insights(pageId, insightDays).then((r) => setInsights(r.insights)).catch(() => {})
+      setInsightsError(null)
+      api.pages
+        .insights(pageId, insightDays)
+        .then((r) => setInsights(r.insights))
+        .catch((err) => {
+          setInsights(null)
+          setInsightsError(getApiError(err, 'Failed to load insights'))
+        })
     }
     if (tab === 'overview' || tab === 'reels') {
       loadQueue()
@@ -443,10 +456,7 @@ export function AduPageDetailPage() {
               queue={queue}
               canWrite={canWrite}
               defaultHashtags={settings.hashtags}
-              onRefresh={() => {
-                loadQueue()
-                loadDetail()
-              }}
+              onRefresh={refreshQueueAndDetail}
               refreshing={queueRefreshing}
             />
           ) : null}
@@ -471,7 +481,11 @@ export function AduPageDetailPage() {
         </div>
       )}
 
-      {tab === 'insights' && insights && (
+      {tab === 'insights' && insightsError && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{insightsError}</div>
+      )}
+
+      {tab === 'insights' && !insightsError && insights && (
         <div className="space-y-6">
           <div className="flex gap-2">
             {[7, 14, 28, 90].map((d) => (

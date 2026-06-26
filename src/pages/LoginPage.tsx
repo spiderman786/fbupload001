@@ -8,7 +8,10 @@ export function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const from = (location.state as { from?: string; message?: string })?.from ?? '/agency'
+  const from =
+    (location.state as { from?: string; redirect?: string; message?: string })?.redirect ??
+    (location.state as { from?: string; message?: string })?.from ??
+    '/agency'
   const successMessage = (location.state as { message?: string })?.message ?? ''
 
   const [email, setEmail] = useState('')

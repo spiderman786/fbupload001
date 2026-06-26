@@ -17,7 +17,7 @@ export function explainJobFailure(jobId: string): JobExplanation | null {
 
   const error = (job.error_message ?? '').toLowerCase()
   const logs = getJobLogs(jobId)
-  const logText = logs.map((l) => l.message.toLowerCase()).join(' ')
+  const logText = logs.map((l) => String(l.message).toLowerCase()).join(' ')
 
   if (/insufficient token|token balance/.test(error)) {
     return {

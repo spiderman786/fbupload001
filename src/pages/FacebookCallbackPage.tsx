@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 
@@ -6,27 +6,38 @@ export function FacebookCallbackPage() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const [status, setStatus] = useState('Connecting Facebook account...')
+  const exchangedRef = useRef(false)
 
   useEffect(() => {
+    if (exchangedRef.current) return
+    exchangedRef.current = true
+
     const code = params.get('code')
     const state = params.get('state') ?? undefined
+    let redirectTimer: ReturnType<typeof setTimeout> | undefined
 
     if (!code) {
       setStatus('Missing OAuth code. Redirecting...')
-      setTimeout(() => navigate('/facebook/accounts'), 2000)
-      return
+      redirectTimer = setTimeout(() => navigate('/facebook/accounts'), 2000)
+      return () => {
+        if (redirectTimer) clearTimeout(redirectTimer)
+      }
     }
 
     api.facebook
       .callback(code, state)
       .then((res) => {
         setStatus(`Connected! ${res.pagesConnected} page(s) added. Redirecting...`)
-        setTimeout(() => navigate('/facebook/accounts'), 1500)
+        redirectTimer = setTimeout(() => navigate('/facebook/accounts'), 1500)
       })
       .catch((err) => {
         setStatus((err as { error?: string }).error ?? 'Connection failed')
-        setTimeout(() => navigate('/facebook/accounts'), 3000)
+        redirectTimer = setTimeout(() => navigate('/facebook/accounts'), 3000)
       })
+
+    return () => {
+      if (redirectTimer) clearTimeout(redirectTimer)
+    }
   }, [params, navigate])
 
   return (

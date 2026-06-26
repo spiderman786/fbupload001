@@ -1,4 +1,5 @@
 import Parser from 'rss-parser'
+import { assertSafeExternalUrl } from '../../utils/safeUrl.js'
 import { normalizeArticleUrl } from './types.js'
 
 const parser = new Parser({
@@ -28,7 +29,7 @@ function pickImage(item: Parser.Item): string | null {
   const mediaThumb = (item as Record<string, unknown>)['media:thumbnail'] as { $?: { url?: string } } | undefined
   if (mediaThumb?.$?.url) return mediaThumb.$.url
 
-  const content = item.content ?? item['content:encoded'] ?? item.summary ?? ''
+  const content = String(item.content ?? (item as Record<string, unknown>)['content:encoded'] ?? item.summary ?? '')
   const imgMatch = content.match(/<img[^>]+src=["']([^"']+)["']/i)
   if (imgMatch?.[1]) return imgMatch[1]
 
@@ -36,6 +37,7 @@ function pickImage(item: Parser.Item): string | null {
 }
 
 export async function fetchRssFeed(url: string): Promise<RssArticle[]> {
+  assertSafeExternalUrl(url)
   const feed = await parser.parseURL(url)
   const articles: RssArticle[] = []
 
@@ -57,6 +59,7 @@ export async function fetchRssFeed(url: string): Promise<RssArticle[]> {
 
 export async function scrapeArticleImages(articleUrl: string): Promise<string[]> {
   try {
+    assertSafeExternalUrl(articleUrl)
     const res = await fetch(articleUrl, {
       headers: { 'User-Agent': 'FBUploadPro-NewsBot/1.0' },
       signal: AbortSignal.timeout(15000),

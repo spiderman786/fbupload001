@@ -3,7 +3,6 @@ import { db } from '../db.js'
 import { getPageAutomationSettings } from './pageAutomationSettings.js'
 import { isSourceActiveFlag } from '../utils/sourceActive.js'
 import { healSourceAssignment } from './sourceAccounts.js'
-import { isSourceActiveFlag } from '../utils/sourceActive.js'
 
 export type QueueJobType = 'direct' | 'inapp' | 'scheduled' | 'prefill'
 

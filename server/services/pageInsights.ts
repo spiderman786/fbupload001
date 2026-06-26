@@ -1,5 +1,4 @@
 import { db } from '../db.js'
-import { getPageScrapeInfo } from './scrapeStatus.js'
 
 const GRAPH = 'https://graph.facebook.com/v21.0'
 

@@ -15,6 +15,7 @@ import { getByocCredentialById, isFacebookConfiguredForAgency, listByocApps } fr
 import { CONNECT_PAGES_BATCH_SIZE, assertOwnerUnlimitedPages } from '../utils/pagination.js'
 import type { AgencyRequest } from '../utils/agency.js'
 
+import { routeParam } from '../utils/routeParam.js'
 export const facebookRouter = Router()
 
 const oauthStates = new Map<
@@ -72,6 +73,9 @@ facebookRouter.post('/callback', authMiddleware, requireVerified, agencyMiddlewa
     }
     byocCredentialId = stored.byocCredentialId
     oauthStates.delete(state)
+  } else if (process.env.NODE_ENV === 'production') {
+    res.status(400).json({ error: 'Missing OAuth state' })
+    return
   }
 
   try {
@@ -92,6 +96,10 @@ facebookRouter.post('/callback', authMiddleware, requireVerified, agencyMiddlewa
 })
 
 facebookRouter.post('/connect-mock', authMiddleware, requireVerified, agencyMiddleware, requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    res.status(404).json({ error: 'Not found' })
+    return
+  }
   try {
     const userId = req.user!.id
     const agencyId = req.agency!.id
@@ -129,7 +137,7 @@ facebookRouter.get('/accounts', authMiddleware, requireVerified, agencyMiddlewar
 facebookRouter.get('/accounts/:accountId/pages', authMiddleware, requireVerified, agencyMiddleware, requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
   const account = db
     .prepare('SELECT id, access_token FROM facebook_accounts WHERE id = ? AND agency_id = ?')
-    .get(req.params.accountId, req.agency!.id) as { id: string; access_token: string } | undefined
+    .get(routeParam(req.params.accountId), req.agency!.id) as { id: string; access_token: string } | undefined
 
   if (!account) {
     res.status(404).json({ error: 'Facebook account not found' })
@@ -154,7 +162,7 @@ facebookRouter.post(
   async (req: AgencyRequest, res) => {
     const account = db
       .prepare('SELECT id, access_token FROM facebook_accounts WHERE id = ? AND agency_id = ?')
-      .get(req.params.accountId, req.agency!.id) as { id: string; access_token: string } | undefined
+      .get(routeParam(req.params.accountId), req.agency!.id) as { id: string; access_token: string } | undefined
 
     if (!account) {
       res.status(404).json({ error: 'Facebook account not found' })
@@ -172,7 +180,7 @@ facebookRouter.post(
     const currentCount = db
       .prepare('SELECT COUNT(*) as count FROM facebook_pages WHERE agency_id = ?')
       .get(req.agency!.id) as { count: number }
-    assertOwnerUnlimitedPages(req.agency!.role, currentCount.count, pageIds.length)
+    assertOwnerUnlimitedPages(req.agency!.role, currentCount.count)
 
     try {
       const connected: string[] = []

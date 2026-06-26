@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import sharp from 'sharp'
+import sharp, { type OverlayOptions } from 'sharp'
 import { downloadImageBuffer } from './rssFetcher.js'
 import { parseBrandType, parseColors, parseFonts, type NewsBrandType, type NewsColors, type NewsFonts } from './types.js'
 
@@ -131,7 +131,7 @@ async function circleInset(input: Buffer, size: number, borderColor: string): Pr
 export const TEMPLATE_PREVIEW_HEADLINE = 'ATMOSPHERIC THRILLER RETURNS WITH DEEPER MYSTERIES AND HIDDEN TRUTHS'
 export const TEMPLATE_PREVIEW_ACCENT_WORDS = ['ATMOSPHERIC', 'THRILLER', 'TRUTHS']
 
-async function createSampleHeroBuffer(accentColor: string): Promise<Buffer> {
+async function createSampleHeroBuffer(_accentColor: string): Promise<Buffer> {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS_W}" height="${HERO_H}">
     <defs>
       <linearGradient id="hero" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -190,7 +190,7 @@ async function renderNewsCanvas(options: {
     ${cta ? `<text x="${CANVAS_W / 2}" y="${CANVAS_H - 36}" text-anchor="middle" font-family="${FONT_STACK}" font-size="${fonts.ctaSize}" font-weight="700" fill="${colors.cta}">${escapeXml(cta.toUpperCase())}</text>` : ''}
   </svg>`)
 
-  const composites: sharp.OverlayOptions[] = [
+  const composites: OverlayOptions[] = [
     { input: heroLayer, top: 0, left: 0 },
     { input: insetLayer, top: insetY, left: INSET_X },
     { input: overlaySvg, top: 0, left: 0 },

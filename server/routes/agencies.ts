@@ -13,6 +13,7 @@ import {
   type AgencyRole,
 } from '../utils/agency.js'
 
+import { routeParam } from '../utils/routeParam.js'
 export const agenciesRouter = Router()
 
 // Public invite preview (no auth)
@@ -266,7 +267,7 @@ agenciesRouter.delete('/invites/:id', (req: AgencyRequest, res) => {
     return
   }
 
-  db.prepare('DELETE FROM agency_invites WHERE id = ? AND agency_id = ?').run(req.params.id, req.agency!.id)
+  db.prepare('DELETE FROM agency_invites WHERE id = ? AND agency_id = ?').run(routeParam(req.params.id), req.agency!.id)
   res.json({ message: 'Invite revoked' })
 })
 
@@ -284,7 +285,7 @@ agenciesRouter.patch('/members/:userId', (req: AgencyRequest, res) => {
 
   const member = db
     .prepare('SELECT role FROM agency_members WHERE agency_id = ? AND user_id = ?')
-    .get(req.agency!.id, req.params.userId) as { role: AgencyRole } | undefined
+    .get(req.agency!.id, routeParam(req.params.userId)) as { role: AgencyRole } | undefined
 
   if (!member) {
     res.status(404).json({ error: 'Member not found' })
@@ -294,7 +295,7 @@ agenciesRouter.patch('/members/:userId', (req: AgencyRequest, res) => {
     res.status(400).json({ error: 'Cannot change owner role' })
     return
   }
-  if (req.params.userId === req.user!.id) {
+  if (routeParam(req.params.userId) === req.user!.id) {
     res.status(400).json({ error: 'Cannot change your own role' })
     return
   }
@@ -302,14 +303,14 @@ agenciesRouter.patch('/members/:userId', (req: AgencyRequest, res) => {
   db.prepare('UPDATE agency_members SET role = ? WHERE agency_id = ? AND user_id = ?').run(
     role,
     req.agency!.id,
-    req.params.userId,
+    routeParam(req.params.userId),
   )
 
   res.json({ message: 'Role updated' })
 })
 
 agenciesRouter.delete('/members/:userId', (req: AgencyRequest, res) => {
-  const targetId = req.params.userId
+  const targetId = routeParam(req.params.userId)
 
   if (targetId === req.user!.id) {
     res.status(400).json({ error: 'Use leave endpoint to remove yourself' })

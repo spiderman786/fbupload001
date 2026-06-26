@@ -150,7 +150,7 @@ export function createAgencyForUser(
     uuid(),
     agencyId,
     userId,
-    'admin',
+    'owner',
   )
   return { agencyId, subdomain }
 }

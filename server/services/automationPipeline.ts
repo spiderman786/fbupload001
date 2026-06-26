@@ -54,9 +54,23 @@ function resolveSourceId(job: JobRow, pageId: string): string {
   return sourceId
 }
 
+function resolveAgencyId(job: JobRow): string {
+  const explicit = job.agency_id as string | null
+  if (explicit) return explicit
+
+  const pageId = job.target_page_id as string
+  const page = db.prepare('SELECT agency_id FROM facebook_pages WHERE id = ?').get(pageId) as
+    | { agency_id: string }
+    | undefined
+  if (!page?.agency_id) throw new Error('Target page not found')
+
+  db.prepare('UPDATE reel_jobs SET agency_id = ? WHERE id = ?').run(page.agency_id, job.id as string)
+  return page.agency_id
+}
+
 function validateJobContext(job: JobRow, options?: { skipQuota?: boolean }) {
   const userId = job.user_id as string
-  const agencyId = (job.agency_id as string | null) ?? userId
+  const agencyId = resolveAgencyId(job)
   const pageId = job.target_page_id as string
 
   if (!isPlatformFlagEnabled('publishing_enabled')) throw new Error('Publishing disabled platform-wide')
@@ -146,8 +160,14 @@ async function publishCleanedFile(
   const { userId, agencyId, pageId, page, sourceId, source } = ctx
   const tokenCost = source.tokens_per_reel as number
 
-  const agency = db.prepare('SELECT token_balance FROM agencies WHERE id = ?').get(agencyId) as { token_balance: number }
-  if (agency.token_balance < tokenCost) throw new Error('Insufficient token balance')
+  const debited = db.transaction(() => {
+    const result = db
+      .prepare('UPDATE agencies SET token_balance = token_balance - ? WHERE id = ? AND token_balance >= ?')
+      .run(tokenCost, agencyId, tokenCost)
+    return result.changes > 0
+  })()
+
+  if (!debited) throw new Error('Insufficient token balance')
 
   appendJobLog(jobId, 'publish', 'Uploading to Facebook')
 
@@ -164,27 +184,27 @@ async function publishCleanedFile(
   const mockMode = !isFacebookConfiguredForAgency(agencyId) && !pageToken
   let postId: string
 
-  if (mockMode || !pageToken) {
-    await new Promise((r) => setTimeout(r, 400))
-    postId = `mock_reel_${Date.now()}`
-    appendJobLog(jobId, 'publish', 'Mock publish (no FB token)', 'warn')
-  } else {
-    const result = await publishReelVideo(
-      page.meta_page_id as string,
-      pageToken,
-      cleanedPath,
-      (loadJob(jobId).caption as string | null) || `Reel from ${source.username}`,
-    )
-    postId = result.postId
-    appendJobLog(jobId, 'publish', `Published ${postId}`)
+  try {
+    if (mockMode || !pageToken) {
+      await new Promise((r) => setTimeout(r, 400))
+      postId = `mock_reel_${Date.now()}`
+      appendJobLog(jobId, 'publish', 'Mock publish (no FB token)', 'warn')
+    } else {
+      const result = await publishReelVideo(
+        page.meta_page_id as string,
+        pageToken,
+        cleanedPath,
+        (loadJob(jobId).caption as string | null) || `Reel from ${source.username}`,
+      )
+      postId = result.postId
+      appendJobLog(jobId, 'publish', `Published ${postId}`)
+    }
+  } catch (err) {
+    db.prepare('UPDATE agencies SET token_balance = token_balance + ? WHERE id = ?').run(tokenCost, agencyId)
+    throw err
   }
 
   db.transaction(() => {
-    db.prepare('UPDATE agencies SET token_balance = token_balance - ? WHERE id = ? AND token_balance >= ?').run(
-      tokenCost,
-      agencyId,
-      tokenCost,
-    )
     db.prepare(`
       UPDATE reel_jobs SET status = 'published', meta_post_id = ?, tokens_charged = ?, completed_at = datetime('now')
       WHERE id = ?
@@ -242,7 +262,7 @@ async function runPrefillJob(jobId: string) {
   db.prepare("UPDATE reel_jobs SET status = 'downloading' WHERE id = ?").run(jobId)
   markScrapeIdle(pageId)
   try {
-    const { discovered, download, cleanedPath } = await downloadAndClean(agencyId, jobId, source, pageId, sourceId)
+    const { download, cleanedPath } = await downloadAndClean(agencyId, jobId, source, pageId, sourceId)
 
     const meta = await fetchReelMetadata(download.sourceUrl)
     const defaultCaption = `Reel from @${String(source.username).replace(/^@/, '')}`
@@ -275,7 +295,7 @@ async function runPublishFromQueueJob(jobId: string) {
   appendJobLog(jobId, 'start', 'Publishing from pre-download queue')
   const job = loadJob(jobId)
   const ctx = validateJobContext(job)
-  const { agencyId, pageId } = ctx
+  const { agencyId } = ctx
 
   const cleanedPath = await resolvePublishVideoPath(job, agencyId)
 
@@ -307,6 +327,11 @@ export async function runAutomationJob(jobId: string): Promise<void> {
   const job = loadJob(jobId)
   const jobType = job.job_type as JobType
   const status = job.status as string
+
+  if (job.cleaned_file_path && status === 'downloading' && jobType !== 'prefill') {
+    await runPublishFromQueueJob(jobId)
+    return
+  }
 
   if (status === 'publishing' && job.cleaned_file_path) {
     await runPublishFromQueueJob(jobId)

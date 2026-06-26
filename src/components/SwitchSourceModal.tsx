@@ -22,11 +22,11 @@ function switchPlatformTitle(platform: string) {
   return platform
 }
 
-function platformInputIcon(platform: string) {
+function PlatformInputIcon({ platform, className }: { platform: string; className?: string }) {
   const p = platform.toLowerCase()
-  if (p === 'tiktok') return Music2
-  if (p === 'youtube') return TvMinimalPlay
-  return Share2
+  if (p === 'tiktok') return <Music2 className={className} />
+  if (p === 'youtube') return <TvMinimalPlay className={className} />
+  return <Share2 className={className} />
 }
 
 function normalizeUsername(value: string) {
@@ -81,8 +81,6 @@ export function SwitchSourceModal({ open, pageId, currentSource, onClose, onComp
 
   if (!open) return null
 
-  const InputIcon = platformInputIcon(platform)
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
       <div className="w-full max-w-lg rounded-2xl border border-border bg-background shadow-xl">
@@ -117,7 +115,7 @@ export function SwitchSourceModal({ open, pageId, currentSource, onClose, onComp
           <label className="block text-sm">
             <span className="font-medium">New Target Identity</span>
             <div className="relative mt-1.5">
-              <InputIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <PlatformInputIcon platform={platform} className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="text"
                 value={username}

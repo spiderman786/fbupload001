@@ -187,13 +187,11 @@ export function resolveQueueSourceUrl(job: Record<string, unknown>): string | nu
   }
 
   let platform = job.source_platform as string | null
-  let username = job.source_username as string | null
-  if ((!platform || !username) && job.source_account_id) {
+  if (!platform && job.source_account_id) {
     const source = db
-      .prepare('SELECT platform, username FROM source_accounts WHERE id = ?')
-      .get(job.source_account_id as string) as { platform: string; username: string } | undefined
-    platform = platform ?? source?.platform ?? null
-    username = username ?? source?.username ?? null
+      .prepare('SELECT platform FROM source_accounts WHERE id = ?')
+      .get(job.source_account_id as string) as { platform: string } | undefined
+    platform = source?.platform ?? null
   }
 
   if (!reelId) return null

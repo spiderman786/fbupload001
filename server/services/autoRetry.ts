@@ -26,5 +26,6 @@ export function maybeAutoRetryJob(jobId: string, errorMessage: string): boolean 
     error: errorMessage,
   })
 
+  void import('./jobQueue.js').then(({ enqueueJob }) => enqueueJob(jobId))
   return true
 }

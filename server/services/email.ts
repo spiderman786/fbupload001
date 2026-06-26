@@ -208,6 +208,7 @@ async function sendViaSmtp(config: SmtpConfig, to: string, subject: string, body
     const details = errorText(error)
     throw new Error(
       `SMTP send failed at "${stage}" (${config.host}:${config.port}, secure=${config.secure}): ${details}`,
+      { cause: error },
     )
   } finally {
     socket.destroy()

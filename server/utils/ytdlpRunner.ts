@@ -31,7 +31,7 @@ function isSocialDownload(args: string[]): boolean {
 }
 
 /** Instagram/TikTok/FB: use residential proxies first when a pool exists (no cookies needed). */
-function useProxyFirst(args: string[]): boolean {
+function shouldUseProxyFirst(args: string[]): boolean {
   if (process.env.SOCIAL_PROXY_FIRST === 'false') return !isDirectFirst()
   if (isSocialDownload(args) && isProxyPoolEnabled()) return true
   return !isDirectFirst()
@@ -84,7 +84,7 @@ export async function execYtDlpWithProxyFallback(
   args: string[],
   options?: ExecOptions,
 ): Promise<YtDlpRunResult> {
-  const proxyFirst = useProxyFirst(args)
+  const proxyFirst = shouldUseProxyFirst(args)
   let lastErr: unknown
 
   const tryProxy = async (): Promise<YtDlpRunResult | null> => {
