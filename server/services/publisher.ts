@@ -137,3 +137,44 @@ export async function listPagePosts(metaPageId: string, pageAccessToken: string,
   if (data.error) throw new Error(data.error.message)
   return data.data ?? []
 }
+
+export async function publishPhotoPost(
+  metaPageId: string,
+  pageAccessToken: string,
+  imagePath: string,
+  message?: string,
+): Promise<{ postId: string }> {
+  if (!fs.existsSync(imagePath)) throw new Error('Image file not found')
+
+  const stat = fs.statSync(imagePath)
+  if (stat.size < 100) {
+    await new Promise((r) => setTimeout(r, 300))
+    return { postId: `mock_photo_${Date.now()}` }
+  }
+
+  const buffer = fs.readFileSync(imagePath)
+  const form = new FormData()
+  form.append('access_token', pageAccessToken)
+  if (message) form.append('message', message)
+  form.append('source', new Blob([buffer], { type: 'image/png' }), 'news.png')
+
+  const res = await fetch(`${GRAPH}/${metaPageId}/photos`, { method: 'POST', body: form })
+  const data = (await res.json()) as { id?: string; post_id?: string; error?: { message: string } }
+  if (!data.id && !data.post_id) throw new Error(data.error?.message ?? 'Photo publish failed')
+  return { postId: data.post_id ?? data.id! }
+}
+
+export async function postComment(
+  postId: string,
+  pageAccessToken: string,
+  message: string,
+): Promise<{ commentId: string }> {
+  const params = new URLSearchParams({
+    message,
+    access_token: pageAccessToken,
+  })
+  const res = await fetch(`${GRAPH}/${postId}/comments?${params}`, { method: 'POST' })
+  const data = (await res.json()) as { id?: string; error?: { message: string } }
+  if (!data.id) throw new Error(data.error?.message ?? 'Comment failed')
+  return { commentId: data.id }
+}

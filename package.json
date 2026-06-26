@@ -16,7 +16,8 @@
     "worker": "tsx server/worker.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "seed:dev": "tsx scripts/seed-dev-login.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",
@@ -34,6 +35,8 @@
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.18.0",
+    "rss-parser": "^3.13.0",
+    "sharp": "^0.35.2",
     "tsx": "^4.22.4",
     "uuid": "^14.0.0"
   },

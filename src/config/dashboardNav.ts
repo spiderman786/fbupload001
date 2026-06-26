@@ -16,6 +16,7 @@ import {
   Upload,
   Users,
   Video,
+  Newspaper,
 } from 'lucide-react'
 
 export type NavItem = { to: string; label: string; icon?: LucideIcon; ownerOnly?: boolean }
@@ -51,6 +52,7 @@ export const DASHBOARD_NAV: NavSection[] = [
       { to: '/facebook/direct-schedule', label: 'Direct Schedule', icon: CalendarClock },
       { to: '/facebook/inapp-schedule', label: 'InApp Schedule', icon: CalendarClock },
       { to: '/facebook/ai-posts', label: 'AI Text/Image Posts', icon: Bot },
+      { to: '/facebook/news-feed', label: 'RSS News Feed', icon: Newspaper, ownerOnly: true },
       { to: '/facebook/payout', label: 'Payout Transfer', icon: CreditCard },
     ],
   },
@@ -99,6 +101,7 @@ export const FEATURE_META: Record<string, { title: string; description: string }
   '/facebook/direct-post': { title: 'Direct Post', description: 'Publish reels directly to Facebook pages via Graph API.' },
   '/facebook/inapp-schedule': { title: 'InApp Schedule', description: 'Queue reels for in-app publishing at scheduled times.' },
   '/facebook/ai-posts': { title: 'AI Text/Image Posts', description: 'Generate and publish AI-assisted text and image posts.' },
+  '/facebook/news-feed': { title: 'RSS News Feed', description: 'Automate RSS news into branded Facebook image posts with captions.' },
   '/facebook/payout': { title: 'Payout Transfer', description: 'Manage payout transfers for monetized pages.' },
   '/youtube/accounts': { title: 'YouTube Accounts', description: 'Connect and manage YouTube channels for cross-posting.' },
   '/youtube/direct-post': { title: 'YouTube Direct Post', description: 'Publish content directly to YouTube.' },

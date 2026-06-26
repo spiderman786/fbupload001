@@ -29,6 +29,7 @@ import { TokensPage } from './pages/dashboard/TokensPage'
 import { AcceptInvitePage } from './pages/AcceptInvitePage'
 import { TeamPage } from './pages/dashboard/TeamPage'
 import { AiPostsPage } from './pages/dashboard/AiPostsPage'
+import { NewsFeedPage } from './pages/dashboard/NewsFeedPage'
 import { PayoutPage } from './pages/dashboard/PayoutPage'
 import { YoutubeToolsPage, InstagramToolsPage, YoutubeByocPage, InstagramByocPage } from './pages/dashboard/PlatformPages'
 import { OpsLayout, OpsGate } from './pages/ops/OpsLayout'
@@ -82,6 +83,8 @@ function App() {
             <Route path="/agency/facebook/inapp-schedule" element={<InAppSchedulePage />} />
             <Route path="/facebook/ai-posts" element={<AiPostsPage />} />
             <Route path="/agency/facebook/ai-posts" element={<AiPostsPage />} />
+            <Route path="/facebook/news-feed" element={<OwnerRoute><NewsFeedPage /></OwnerRoute>} />
+            <Route path="/agency/facebook/news-feed" element={<OwnerRoute><NewsFeedPage /></OwnerRoute>} />
             <Route path="/facebook/payout" element={<PayoutPage />} />
             <Route path="/agency/facebook/payout" element={<PayoutPage />} />
 

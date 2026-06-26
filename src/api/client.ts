@@ -317,6 +317,84 @@ export const api = {
     payout: (body: { pageId: string; amount: number; recipientId?: string }) =>
       request<{ message: string }>('/automation/payout', { method: 'POST', body: JSON.stringify(body) }),
   },
+  news: {
+    overview: () => request<NewsOverview>('/news/overview'),
+    createTemplate: (body: {
+      name: string
+      layoutPreset?: string
+      colors?: NewsTemplateColors
+      fonts?: NewsTemplateFonts
+      logoPath?: string | null
+      brandType?: NewsBrandType
+      ctaText?: string
+      defaultHashtags?: string[]
+      aiTonePrompt?: string
+    }) => request<{ template: NewsTemplateRow }>('/news/templates', { method: 'POST', body: JSON.stringify(body) }),
+    previewTemplate: async (body: {
+      colors?: NewsTemplateColors
+      fonts?: NewsTemplateFonts
+      ctaText?: string
+      headline?: string
+      logoPath?: string | null
+      brandType?: NewsBrandType
+      pageId?: string
+      pageName?: string
+    }) => {
+      const res = await fetch(`${BASE}/news/templates/preview`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as Partial<ApiError>
+        throw { error: data.error?.trim() || `Preview failed (${res.status})` } as ApiError
+      }
+      const contentType = res.headers.get('content-type') ?? ''
+      if (!contentType.includes('image/')) {
+        throw { error: 'Preview returned an invalid response' } as ApiError
+      }
+      return res.blob()
+    },
+    updateTemplate: (
+      id: string,
+      body: Partial<{
+        name: string
+        layoutPreset: string
+        colors: NewsTemplateColors
+        fonts: NewsTemplateFonts
+        logoPath: string | null
+        brandType: NewsBrandType
+        ctaText: string
+        defaultHashtags: string[]
+        aiTonePrompt: string
+      }>,
+    ) => request<{ template: NewsTemplateRow }>(`/news/templates/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    uploadLogo: (body: { dataUrl: string; fileName?: string }) =>
+      request<{ logoPath: string }>('/news/templates/logo', { method: 'POST', body: JSON.stringify(body) }),
+    duplicateTemplate: (id: string, name?: string) =>
+      request<{ template: NewsTemplateRow }>(`/news/templates/${id}/duplicate`, {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      }),
+    bulkSetup: (body: NewsBulkSetupBody) =>
+      request<{ message: string; updated: number }>('/news/bulk-setup', { method: 'POST', body: JSON.stringify(body) }),
+    createFeed: (body: { name: string; url: string; pageId: string; templateId?: string }) =>
+      request<{ feed: NewsFeedRow }>('/news/feeds', { method: 'POST', body: JSON.stringify(body) }),
+    deleteFeed: (id: string) => request<{ message: string }>(`/news/feeds/${id}`, { method: 'DELETE' }),
+    savePageSettings: (pageId: string, body: Partial<NewsPageSettingsBody>) =>
+      request<{ message: string }>(`/news/page-settings/${pageId}`, { method: 'PUT', body: JSON.stringify(body) }),
+    pollAll: () => request<{ message: string; feeds: number; created: number }>('/news/poll', { method: 'POST' }),
+    pollFeed: (id: string) => request<{ message: string; created: number }>(`/news/feeds/${id}/poll`, { method: 'POST' }),
+    publishItem: (id: string) => request<{ message: string; postId: string }>(`/news/items/${id}/publish`, { method: 'POST' }),
+    skipItem: (id: string) => request<{ message: string }>(`/news/items/${id}/skip`, { method: 'POST' }),
+    testFetch: (url: string) =>
+      request<{ count: number; articles: { title: string; link: string; imageUrl: string | null }[] }>('/news/test-fetch', {
+        method: 'POST',
+        body: JSON.stringify({ url }),
+      }),
+    previewUrl: (itemId: string) => `/api/news/items/${itemId}/preview`,
+  },
   byoc: {
     listApps: (platform: string) =>
       request<{
@@ -949,4 +1027,123 @@ export type OpsLiveEvent = {
   agencyName?: string | null
   pageName?: string | null
   at: string
+}
+
+export type NewsTemplateColors = {
+  accent: string
+  text: string
+  barBg: string
+  cta: string
+  insetBorder: string
+}
+
+export type NewsTemplateFonts = {
+  headlineSize?: number
+  textSize?: number
+  ctaSize?: number
+  pageNameSize?: number
+}
+
+export type NewsBrandType = 'page_name' | 'logo' | 'none'
+
+export type NewsTemplateRow = {
+  id: string
+  name: string
+  layoutPreset: string
+  colors: NewsTemplateColors
+  fonts: NewsTemplateFonts
+  logoPath: string | null
+  brandType: NewsBrandType
+  ctaText: string
+  defaultHashtags: string[]
+  aiTonePrompt: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type NewsFeedRow = {
+  id: string
+  name: string
+  url: string
+  pageId: string | null
+  templateId: string | null
+  isActive: boolean
+  lastPolledAt: string | null
+  lastError: string | null
+  createdAt: string
+}
+
+export type NewsItemRow = {
+  id: string
+  feedId: string | null
+  pageId: string | null
+  templateId: string | null
+  articleUrl: string
+  headline: string | null
+  postTitle: string | null
+  postDescription: string | null
+  hashtags: string[]
+  heroImageUrl: string | null
+  generatedImagePath: string | null
+  fbPostId: string | null
+  status: string
+  errorMessage: string | null
+  postedAt: string | null
+  createdAt: string
+}
+
+export type NewsPageRow = {
+  id: string
+  name: string
+  metaPageId: string
+  newsActive: boolean
+  templateId: string | null
+  autoPublish: boolean
+  postsPerDay: number
+  scheduleTimes: string[]
+  timezone: string
+  commentLinkEnabled: boolean
+  includeLinkInCaption: boolean
+  aiRewriteEnabled: boolean
+  defaultHashtags: string[]
+  scheduleOffsetMinutes: number
+}
+
+export type NewsBulkSetupBody = {
+  pageIds: string[]
+  templateId?: string | null
+  copyFromPageId?: string
+  autoPublish?: boolean
+  postsPerDay?: number
+  scheduleTimes?: string[]
+  timezone?: string
+  scheduleOffsetMinutes?: number
+  commentLinkEnabled?: boolean
+  includeLinkInCaption?: boolean
+  aiRewriteEnabled?: boolean
+  defaultHashtags?: string[]
+  rssFeedUrl?: string
+  rssFeedName?: string
+}
+
+export type NewsPageSettingsBody = {
+  templateId?: string | null
+  autoPublish?: boolean
+  postsPerDay?: number
+  scheduleTimes?: string[]
+  timezone?: string
+  commentLinkEnabled?: boolean
+  includeLinkInCaption?: boolean
+  aiRewriteEnabled?: boolean
+  defaultHashtags?: string[]
+  isActive?: boolean
+  scheduleOffsetMinutes?: number
+}
+
+export type NewsOverview = {
+  templates: NewsTemplateRow[]
+  feeds: NewsFeedRow[]
+  pages: NewsPageRow[]
+  items: NewsItemRow[]
+  stats: { ready: number; posted: number; failed: number }
 }

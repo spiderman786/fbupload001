@@ -21,6 +21,7 @@ import { agenciesRouter } from './routes/agencies.js'
 import { initProxyPool, getProxyPoolStats } from './services/proxyPool.js'
 import { proxyPoolRouter } from './routes/proxyPool.js'
 import { opsRouter } from './routes/ops.js'
+import { newsRouter } from './routes/news.js'
 import { seedPlatformAdmin, logPlatformAdminMode } from './services/platformAdmin.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -70,15 +71,24 @@ app.use('/api/byoc', byocRouter)
 app.use('/api/agencies', agenciesRouter)
 app.use('/api/proxy-pool', proxyPoolRouter)
 app.use('/api/ops', opsRouter)
+app.use('/api/news', newsRouter)
 
-// Serve frontend in production
+// Serve frontend in production (never swallow /api/* — dist/ exists in dev after builds)
 const distPath = path.join(__dirname, '..', 'dist')
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath))
-  app.get('/{*splat}', (_req, res) => {
+  app.get('/{*splat}', (req, res, next) => {
+    if (req.path.startsWith('/api/')) {
+      next()
+      return
+    }
     res.sendFile(path.join(distPath, 'index.html'))
   })
 }
+
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'Not found' })
+})
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[server] Running on http://0.0.0.0:${PORT}`)

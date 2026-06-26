@@ -458,6 +458,106 @@ function migrateOps() {
 
   migrateReelJobsQueuedStatus()
   migrateScrapeAndSchedule()
+  migrateNews()
+}
+
+function migrateNews() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS news_templates (
+      id TEXT PRIMARY KEY,
+      agency_id TEXT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      layout_preset TEXT NOT NULL DEFAULT 'popcorn',
+      colors_json TEXT NOT NULL DEFAULT '{"accent":"#00D4FF","text":"#FFFFFF","barBg":"#000000","cta":"#AAAAAA","insetBorder":"#00D4FF"}',
+      fonts_json TEXT NOT NULL DEFAULT '{"headlineSize":50,"textSize":50,"ctaSize":20,"pageNameSize":15}',
+      logo_path TEXT,
+      cta_text TEXT NOT NULL DEFAULT '',
+      default_hashtags_json TEXT NOT NULL DEFAULT '[]',
+      ai_tone_prompt TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS rss_feeds (
+      id TEXT PRIMARY KEY,
+      agency_id TEXT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      page_id TEXT REFERENCES facebook_pages(id) ON DELETE SET NULL,
+      name TEXT NOT NULL,
+      url TEXT NOT NULL,
+      template_id TEXT REFERENCES news_templates(id) ON DELETE SET NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      last_polled_at TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS page_news_settings (
+      page_id TEXT PRIMARY KEY REFERENCES facebook_pages(id) ON DELETE CASCADE,
+      agency_id TEXT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      template_id TEXT REFERENCES news_templates(id) ON DELETE SET NULL,
+      auto_publish INTEGER NOT NULL DEFAULT 1,
+      posts_per_day INTEGER NOT NULL DEFAULT 4,
+      schedule_times TEXT NOT NULL DEFAULT '["07:30","10:00","13:00","16:00"]',
+      timezone TEXT NOT NULL DEFAULT 'America/New_York',
+      comment_link_enabled INTEGER NOT NULL DEFAULT 0,
+      include_link_in_caption INTEGER NOT NULL DEFAULT 0,
+      ai_rewrite_enabled INTEGER NOT NULL DEFAULT 0,
+      default_hashtags_json TEXT NOT NULL DEFAULT '[]',
+      schedule_offset_minutes INTEGER NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS news_items (
+      id TEXT PRIMARY KEY,
+      agency_id TEXT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      feed_id TEXT REFERENCES rss_feeds(id) ON DELETE SET NULL,
+      page_id TEXT REFERENCES facebook_pages(id) ON DELETE SET NULL,
+      template_id TEXT REFERENCES news_templates(id) ON DELETE SET NULL,
+      article_url TEXT NOT NULL,
+      rss_title TEXT,
+      rss_description TEXT,
+      headline TEXT,
+      accent_words_json TEXT NOT NULL DEFAULT '[]',
+      post_title TEXT,
+      post_description TEXT,
+      hashtags_json TEXT NOT NULL DEFAULT '[]',
+      hero_image_url TEXT,
+      inset_image_url TEXT,
+      generated_image_path TEXT,
+      fb_post_id TEXT,
+      fb_comment_id TEXT,
+      status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new','ready','posted','failed','skipped')),
+      error_message TEXT,
+      scheduled_for TEXT,
+      posted_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS posted_articles (
+      id TEXT PRIMARY KEY,
+      agency_id TEXT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      page_id TEXT NOT NULL REFERENCES facebook_pages(id) ON DELETE CASCADE,
+      article_url TEXT NOT NULL,
+      news_item_id TEXT REFERENCES news_items(id) ON DELETE SET NULL,
+      fb_post_id TEXT,
+      posted_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(page_id, article_url)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_news_templates_agency ON news_templates(agency_id);
+    CREATE INDEX IF NOT EXISTS idx_rss_feeds_agency ON rss_feeds(agency_id);
+    CREATE INDEX IF NOT EXISTS idx_rss_feeds_page ON rss_feeds(page_id);
+    CREATE INDEX IF NOT EXISTS idx_news_items_agency ON news_items(agency_id);
+    CREATE INDEX IF NOT EXISTS idx_news_items_status ON news_items(status);
+    CREATE INDEX IF NOT EXISTS idx_news_items_page ON news_items(page_id, status);
+    CREATE INDEX IF NOT EXISTS idx_posted_articles_page ON posted_articles(page_id);
+  `)
+
+  const templateCols = db.prepare('PRAGMA table_info(news_templates)').all() as { name: string }[]
+  if (!templateCols.some((c) => c.name === 'brand_type')) {
+    db.exec(`ALTER TABLE news_templates ADD COLUMN brand_type TEXT NOT NULL DEFAULT 'page_name'`)
+  }
 }
 
 function migrateScrapeAndSchedule() {
