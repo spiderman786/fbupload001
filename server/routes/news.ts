@@ -20,6 +20,8 @@ function ensureNewsLogosDir(agencyId: string) {
   return dir
 }
 
+export const newsRouter = Router()
+
 newsRouter.use(authMiddleware, requireVerified, agencyMiddleware, requireRole('owner'))
 
 function mapTemplate(row: Record<string, unknown>) {
