@@ -992,7 +992,7 @@ export function NewsFeedPage() {
           aria-modal="true"
           aria-label="Generated news image preview"
         >
-          <div className="relative w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+          <div className="relative w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
               onClick={() => setViewItemId(null)}

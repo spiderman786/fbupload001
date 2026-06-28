@@ -20,18 +20,40 @@ function escapeXml(text: string): string {
     .replace(/"/g, '&quot;')
 }
 
+const HEADLINE_PAD = 100
+const IMPACT_CHAR_WIDTH = 0.62
+
+function estimateTextWidth(text: string, fontSize: number): number {
+  return text.length * fontSize * IMPACT_CHAR_WIDTH
+}
+
+function lineFitsCanvas(line: string, fontSize: number): boolean {
+  return estimateTextWidth(line, fontSize) <= CANVAS_W - HEADLINE_PAD
+}
+
+function splitLongWord(word: string, maxChars: number): string[] {
+  if (word.length <= maxChars) return [word]
+  const parts: string[] = []
+  for (let i = 0; i < word.length; i += maxChars) {
+    parts.push(word.slice(i, i + maxChars))
+  }
+  return parts
+}
+
 function wrapHeadlineWords(headline: string, maxCharsPerLine: number): string[] {
   const words = headline.split(/\s+/).filter(Boolean)
   const lines: string[] = []
   let current = ''
 
   for (const word of words) {
-    const next = current ? `${current} ${word}` : word
-    if (next.length > maxCharsPerLine && current) {
-      lines.push(current)
-      current = word
-    } else {
-      current = next
+    for (const chunk of splitLongWord(word, maxCharsPerLine)) {
+      const next = current ? `${current} ${chunk}` : chunk
+      if (next.length > maxCharsPerLine && current) {
+        lines.push(current)
+        current = chunk
+      } else {
+        current = next
+      }
     }
   }
   if (current) lines.push(current)
@@ -39,22 +61,40 @@ function wrapHeadlineWords(headline: string, maxCharsPerLine: number): string[] 
 }
 
 function maxCharsForFontSize(fontSize: number): number {
-  return Math.max(14, Math.floor((CANVAS_W - 100) / (fontSize * 0.52)))
+  return Math.max(10, Math.floor((CANVAS_W - HEADLINE_PAD) / (fontSize * IMPACT_CHAR_WIDTH)))
 }
 
 function fitHeadlineLines(headline: string, baseFontSize: number): { lines: string[]; fontSize: number } {
   let fontSize = baseFontSize
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < 8; attempt++) {
     const lines = wrapHeadlineWords(headline, maxCharsForFontSize(fontSize))
-    if (lines.length <= 4) return { lines, fontSize }
-    fontSize = Math.max(32, fontSize - 6)
+    if (lines.length <= 4 && lines.every((line) => lineFitsCanvas(line, fontSize))) {
+      return { lines, fontSize }
+    }
+    fontSize = Math.max(28, fontSize - 4)
   }
-  const lines = wrapHeadlineWords(headline, maxCharsForFontSize(32)).slice(0, 4)
-  return { lines, fontSize: 32 }
+  const lines = wrapHeadlineWords(headline, maxCharsForFontSize(28)).slice(0, 4)
+  return { lines, fontSize: 28 }
 }
 
 export function normalizeHeadlineText(headline: string): string {
   return headline.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+/** Repair AI headlines that lost spaces between words. */
+export function ensureSpacedHeadline(headline: string, fallbackTitle?: string): string {
+  const text = normalizeHeadlineText(headline).toUpperCase()
+  if (/\s/.test(text)) return text
+
+  if (fallbackTitle) {
+    const fromRss = normalizeHeadlineText(fallbackTitle).toUpperCase()
+    const rssWords = fromRss.split(/\s+/).filter(Boolean)
+    if (rssWords.length > 1) {
+      return rssWords.slice(0, 8).join(' ').slice(0, 80)
+    }
+  }
+
+  return text.match(/.{1,14}/g)?.join(' ') ?? text
 }
 
 /** Check whether a headline fits the 1080×1350 template text area (max 4 lines). */
@@ -72,7 +112,7 @@ export function precheckHeadlineForTemplate(
   const normalizedHeadline = normalizeHeadlineText(headline).toUpperCase()
   const baseSize = fonts.headlineSize ?? fonts.textSize ?? 50
   const { lines, fontSize } = fitHeadlineLines(normalizedHeadline, baseSize)
-  const fits = lines.length <= 4 && fontSize >= 32 && normalizedHeadline.length <= 85
+  const fits = lines.length <= 4 && fontSize >= 28 && lines.every((line) => lineFitsCanvas(line, fontSize)) && normalizedHeadline.length <= 85
   return { fits, lines, fontSize, lineCount: lines.length, normalizedHeadline }
 }
 
@@ -127,25 +167,35 @@ function buildHeadlineLineSvg(
 ): string {
   const accentSet = new Set(accentWords.map((w) => w.toUpperCase()))
   const words = line.split(/\s+/).filter(Boolean)
-  const hasAccent = words.some((word) => {
-    const clean = word.replace(/[^A-Za-z0-9']/g, '').toUpperCase()
-    return accentSet.has(clean) || accentSet.has(word.toUpperCase())
-  })
+  if (words.length === 0) return ''
 
-  if (!hasAccent) {
-    return `<text x="${CANVAS_W / 2}" y="${y}" text-anchor="middle" font-family="${FONT_STACK}" font-size="${fontSize}" font-weight="900" fill="${colors.text}">${escapeXml(line)}</text>`
-  }
-
-  let inner = ''
-  words.forEach((word, idx) => {
+  const chunks = words.map((word, idx) => {
     const clean = word.replace(/[^A-Za-z0-9']/g, '').toUpperCase()
     const isAccent = accentSet.has(clean) || accentSet.has(word.toUpperCase())
-    const fill = isAccent ? colors.accent : colors.text
-    const text = (idx > 0 ? ' ' : '') + word
-    inner += `<tspan fill="${fill}">${escapeXml(text)}</tspan>`
+    return {
+      text: word + (idx < words.length - 1 ? ' ' : ''),
+      fill: isAccent ? colors.accent : colors.text,
+    }
   })
 
-  return `<text x="${CANVAS_W / 2}" y="${y}" text-anchor="middle" font-family="${FONT_STACK}" font-size="${fontSize}" font-weight="900">${inner}</text>`
+  const totalWidth = chunks.reduce((sum, chunk) => sum + estimateTextWidth(chunk.text, fontSize), 0)
+  const maxWidth = CANVAS_W - HEADLINE_PAD
+
+  if (totalWidth > maxWidth) {
+    return `<text x="${CANVAS_W / 2}" y="${y}" text-anchor="middle" font-family="${FONT_STACK}" font-size="${fontSize}" font-weight="900" fill="${colors.text}" textLength="${maxWidth}" lengthAdjust="spacingAndGlyphs">${escapeXml(line)}</text>`
+  }
+
+  const startX = (CANVAS_W - totalWidth) / 2
+  let inner = ''
+  chunks.forEach((chunk, idx) => {
+    if (idx === 0) {
+      inner += `<tspan x="${startX.toFixed(1)}" fill="${chunk.fill}">${escapeXml(chunk.text)}</tspan>`
+    } else {
+      inner += `<tspan dx="${estimateTextWidth(chunks[idx - 1]!.text, fontSize).toFixed(1)}" fill="${chunk.fill}">${escapeXml(chunk.text)}</tspan>`
+    }
+  })
+
+  return `<text y="${y}" font-family="${FONT_STACK}" font-size="${fontSize}" font-weight="900">${inner}</text>`
 }
 
 function buildHeadlineSvg(
@@ -155,7 +205,8 @@ function buildHeadlineSvg(
   fonts: NewsFonts,
   barTop: number,
 ): string {
-  const { lines, fontSize } = fitHeadlineLines(headline, fonts.headlineSize)
+  const cleanHeadline = normalizeHeadlineText(headline).toUpperCase()
+  const { lines, fontSize } = fitHeadlineLines(cleanHeadline, fonts.headlineSize)
   const lineHeight = Math.round(fontSize * 1.18)
   const textBlockHeight = lines.length * lineHeight
   const textAreaHeight = CANVAS_H - barTop
@@ -345,7 +396,7 @@ export async function composeNewsImage(options: {
   const png = await renderNewsCanvas({
     heroBuf,
     insetBuf,
-    headline: options.headline,
+    headline: ensureSpacedHeadline(options.headline),
     accentWords: options.accentWords,
     colorsJson: options.colorsJson,
     fontsJson: options.fontsJson,

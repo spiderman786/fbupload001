@@ -1,5 +1,5 @@
 import { pickAccentWords } from './contentFormatter.js'
-import { fitHeadlineToTemplate, normalizeHeadlineText, precheckHeadlineForTemplate } from './imageCompositor.js'
+import { fitHeadlineToTemplate, normalizeHeadlineText, precheckHeadlineForTemplate, ensureSpacedHeadline } from './imageCompositor.js'
 import { resolveAiCredentials, type AiProvider } from './aiSettings.js'
 
 export type AiRewriteResult = {
@@ -210,8 +210,8 @@ export async function adaptHeadlineForImageGraphic(input: {
 Tone: ${tone}
 
 Rules for headline:
-- ALL CAPS, single line (spaces only — NO line breaks)
-- Maximum 60 characters total
+- ALL CAPS, single line with a space between every word (required)
+- Maximum 55 characters total
 - Short, scannable, no filler (remove "who was", "what to know", etc. when possible)
 - Must fit on 3–4 lines on a 1080px-wide phone graphic
 - Keep names, show titles, and key facts
@@ -230,8 +230,26 @@ RSS description: ${(input.rssDescription ?? '').slice(0, 400)}`
   let parsed = await callAiJson(buildPrompt(), 'You write ultra-short Facebook news graphic headlines. JSON only.', input.agencyId)
   if (!parsed) return null
 
-  let headline = normalizeHeadlineText(String(parsed.headline ?? input.rssTitle)).toUpperCase().slice(0, 80)
+  let headline = ensureSpacedHeadline(
+    normalizeHeadlineText(String(parsed.headline ?? input.rssTitle)).toUpperCase().slice(0, 80),
+    input.rssTitle,
+  )
   let check = precheckHeadlineForTemplate(headline, input.fontsJson)
+
+  if (!/\s/.test(headline)) {
+    parsed = await callAiJson(
+      buildPrompt('Your last headline had no spaces between words. Use normal spaced words.'),
+      'You write ultra-short Facebook news graphic headlines. JSON only.',
+      input.agencyId,
+    )
+    if (parsed) {
+      headline = ensureSpacedHeadline(
+        normalizeHeadlineText(String(parsed.headline ?? headline)).toUpperCase().slice(0, 80),
+        input.rssTitle,
+      )
+      check = precheckHeadlineForTemplate(headline, input.fontsJson)
+    }
+  }
 
   if (!check.fits) {
     parsed = await callAiJson(
@@ -240,7 +258,10 @@ RSS description: ${(input.rssDescription ?? '').slice(0, 400)}`
       input.agencyId,
     )
     if (parsed) {
-      headline = normalizeHeadlineText(String(parsed.headline ?? headline)).toUpperCase().slice(0, 80)
+      headline = ensureSpacedHeadline(
+        normalizeHeadlineText(String(parsed.headline ?? headline)).toUpperCase().slice(0, 80),
+        input.rssTitle,
+      )
       check = precheckHeadlineForTemplate(headline, input.fontsJson)
     }
   }
