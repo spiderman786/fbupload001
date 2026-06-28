@@ -53,25 +53,28 @@ export function getPrefillTarget(pageId: string): number {
 /** Atomically move oldest queued reel to publishing and return its job id. */
 export function claimQueuedJobForPublish(pageId: string, jobType: QueueJobType): string | null {
   return db.transaction(() => {
-    const row = db
-      .prepare(`
-        SELECT id FROM reel_jobs
-        WHERE target_page_id = ? AND status = 'queued'
-        ORDER BY created_at ASC
-        LIMIT 1
-      `)
-      .get(pageId) as { id: string } | undefined
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const row = db
+        .prepare(`
+          SELECT id FROM reel_jobs
+          WHERE target_page_id = ? AND status = 'queued'
+          ORDER BY created_at ASC
+          LIMIT 1
+        `)
+        .get(pageId) as { id: string } | undefined
 
-    if (!row) return null
+      if (!row) return null
 
-    const result = db
-      .prepare(`
-        UPDATE reel_jobs SET status = 'publishing', job_type = ?
-        WHERE id = ? AND status = 'queued'
-      `)
-      .run(jobType, row.id)
+      const result = db
+        .prepare(`
+          UPDATE reel_jobs SET status = 'publishing', job_type = ?
+          WHERE id = ? AND status = 'queued'
+        `)
+        .run(jobType, row.id)
 
-    return result.changes > 0 ? row.id : null
+      if (result.changes > 0) return row.id
+    }
+    return null
   })()
 }
 

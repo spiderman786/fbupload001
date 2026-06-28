@@ -1,9 +1,10 @@
 import { db } from '../db.js'
 import { getCurrentTimeHHMM, getTodayDateInTimezone } from '../utils/timezone.js'
 import { canPagePostToday } from './pageQuota.js'
-import { claimQueuedJobForPublish } from './reelQueue.js'
+import { claimQueuedJobForPublish, countQueuedForPage } from './reelQueue.js'
 import { createAutomationJob } from './automationPipeline.js'
 import { enqueueJob } from './jobQueue.js'
+import { dedupeQueuedJobsForPageSync } from './queueActions.js'
 
 function parseScheduleTimes(raw: string): string[] {
   try {
@@ -14,9 +15,20 @@ function parseScheduleTimes(raw: string): string[] {
   }
 }
 
-function enqueueScheduledPublish(agencyId: string, userId: string, pageId: string) {
-  if (!canPagePostToday(pageId)) return
+/** Atomically claim this page's schedule slot so multi-instance deploys cannot double-fire. */
+function tryClaimScheduleFire(pageId: string, fireKey: string): boolean {
+  const result = db
+    .prepare(`
+      UPDATE page_automation_settings
+      SET last_schedule_fire = ?
+      WHERE page_id = ?
+        AND (last_schedule_fire IS NULL OR last_schedule_fire != ?)
+    `)
+    .run(fireKey, pageId, fireKey)
+  return result.changes > 0
+}
 
+function pageHasInflightPublish(pageId: string): boolean {
   const inflight = db
     .prepare(`
       SELECT id FROM reel_jobs
@@ -24,13 +36,23 @@ function enqueueScheduledPublish(agencyId: string, userId: string, pageId: strin
       LIMIT 1
     `)
     .get(pageId)
-  if (inflight) return
+  return Boolean(inflight)
+}
+
+function enqueueScheduledPublish(agencyId: string, userId: string, pageId: string) {
+  if (!canPagePostToday(pageId)) return
+  if (pageHasInflightPublish(pageId)) return
+
+  dedupeQueuedJobsForPageSync(pageId, agencyId)
 
   const queuedJobId = claimQueuedJobForPublish(pageId, 'scheduled')
   if (queuedJobId) {
     enqueueJob(queuedJobId)
     return
   }
+
+  // Queue may still have rows if another worker claimed the head item — never spawn a parallel pipeline job.
+  if (countQueuedForPage(pageId) > 0) return
 
   const jobId = createAutomationJob(agencyId, userId, pageId, 'scheduled', undefined, new Date().toISOString())
   enqueueJob(jobId)
@@ -66,9 +88,9 @@ export function processPageAutomationSchedules() {
 
     const fireKey = `${getTodayDateInTimezone(tz)}:${currentTime}`
     if (page.last_schedule_fire === fireKey) continue
+    if (!tryClaimScheduleFire(page.id, fireKey)) continue
 
     enqueueScheduledPublish(page.agency_id, page.user_id, page.id)
-    db.prepare('UPDATE page_automation_settings SET last_schedule_fire = ? WHERE page_id = ?').run(fireKey, page.id)
   }
 }
 

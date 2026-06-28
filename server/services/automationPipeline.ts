@@ -6,7 +6,7 @@ import { downloadReelFromUrl, stripVideoMetadata, cleanupJobFiles, fetchReelMeta
 import { getPageAccessToken, publishReelVideo } from './publisher.js'
 import { isFacebookConfiguredForAgency } from './byoc.js'
 import { discoverNextReel } from './reelDiscovery.js'
-import { recordPostedReel } from './dedup.js'
+import { recordPostedReel, isReelAlreadyPosted } from './dedup.js'
 import { canPagePostToday, refreshPagePostedToday } from './pageQuota.js'
 import { markPageHealthCompleted } from './pageHealth.js'
 import { appendJobLog } from './jobLog.js'
@@ -150,6 +150,47 @@ async function downloadAndClean(
   return { discovered, download, cleanedPath }
 }
 
+type PublishClaim = 'proceed' | 'already_published' | 'contended'
+
+/** Ensure only one worker uploads to Facebook for a given job (multi-instance safe). */
+function tryClaimPublishJob(jobId: string): PublishClaim {
+  return db.transaction(() => {
+    const row = db
+      .prepare('SELECT status, meta_post_id FROM reel_jobs WHERE id = ?')
+      .get(jobId) as { status: string; meta_post_id: string | null } | undefined
+    if (!row) throw new Error('Job not found')
+    if (row.meta_post_id) return 'already_published'
+
+    const claimed = db
+      .prepare(`
+        UPDATE reel_jobs SET status = 'publishing'
+        WHERE id = ?
+          AND meta_post_id IS NULL
+          AND status IN ('queued', 'downloading', 'publishing', 'pending')
+      `)
+      .run(jobId)
+
+    if (claimed.changes > 0) return 'proceed'
+
+    const again = db
+      .prepare('SELECT meta_post_id FROM reel_jobs WHERE id = ?')
+      .get(jobId) as { meta_post_id: string | null } | undefined
+    if (again?.meta_post_id) return 'already_published'
+    return 'contended'
+  })()
+}
+
+async function waitForPeerPublish(jobId: string, attempts = 8): Promise<PublishClaim> {
+  for (let i = 0; i < attempts; i++) {
+    await new Promise((r) => setTimeout(r, 500))
+    const row = db
+      .prepare('SELECT meta_post_id, status FROM reel_jobs WHERE id = ?')
+      .get(jobId) as { meta_post_id: string | null; status: string } | undefined
+    if (row?.meta_post_id || row?.status === 'published') return 'already_published'
+  }
+  return 'contended'
+}
+
 async function publishCleanedFile(
   jobId: string,
   ctx: ReturnType<typeof validateJobContext>,
@@ -159,6 +200,26 @@ async function publishCleanedFile(
 ) {
   const { userId, agencyId, pageId, page, sourceId, source } = ctx
   const tokenCost = source.tokens_per_reel as number
+
+  if (discovered.reelId !== 'unknown' && isReelAlreadyPosted(pageId, discovered.reelId)) {
+    appendJobLog(jobId, 'publish', `Reel ${discovered.reelId} already on page — skipping duplicate upload`, 'warn')
+    db.prepare(`
+      UPDATE reel_jobs
+      SET status = 'failed', error_message = 'Duplicate reel — already published to this page', completed_at = datetime('now')
+      WHERE id = ? AND status != 'published'
+    `).run(jobId)
+    return
+  }
+
+  let claim = tryClaimPublishJob(jobId)
+  if (claim === 'contended') claim = await waitForPeerPublish(jobId)
+  if (claim === 'already_published') {
+    appendJobLog(jobId, 'publish', 'Already published — skipping duplicate upload', 'warn')
+    return
+  }
+  if (claim === 'contended') {
+    throw new Error('Publish already in progress for this job')
+  }
 
   const debited = db.transaction(() => {
     const result = db
@@ -204,11 +265,16 @@ async function publishCleanedFile(
     throw err
   }
 
-  db.transaction(() => {
-    db.prepare(`
-      UPDATE reel_jobs SET status = 'published', meta_post_id = ?, tokens_charged = ?, completed_at = datetime('now')
-      WHERE id = ?
-    `).run(postId, tokenCost, jobId)
+  const recorded = db.transaction(() => {
+    const reserved = db
+      .prepare(`
+        UPDATE reel_jobs
+        SET status = 'published', meta_post_id = ?, tokens_charged = ?, completed_at = datetime('now')
+        WHERE id = ? AND meta_post_id IS NULL
+      `)
+      .run(postId, tokenCost, jobId)
+    if (reserved.changes === 0) return false
+
     db.prepare(`
       INSERT INTO token_transactions (id, user_id, agency_id, amount, type, reel_job_id, note)
       VALUES (?, ?, ?, ?, 'publish_debit', ?, ?)
@@ -227,7 +293,14 @@ async function publishCleanedFile(
       metaPostId: postId,
       jobId,
     })
+    return true
   })()
+
+  if (!recorded) {
+    db.prepare('UPDATE agencies SET token_balance = token_balance + ? WHERE id = ?').run(tokenCost, agencyId)
+    appendJobLog(jobId, 'publish', 'Peer worker recorded publish first — refunded duplicate token debit', 'warn')
+    return
+  }
 
   refreshPagePostedToday(pageId)
   markPageHealthCompleted(pageId)
@@ -327,6 +400,11 @@ export async function runAutomationJob(jobId: string): Promise<void> {
   const job = loadJob(jobId)
   const jobType = job.job_type as JobType
   const status = job.status as string
+
+  if (status === 'published' || job.meta_post_id) {
+    appendJobLog(jobId, 'start', 'Job already published — skipping', 'warn')
+    return
+  }
 
   if (job.cleaned_file_path && status === 'downloading' && jobType !== 'prefill') {
     await runPublishFromQueueJob(jobId)

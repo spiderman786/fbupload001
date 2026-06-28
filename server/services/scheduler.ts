@@ -3,7 +3,8 @@ import { db } from '../db.js'
 import { createAutomationJob } from './automationPipeline.js'
 import { canPagePostToday } from './pageQuota.js'
 import { enqueueJob } from './jobQueue.js'
-import { claimQueuedJobForPublish } from './reelQueue.js'
+import { claimQueuedJobForPublish, countQueuedForPage } from './reelQueue.js'
+import { dedupeQueuedJobsForPageSync } from './queueActions.js'
 import { syncAllUsersFollowers } from './followerSync.js'
 import { resetAllDailyQuotas } from './pageQuota.js'
 import { runMaintenance } from './cleanup.js'
@@ -35,11 +36,15 @@ function enqueuePageJob(
 
   if (inflight) return
 
+  dedupeQueuedJobsForPageSync(pageId, agencyId)
+
   const queuedJobId = claimQueuedJobForPublish(pageId, jobType)
   if (queuedJobId) {
     enqueueJob(queuedJobId)
     return
   }
+
+  if (countQueuedForPage(pageId) > 0) return
 
   const jobId = createAutomationJob(agencyId, userId, pageId, jobType, undefined, scheduledFor)
   enqueueJob(jobId)

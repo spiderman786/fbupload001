@@ -62,8 +62,7 @@ export async function removeQueuedJob(
   db.prepare('DELETE FROM reel_jobs WHERE id = ?').run(jobId)
 }
 
-/** Remove duplicate queued reels — keeps the oldest copy per source reel / URL. */
-export async function dedupeQueuedJobsForPage(pageId: string, agencyId: string) {
+function findDuplicateQueuedJobIds(pageId: string, agencyId: string): string[] {
   const jobs = db
     .prepare(`
       SELECT r.id, r.source_reel_id, r.source_url, s.platform as source_platform
@@ -114,11 +113,46 @@ export async function dedupeQueuedJobsForPage(pageId: string, agencyId: string) 
     }
   }
 
+  return toRemove
+}
+
+function purgeDuplicateQueuedJobs(pageId: string, agencyId: string, toRemove: string[]) {
+  for (const id of toRemove) {
+    const job = db
+      .prepare(`
+        SELECT * FROM reel_jobs
+        WHERE id = ? AND target_page_id = ? AND agency_id = ? AND status = 'queued'
+      `)
+      .get(id, pageId, agencyId) as Record<string, unknown> | undefined
+    if (!job) continue
+    void deleteQueueR2Media(job)
+    cleanupJobFiles(agencyId, id)
+    db.prepare('DELETE FROM reel_jobs WHERE id = ?').run(id)
+  }
+}
+
+/** Remove duplicate queued reels — keeps the oldest copy per source reel / URL. */
+export async function dedupeQueuedJobsForPage(pageId: string, agencyId: string) {
+  const jobs = db
+    .prepare(`
+      SELECT id FROM reel_jobs
+      WHERE target_page_id = ? AND agency_id = ? AND status = 'queued'
+    `)
+    .all(pageId, agencyId) as { id: string }[]
+
+  const toRemove = findDuplicateQueuedJobIds(pageId, agencyId)
   for (const id of toRemove) {
     await removeQueuedJob(id, pageId, agencyId, { recordSkip: false })
   }
 
   return { removed: toRemove.length, kept: jobs.length - toRemove.length }
+}
+
+/** Scheduler-safe dedupe (no await) — call before claiming a queued publish job. */
+export function dedupeQueuedJobsForPageSync(pageId: string, agencyId: string): number {
+  const toRemove = findDuplicateQueuedJobIds(pageId, agencyId)
+  purgeDuplicateQueuedJobs(pageId, agencyId, toRemove)
+  return toRemove.length
 }
 
 /** Trim queued reels down to the page daily limit (drops newest extras). */

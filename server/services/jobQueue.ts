@@ -17,7 +17,7 @@ function claimNextJobId(): string | null {
     const publishing = db
       .prepare(`
         SELECT id FROM reel_jobs
-        WHERE status = 'publishing'
+        WHERE status = 'publishing' AND (meta_post_id IS NULL OR meta_post_id = '')
         ORDER BY created_at ASC
         LIMIT 1
       `)
@@ -25,7 +25,10 @@ function claimNextJobId(): string | null {
 
     if (publishing) {
       const claimed = db
-        .prepare(`UPDATE reel_jobs SET status = 'downloading' WHERE id = ? AND status = 'publishing'`)
+        .prepare(`
+          UPDATE reel_jobs SET status = 'downloading'
+          WHERE id = ? AND status = 'publishing' AND (meta_post_id IS NULL OR meta_post_id = '')
+        `)
         .run(publishing.id)
       if (claimed.changes > 0) return publishing.id
     }
@@ -34,6 +37,7 @@ function claimNextJobId(): string | null {
       .prepare(`
         SELECT id FROM reel_jobs
         WHERE status = 'pending'
+          AND (meta_post_id IS NULL OR meta_post_id = '')
           AND (scheduled_for IS NULL OR scheduled_for <= datetime('now'))
         ORDER BY
           CASE job_type WHEN 'direct' THEN 0 WHEN 'prefill' THEN 1 ELSE 2 END,
@@ -45,7 +49,10 @@ function claimNextJobId(): string | null {
     if (!pending) return null
 
     const result = db
-      .prepare(`UPDATE reel_jobs SET status = 'downloading' WHERE id = ? AND status = 'pending'`)
+      .prepare(`
+        UPDATE reel_jobs SET status = 'downloading'
+        WHERE id = ? AND status = 'pending' AND (meta_post_id IS NULL OR meta_post_id = '')
+      `)
       .run(pending.id)
 
     return result.changes > 0 ? pending.id : null
