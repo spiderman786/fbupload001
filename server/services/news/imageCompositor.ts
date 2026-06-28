@@ -191,16 +191,9 @@ function buildHeadlineLineSvg(
   const words = line.split(/\s+/).filter(Boolean)
   if (words.length === 0) return ''
 
-  const chunks = words.map((word, idx) => {
-    const clean = word.replace(/[^A-Za-z0-9']/g, '').toUpperCase()
-    const isAccent = accentSet.has(clean) || accentSet.has(word.toUpperCase())
-    return {
-      text: word + (idx < words.length - 1 ? ' ' : ''),
-      fill: isAccent ? colors.accent : colors.text,
-    }
-  })
-
-  const totalWidth = chunks.reduce((sum, chunk) => sum + estimateTextWidth(chunk.text, fontSize), 0)
+  const spaceWidth = estimateTextWidth(' ', fontSize)
+  const wordWidths = words.map((word) => estimateTextWidth(word, fontSize))
+  const totalWidth = wordWidths.reduce((sum, width, idx) => sum + width + (idx > 0 ? spaceWidth : 0), 0)
   const maxWidth = CANVAS_W - HEADLINE_PAD
 
   if (totalWidth > maxWidth) {
@@ -209,14 +202,14 @@ function buildHeadlineLineSvg(
     return `<text x="${CANVAS_W / 2}" y="${y}" text-anchor="middle" font-family="${FONT_STACK}" font-size="${adjustedSize}" font-weight="900" fill="${colors.text}">${escapeXml(line)}</text>`
   }
 
-  const startX = (CANVAS_W - totalWidth) / 2
+  let x = (CANVAS_W - totalWidth) / 2
   let inner = ''
-  chunks.forEach((chunk, idx) => {
-    if (idx === 0) {
-      inner += `<tspan x="${startX.toFixed(1)}" fill="${chunk.fill}">${escapeXml(chunk.text)}</tspan>`
-    } else {
-      inner += `<tspan dx="${estimateTextWidth(chunks[idx - 1]!.text, fontSize).toFixed(1)}" fill="${chunk.fill}">${escapeXml(chunk.text)}</tspan>`
-    }
+  words.forEach((word, idx) => {
+    if (idx > 0) x += spaceWidth
+    const clean = word.replace(/[^A-Za-z0-9']/g, '').toUpperCase()
+    const isAccent = accentSet.has(clean) || accentSet.has(word.toUpperCase())
+    inner += `<tspan x="${x.toFixed(1)}" fill="${isAccent ? colors.accent : colors.text}">${escapeXml(word)}</tspan>`
+    x += wordWidths[idx]!
   })
 
   return `<text y="${y}" font-family="${FONT_STACK}" font-size="${fontSize}" font-weight="900">${inner}</text>`
