@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url'
 import { v4 as uuid } from 'uuid'
 import { db } from '../../db.js'
 import { publishPhotoPost, postComment } from '../publisher.js'
-import { isOAuthTokenError, refreshPageAccessToken, resolvePageAccessToken } from '../pageTokens.js'
+import { isOAuthTokenError, refreshPageAccessToken, resolvePageAccessToken, assertPublishableFacebookPage } from '../pageTokens.js'
 import { maybeRewriteNewsContent } from './aiRewriter.js'
 import { runCompositorJob } from './compositorQueue.js'
 import { formatNewsContent, mergeHashtags } from './contentFormatter.js'
@@ -123,6 +123,8 @@ async function publishPhotoWithTokenRetry(
   imagePath: string,
   caption: string,
 ): Promise<{ postId: string; token: string; metaPageId: string }> {
+  assertPublishableFacebookPage(pageId, agencyId)
+
   const page = await resolvePageAccessToken(pageId, { agencyId })
   if (!page) {
     throw new Error('Page token not available — reconnect Facebook under Facebook → Accounts')

@@ -11,6 +11,8 @@ import { getCompositorQueueStats } from '../services/news/compositorQueue.js'
 import { pollFeedsForAgency, pollFeed, publishNewsItem } from '../services/news/newsPipeline.js'
 import { fetchRssFeed } from '../services/news/rssFetcher.js'
 import { DEFAULT_COLORS, parseBrandType, parseJsonArray, resolveFonts, type NewsFonts } from '../services/news/types.js'
+import { isMockMetaPageId } from '../services/facebook.js'
+import { assertPublishableFacebookPage } from '../services/pageTokens.js'
 
 import { routeParam } from '../utils/routeParam.js'
 const newsLogosDir = path.join(process.cwd(), 'data', 'news-logos')
@@ -42,12 +44,16 @@ function mapTemplate(row: Record<string, unknown>) {
   }
 }
 
-function mapFeed(row: Record<string, unknown>) {
+function mapFeed(row: Record<string, unknown>, pageLookup?: Map<string, { name: string; isMockPage: boolean }>) {
+  const pageId = row.page_id as string | null
+  const pageInfo = pageId && pageLookup?.get(pageId)
   return {
     id: row.id,
     name: row.name,
     url: row.url,
-    pageId: row.page_id ?? null,
+    pageId,
+    pageName: pageInfo?.name ?? null,
+    isMockPage: pageInfo?.isMockPage ?? false,
     templateId: row.template_id ?? null,
     isActive: !!row.is_active,
     lastPolledAt: row.last_polled_at ?? null,
@@ -84,13 +90,6 @@ newsRouter.get('/overview', (req: AgencyRequest, res) => {
     db.prepare('SELECT * FROM news_templates WHERE agency_id = ? ORDER BY name').all(agencyId) as Record<string, unknown>[]
   ).map(mapTemplate)
 
-  const feeds = (
-    db.prepare('SELECT * FROM rss_feeds WHERE agency_id = ? ORDER BY created_at DESC').all(agencyId) as Record<
-      string,
-      unknown
-    >[]
-  ).map(mapFeed)
-
   const pages = db
     .prepare(`
       SELECT fp.id, fp.name, fp.meta_page_id, pns.template_id, pns.auto_publish, pns.posts_per_day,
@@ -103,6 +102,20 @@ newsRouter.get('/overview', (req: AgencyRequest, res) => {
       ORDER BY fp.name
     `)
     .all(agencyId) as Record<string, unknown>[]
+
+  const pageLookup = new Map(
+    pages.map((p) => [
+      String(p.id),
+      { name: String(p.name), isMockPage: isMockMetaPageId(String(p.meta_page_id)) },
+    ]),
+  )
+
+  const feeds = (
+    db.prepare('SELECT * FROM rss_feeds WHERE agency_id = ? ORDER BY created_at DESC').all(agencyId) as Record<
+      string,
+      unknown
+    >[]
+  ).map((row) => mapFeed(row, pageLookup))
 
   const items = (
     db
@@ -127,6 +140,7 @@ newsRouter.get('/overview', (req: AgencyRequest, res) => {
       id: p.id,
       name: p.name,
       metaPageId: p.meta_page_id,
+      isMockPage: isMockMetaPageId(String(p.meta_page_id)),
       newsActive: !!p.news_active,
       templateId: p.template_id ?? null,
       autoPublish: p.auto_publish == null ? true : !!p.auto_publish,
@@ -436,6 +450,13 @@ newsRouter.post('/feeds', (req: AgencyRequest, res) => {
     return
   }
 
+  try {
+    assertPublishableFacebookPage(String(pageId), req.agency!.id)
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Invalid page' })
+    return
+  }
+
   const id = uuid()
   db.prepare(`
     INSERT INTO rss_feeds (id, agency_id, page_id, name, url, template_id)
@@ -449,7 +470,70 @@ newsRouter.post('/feeds', (req: AgencyRequest, res) => {
   `).run(pageId, req.agency!.id, templateId ?? null)
 
   const row = db.prepare('SELECT * FROM rss_feeds WHERE id = ?').get(id) as Record<string, unknown>
-  res.status(201).json({ feed: mapFeed(row) })
+  const pageRow = db
+    .prepare('SELECT name, meta_page_id FROM facebook_pages WHERE id = ?')
+    .get(pageId) as { name: string; meta_page_id: string } | undefined
+  const pageLookup = new Map([
+    [
+      String(pageId),
+      {
+        name: String(pageRow?.name ?? ''),
+        isMockPage: isMockMetaPageId(String(pageRow?.meta_page_id ?? '')),
+      },
+    ],
+  ])
+  res.status(201).json({ feed: mapFeed(row, pageLookup) })
+})
+
+newsRouter.patch('/feeds/:id', (req: AgencyRequest, res) => {
+  const { pageId } = req.body ?? {}
+  if (!pageId) {
+    res.status(400).json({ error: 'pageId is required' })
+    return
+  }
+
+  const feed = db
+    .prepare('SELECT * FROM rss_feeds WHERE id = ? AND agency_id = ?')
+    .get(routeParam(req.params.id), req.agency!.id) as Record<string, unknown> | undefined
+  if (!feed) {
+    res.status(404).json({ error: 'Feed not found' })
+    return
+  }
+
+  const page = db
+    .prepare('SELECT id, name, meta_page_id FROM facebook_pages WHERE id = ? AND agency_id = ?')
+    .get(pageId, req.agency!.id)
+  if (!page) {
+    res.status(404).json({ error: 'Page not found' })
+    return
+  }
+
+  try {
+    assertPublishableFacebookPage(String(pageId), req.agency!.id)
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Invalid page' })
+    return
+  }
+
+  db.prepare('UPDATE rss_feeds SET page_id = ? WHERE id = ?').run(pageId, routeParam(req.params.id))
+  db.prepare(`
+    UPDATE news_items SET page_id = ? WHERE feed_id = ? AND agency_id = ? AND status = 'ready'
+  `).run(pageId, routeParam(req.params.id), req.agency!.id)
+
+  const row = db.prepare('SELECT * FROM rss_feeds WHERE id = ?').get(routeParam(req.params.id)) as Record<string, unknown>
+  const pageRow = db
+    .prepare('SELECT name, meta_page_id FROM facebook_pages WHERE id = ?')
+    .get(pageId) as { name: string; meta_page_id: string } | undefined
+  const pageLookup = new Map([
+    [
+      String(pageId),
+      {
+        name: String(pageRow?.name ?? ''),
+        isMockPage: isMockMetaPageId(String(pageRow?.meta_page_id ?? '')),
+      },
+    ],
+  ])
+  res.json({ feed: mapFeed(row, pageLookup) })
 })
 
 newsRouter.delete('/feeds/:id', (req: AgencyRequest, res) => {

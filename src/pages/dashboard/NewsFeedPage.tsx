@@ -112,7 +112,9 @@ export function NewsFeedPage() {
         items: overview.items ?? [],
         stats: overview.stats ?? { ready: 0, posted: 0, failed: 0 },
       })
-      setFeedPageId((prev) => prev || overview.pages[0]?.id || '')
+      const realPages = overview.pages.filter((p) => !p.isMockPage)
+      const defaultPageId = realPages[0]?.id || overview.pages[0]?.id || ''
+      setFeedPageId((prev) => (prev && realPages.some((p) => p.id === prev) ? prev : defaultPageId))
       setFeedTemplateId((prev) => prev || overview.templates[0]?.id || '')
       setPreviewPageId((prev) => prev || overview.pages[0]?.id || '')
       setSettingsPageId((prev) => prev || overview.pages[0]?.id || '')
@@ -319,6 +321,19 @@ export function NewsFeedPage() {
     }
   }
 
+  async function handleReassignFeed(feedId: string, pageId: string) {
+    try {
+      await api.news.updateFeed(feedId, { pageId })
+      toast.success('Feed reassigned — try Publish again')
+      await load()
+    } catch (err) {
+      toast.error(getApiError(err, 'Reassign failed'))
+    }
+  }
+
+  const publishablePages = data?.pages.filter((p) => !p.isMockPage) ?? []
+  const mockFeedAssigned = data?.feeds.some((f) => f.isMockPage) ?? false
+
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -514,11 +529,19 @@ export function NewsFeedPage() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Facebook page</label>
-                    <select value={feedPageId} onChange={(e) => setFeedPageId(e.target.value)} required className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm">
-                      {data.pages.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
+                    {publishablePages.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No real Facebook pages found.{' '}
+                        <Link to="/facebook/accounts" className="text-primary hover:underline">Connect a real page</Link>{' '}
+                        (demo pages like Adam Sullivan cannot publish).
+                      </p>
+                    ) : (
+                      <select value={feedPageId} onChange={(e) => setFeedPageId(e.target.value)} required className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm">
+                        {publishablePages.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Template</label>
@@ -529,7 +552,7 @@ export function NewsFeedPage() {
                       ))}
                     </select>
                   </div>
-                  <button type="submit" className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">
+                  <button type="submit" disabled={publishablePages.length === 0} className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">
                     <Rss className="h-4 w-4" />
                     Add feed
                   </button>
@@ -651,10 +674,31 @@ export function NewsFeedPage() {
               <ul className="space-y-2 text-sm">
                 {data.feeds.map((f) => (
                   <li key={f.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <p className="font-medium">{f.name}</p>
                       <p className="text-xs text-muted-foreground truncate max-w-md">{f.url}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Page: {f.pageName ?? 'Unknown'}
+                        {f.isMockPage && <span className="ml-2 font-medium text-destructive">Demo page — cannot publish</span>}
+                      </p>
                       {f.lastError && <p className="text-xs text-destructive">{f.lastError}</p>}
+                      {f.isMockPage && publishablePages.length > 0 && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <label className="text-xs text-muted-foreground">Reassign to:</label>
+                          <select
+                            defaultValue=""
+                            onChange={(e) => {
+                              if (e.target.value) void handleReassignFeed(f.id, e.target.value)
+                            }}
+                            className="h-8 rounded-md border border-border bg-background px-2 text-xs"
+                          >
+                            <option value="">Select real page…</option>
+                            {publishablePages.map((p) => (
+                              <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                     </div>
                     <span className="text-xs text-muted-foreground">{f.lastPolledAt ? `Polled ${f.lastPolledAt}` : 'Not polled yet'}</span>
                   </li>
@@ -665,6 +709,12 @@ export function NewsFeedPage() {
 
           <div className="marketing-card">
             <h2 className="mb-3 font-semibold">Queue</h2>
+            {mockFeedAssigned && (
+              <p className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                Your RSS feed is assigned to a demo page (AI Baby Magic / Adam Sullivan / Adin Ross). Meta rejects those with
+                &quot;Invalid OAuth access token&quot;. Reassign the feed to a real page under Active feeds below, then click Publish again.
+              </p>
+            )}
             {data.pages.some((p) => !p.autoPublish) && (
               <p className="mb-3 text-xs text-amber-600 dark:text-amber-400">
                 Review mode: pages with auto-publish off require manual Publish. Native photo posts qualify for Facebook Content Monetization.

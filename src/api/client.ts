@@ -390,6 +390,8 @@ export const api = {
       request<{ message: string; updated: number }>('/news/bulk-setup', { method: 'POST', body: JSON.stringify(body) }),
     createFeed: (body: { name: string; url: string; pageId: string; templateId?: string }) =>
       request<{ feed: NewsFeedRow }>('/news/feeds', { method: 'POST', body: JSON.stringify(body) }),
+    updateFeed: (id: string, body: { pageId: string }) =>
+      request<{ feed: NewsFeedRow }>(`/news/feeds/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     deleteFeed: (id: string) => request<{ message: string }>(`/news/feeds/${id}`, { method: 'DELETE' }),
     savePageSettings: (pageId: string, body: Partial<NewsPageSettingsBody>) =>
       request<{ message: string }>(`/news/page-settings/${pageId}`, { method: 'PUT', body: JSON.stringify(body) }),
@@ -1075,6 +1077,8 @@ export type NewsFeedRow = {
   name: string
   url: string
   pageId: string | null
+  pageName?: string | null
+  isMockPage?: boolean
   templateId: string | null
   isActive: boolean
   lastPolledAt: string | null
@@ -1105,6 +1109,7 @@ export type NewsPageRow = {
   id: string
   name: string
   metaPageId: string
+  isMockPage?: boolean
   newsActive: boolean
   templateId: string | null
   autoPublish: boolean

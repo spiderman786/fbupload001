@@ -1,4 +1,6 @@
 import { db } from '../db.js'
+import { isFacebookConfiguredForAgency } from './byoc.js'
+import { isMockMetaPageId } from './facebook.js'
 
 const GRAPH = 'https://graph.facebook.com/v21.0'
 
@@ -45,6 +47,25 @@ async function fetchPageTokenFromGraph(metaPageId: string, userAccessToken: stri
   return data.access_token.trim()
 }
 
+/** Block RSS/reel publish when a demo page is used with a real Facebook app configured. */
+export function assertPublishableFacebookPage(
+  pageId: string,
+  agencyId: string,
+): { metaPageId: string; name: string } {
+  const row = db
+    .prepare('SELECT meta_page_id, name FROM facebook_pages WHERE id = ? AND agency_id = ?')
+    .get(pageId, agencyId) as { meta_page_id: string; name: string } | undefined
+  if (!row) throw new Error('Facebook page not found')
+
+  if (isFacebookConfiguredForAgency(agencyId) && isMockMetaPageId(row.meta_page_id)) {
+    throw new Error(
+      `"${row.name}" is a demo page and cannot publish to Facebook. Reassign the RSS feed to a real page connected under Facebook → Accounts (for example SonaBilal00012345678908 or Fiaz malik 1).`,
+    )
+  }
+
+  return { metaPageId: row.meta_page_id, name: row.name }
+}
+
 /** Resolve a page token for Graph API calls; optionally force refresh from the linked Facebook account. */
 export async function resolvePageAccessToken(
   pageId: string,
@@ -70,6 +91,7 @@ export async function refreshPageAccessToken(
   const row = loadPageRow(pageId)
   if (!row || row.status !== 'active') return null
   if (agencyId && row.agency_id !== agencyId) return null
+  if (isFacebookConfiguredForAgency(row.agency_id) && isMockMetaPageId(row.meta_page_id)) return null
 
   const userToken = loadUserAccessToken(row.facebook_account_id)
   if (!userToken) return null

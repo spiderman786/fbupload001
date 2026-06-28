@@ -8,6 +8,16 @@ export function isFacebookConfigured(agencyId?: string): boolean {
   return Boolean(process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET)
 }
 
+/** Demo pages created via mock connect — cannot call the real Graph API. */
+export function isMockMetaPageId(metaPageId: string): boolean {
+  return /^mock_page_/i.test(metaPageId.trim())
+}
+
+export function isMockAccessToken(token: string): boolean {
+  const t = token.trim()
+  return t === 'mock_token' || /^mock_/i.test(t)
+}
+
 export function getOAuthUrl(agencyId: string, state: string, byocCredentialId?: string | null): string {
   const creds = getByocCredentials(agencyId, 'facebook', byocCredentialId)
   if (!creds) throw new Error('Facebook app not configured. Add BYOC credentials in Settings.')
