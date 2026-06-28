@@ -1,4 +1,5 @@
 import Parser from 'rss-parser'
+import sharp from 'sharp'
 import { assertSafeExternalUrl } from '../../utils/safeUrl.js'
 import { normalizeArticleUrl } from './types.js'
 
@@ -105,6 +106,45 @@ function dedupeImages(urls: string[]): string[] {
     out.push(u)
   }
   return out
+}
+
+export function upgradeImageUrl(url: string): string {
+  let upgraded = url.trim()
+  try {
+    const u = new URL(upgraded)
+    for (const key of ['w', 'width', 'h', 'height', 'resize', 'quality']) {
+      u.searchParams.delete(key)
+    }
+    upgraded = u.toString()
+  } catch {
+    /* keep original */
+  }
+  return upgraded.replace(/-\d+x\d+(\.(jpe?g|png|webp))/i, '$1')
+}
+
+async function imagePixelArea(url: string): Promise<number> {
+  const buf = await downloadImageBuffer(upgradeImageUrl(url))
+  if (!buf) return 0
+  try {
+    const meta = await sharp(buf).metadata()
+    return (meta.width ?? 0) * (meta.height ?? 0)
+  } catch {
+    return 0
+  }
+}
+
+export async function selectBestHeroAndInset(imageUrls: string[]): Promise<{ hero: string | null; inset: string | null }> {
+  const unique = dedupeImages(imageUrls.filter(Boolean).map(upgradeImageUrl))
+  if (unique.length === 0) return { hero: null, inset: null }
+  if (unique.length === 1) return { hero: unique[0]!, inset: unique[0]! }
+
+  const ranked = await Promise.all(
+    unique.slice(0, 5).map(async (url) => ({ url, area: await imagePixelArea(url) })),
+  )
+  ranked.sort((a, b) => b.area - a.area)
+  const hero = ranked[0]?.url ?? unique[0]!
+  const inset = ranked.find((r) => r.url !== hero)?.url ?? ranked[1]?.url ?? hero
+  return { hero, inset }
 }
 
 export function selectHeroAndInset(imageUrls: string[]): { hero: string | null; inset: string | null } {

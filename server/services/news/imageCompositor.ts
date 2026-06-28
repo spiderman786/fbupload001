@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import sharp, { type OverlayOptions } from 'sharp'
-import { downloadImageBuffer } from './rssFetcher.js'
+import { downloadImageBuffer, upgradeImageUrl } from './rssFetcher.js'
 import { parseBrandType, parseColors, parseFonts, type NewsBrandType, type NewsColors, type NewsFonts } from './types.js'
 
 const CANVAS_W = 1080
@@ -20,7 +20,7 @@ function escapeXml(text: string): string {
     .replace(/"/g, '&quot;')
 }
 
-function wrapHeadlineWords(headline: string, maxCharsPerLine = 26): string[] {
+function wrapHeadlineWords(headline: string, maxCharsPerLine: number): string[] {
   const words = headline.split(/\s+/).filter(Boolean)
   const lines: string[] = []
   let current = ''
@@ -35,7 +35,22 @@ function wrapHeadlineWords(headline: string, maxCharsPerLine = 26): string[] {
     }
   }
   if (current) lines.push(current)
-  return lines.slice(0, 4)
+  return lines
+}
+
+function maxCharsForFontSize(fontSize: number): number {
+  return Math.max(14, Math.floor((CANVAS_W - 100) / (fontSize * 0.52)))
+}
+
+function fitHeadlineLines(headline: string, baseFontSize: number): { lines: string[]; fontSize: number } {
+  let fontSize = baseFontSize
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const lines = wrapHeadlineWords(headline, maxCharsForFontSize(fontSize))
+    if (lines.length <= 4) return { lines, fontSize }
+    fontSize = Math.max(32, fontSize - 6)
+  }
+  const lines = wrapHeadlineWords(headline, maxCharsForFontSize(32)).slice(0, 4)
+  return { lines, fontSize: 32 }
 }
 
 function splitBrandLines(label: string): [string, string] {
@@ -64,8 +79,34 @@ function buildBrandBadgeSvg(pageName: string, colors: NewsColors, fonts: NewsFon
   `
 }
 
-function estimateWordWidth(word: string, fontSize: number): number {
-  return word.length * (fontSize * 0.58) + 14
+function buildHeadlineLineSvg(
+  line: string,
+  y: number,
+  accentWords: string[],
+  colors: NewsColors,
+  fontSize: number,
+): string {
+  const accentSet = new Set(accentWords.map((w) => w.toUpperCase()))
+  const words = line.split(/\s+/).filter(Boolean)
+  const hasAccent = words.some((word) => {
+    const clean = word.replace(/[^A-Za-z0-9']/g, '').toUpperCase()
+    return accentSet.has(clean) || accentSet.has(word.toUpperCase())
+  })
+
+  if (!hasAccent) {
+    return `<text x="${CANVAS_W / 2}" y="${y}" text-anchor="middle" font-family="${FONT_STACK}" font-size="${fontSize}" font-weight="900" fill="${colors.text}">${escapeXml(line)}</text>`
+  }
+
+  let inner = ''
+  words.forEach((word, idx) => {
+    const clean = word.replace(/[^A-Za-z0-9']/g, '').toUpperCase()
+    const isAccent = accentSet.has(clean) || accentSet.has(word.toUpperCase())
+    const fill = isAccent ? colors.accent : colors.text
+    const text = (idx > 0 ? ' ' : '') + word
+    inner += `<tspan fill="${fill}">${escapeXml(text)}</tspan>`
+  })
+
+  return `<text x="${CANVAS_W / 2}" y="${y}" text-anchor="middle" font-family="${FONT_STACK}" font-size="${fontSize}" font-weight="900">${inner}</text>`
 }
 
 function buildHeadlineSvg(
@@ -75,38 +116,23 @@ function buildHeadlineSvg(
   fonts: NewsFonts,
   barTop: number,
 ): string {
-  const lines = wrapHeadlineWords(headline)
-  const accentSet = new Set(accentWords.map((w) => w.toUpperCase()))
-  const lineHeight = fonts.headlineSize + 10
+  const { lines, fontSize } = fitHeadlineLines(headline, fonts.headlineSize)
+  const lineHeight = Math.round(fontSize * 1.18)
   const textBlockHeight = lines.length * lineHeight
   const textAreaHeight = CANVAS_H - barTop
   const brandClearance = BRAND_BADGE_R + 36
   const startY =
-    barTop + brandClearance + fonts.headlineSize + Math.max(24, (textAreaHeight - brandClearance - textBlockHeight) / 2)
+    barTop + brandClearance + fontSize + Math.max(24, (textAreaHeight - brandClearance - textBlockHeight) / 2)
 
-  let svg = ''
-  lines.forEach((line, lineIdx) => {
-    const words = line.split(/\s+/).filter(Boolean)
-    const widths = words.map((word) => estimateWordWidth(word, fonts.headlineSize))
-    const totalWidth = widths.reduce((sum, w) => sum + w, 0)
-    let x = (CANVAS_W - totalWidth) / 2
-    const y = startY + lineIdx * lineHeight
-
-    words.forEach((word, wordIdx) => {
-      const clean = word.replace(/[^A-Za-z0-9']/g, '')
-      const isAccent = accentSet.has(clean.toUpperCase()) || accentSet.has(word.toUpperCase())
-      const fill = isAccent ? colors.accent : colors.text
-      svg += `<text x="${x}" y="${y}" font-family="${FONT_STACK}" font-size="${fonts.headlineSize}" font-weight="900" letter-spacing="0.5" fill="${fill}">${escapeXml(word)}</text>`
-      x += widths[wordIdx]!
-    })
-  })
-
-  return svg
+  return lines
+    .map((line, lineIdx) => buildHeadlineLineSvg(line, startY + lineIdx * lineHeight, accentWords, colors, fontSize))
+    .join('\n')
 }
 
 async function circleInset(input: Buffer, size: number, borderColor: string): Promise<Buffer> {
   const inner = await sharp(input)
-    .resize(size, size, { fit: 'cover', position: 'centre' })
+    .resize(size, size, { fit: 'cover', position: 'centre', kernel: sharp.kernel.lanczos3 })
+    .sharpen({ sigma: 0.6, m1: 0.8, m2: 0.3 })
     .png()
     .toBuffer()
 
@@ -168,7 +194,8 @@ async function renderNewsCanvas(options: {
   const brandType = options.brandType ?? 'page_name'
 
   const heroLayer = await sharp(options.heroBuf)
-    .resize(CANVAS_W, HERO_H, { fit: 'cover', position: 'centre' })
+    .resize(CANVAS_W, HERO_H, { fit: 'cover', position: 'centre', kernel: sharp.kernel.lanczos3 })
+    .sharpen({ sigma: 0.8, m1: 1.0, m2: 0.4 })
     .png()
     .toBuffer()
 
@@ -265,12 +292,12 @@ export async function composeNewsImage(options: {
   ctaText?: string
   outputPath: string
 }): Promise<string> {
-  const heroBuf = await downloadImageBuffer(options.heroUrl)
+  const heroBuf = await downloadImageBuffer(upgradeImageUrl(options.heroUrl))
   if (!heroBuf) throw new Error('Could not download hero image')
 
   let insetBuf = options.insetUrl === options.heroUrl
     ? await sharp(heroBuf).extract({ left: 80, top: 80, width: 400, height: 400 }).toBuffer()
-    : await downloadImageBuffer(options.insetUrl)
+    : await downloadImageBuffer(upgradeImageUrl(options.insetUrl))
 
   if (!insetBuf) insetBuf = heroBuf
 

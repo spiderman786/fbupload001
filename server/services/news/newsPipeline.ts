@@ -9,7 +9,7 @@ import { maybeRewriteNewsContent } from './aiRewriter.js'
 import { runCompositorJob } from './compositorQueue.js'
 import { formatNewsContent, mergeHashtags } from './contentFormatter.js'
 import { composeNewsImage } from './imageCompositor.js'
-import { fetchRssFeed, scrapeArticleImages, selectHeroAndInset } from './rssFetcher.js'
+import { fetchRssFeed, scrapeArticleImages, selectBestHeroAndInset } from './rssFetcher.js'
 import { normalizeArticleUrl, parseBrandType, parseJsonArray } from './types.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -44,8 +44,8 @@ export async function processRssArticle(input: {
     .get(input.pageId) as { name: string } | undefined
 
   const scraped = await scrapeArticleImages(articleUrl)
-  const imageList = [input.article.imageUrl, ...scraped].filter(Boolean) as string[]
-  const { hero, inset } = selectHeroAndInset(imageList)
+  const imageList = [...scraped, input.article.imageUrl].filter(Boolean) as string[]
+  const { hero, inset } = await selectBestHeroAndInset(imageList)
   if (!hero) {
     console.warn(`[news] No images for ${articleUrl}`)
     return null

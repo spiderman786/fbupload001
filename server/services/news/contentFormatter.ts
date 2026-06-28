@@ -17,11 +17,12 @@ function stripHtml(html: string): string {
 }
 
 export function pickAccentWords(headline: string, max = 3): string[] {
+  const stop = new Set(['THE', 'AND', 'FOR', 'WHO', 'WAS', 'ARE', 'WITH', 'FROM', 'THAT', 'THIS', 'AFTER', 'WHAT'])
   const words = headline
     .toUpperCase()
     .split(/\s+/)
     .map((w) => w.replace(/[^A-Z0-9']/g, ''))
-    .filter((w) => w.length >= 3)
+    .filter((w) => w.length >= 4 && !stop.has(w))
 
   if (words.length === 0) return []
   if (words.length <= max) return [...new Set(words)]
