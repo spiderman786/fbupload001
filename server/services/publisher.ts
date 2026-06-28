@@ -11,7 +11,7 @@ export async function getPageAccessToken(metaPageId: string, userAccessToken: st
   if (row?.page_access_token) return row.page_access_token
 
   const res = await fetch(
-    `${GRAPH}/${metaPageId}?fields=access_token&access_token=${userAccessToken}`,
+    `${GRAPH}/${metaPageId}?fields=access_token&access_token=${encodeURIComponent(userAccessToken.trim())}`,
   )
   const data = (await res.json()) as { access_token?: string; error?: { message: string } }
   if (!data.access_token) throw new Error(data.error?.message ?? 'Could not get page access token')

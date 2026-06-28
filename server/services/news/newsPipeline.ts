@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url'
 import { v4 as uuid } from 'uuid'
 import { db } from '../../db.js'
 import { publishPhotoPost, postComment } from '../publisher.js'
+import { isOAuthTokenError, refreshPageAccessToken, resolvePageAccessToken } from '../pageTokens.js'
 import { maybeRewriteNewsContent } from './aiRewriter.js'
 import { runCompositorJob } from './compositorQueue.js'
 import { formatNewsContent, mergeHashtags } from './contentFormatter.js'
@@ -19,14 +20,6 @@ function isDuplicate(pageId: string, articleUrl: string): boolean {
     .prepare('SELECT id FROM posted_articles WHERE page_id = ? AND article_url = ? LIMIT 1')
     .get(pageId, articleUrl) as { id: string } | undefined
   return !!row
-}
-
-function getPageToken(pageId: string): { metaPageId: string; token: string } | null {
-  const row = db
-    .prepare('SELECT meta_page_id, page_access_token FROM facebook_pages WHERE id = ? AND status = ? LIMIT 1')
-    .get(pageId, 'active') as { meta_page_id: string; page_access_token: string | null } | undefined
-  if (!row?.page_access_token) return null
-  return { metaPageId: row.meta_page_id, token: row.page_access_token }
 }
 
 export async function processRssArticle(input: {
@@ -124,14 +117,41 @@ export async function processRssArticle(input: {
   return itemId
 }
 
+async function publishPhotoWithTokenRetry(
+  pageId: string,
+  agencyId: string,
+  imagePath: string,
+  caption: string,
+): Promise<{ postId: string; token: string; metaPageId: string }> {
+  const page = await resolvePageAccessToken(pageId, { agencyId })
+  if (!page) {
+    throw new Error('Page token not available — reconnect Facebook under Facebook → Accounts')
+  }
+
+  try {
+    const { postId } = await publishPhotoPost(page.metaPageId, page.token, imagePath, caption)
+    return { postId, token: page.token, metaPageId: page.metaPageId }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (!isOAuthTokenError(msg)) throw err
+
+    const refreshed = await refreshPageAccessToken(pageId, agencyId)
+    if (!refreshed) {
+      throw new Error('Facebook session expired — reconnect your account under Facebook → Accounts')
+    }
+
+    const { postId } = await publishPhotoPost(refreshed.metaPageId, refreshed.token, imagePath, caption)
+    return { postId, token: refreshed.token, metaPageId: refreshed.metaPageId }
+  }
+}
+
 export async function publishNewsItem(itemId: string): Promise<{ postId: string }> {
   const item = db.prepare('SELECT * FROM news_items WHERE id = ?').get(itemId) as Record<string, unknown> | undefined
   if (!item) throw new Error('News item not found')
   if (item.status === 'posted') throw new Error('Already posted')
 
   const pageId = String(item.page_id)
-  const page = getPageToken(pageId)
-  if (!page) throw new Error('Page token not available')
+  const agencyId = String(item.agency_id)
 
   const settings = db.prepare('SELECT * FROM page_news_settings WHERE page_id = ?').get(pageId) as
     | Record<string, unknown>
@@ -150,12 +170,12 @@ export async function publishNewsItem(itemId: string): Promise<{ postId: string 
   const imagePath = String(item.generated_image_path ?? '')
   if (!imagePath || !fs.existsSync(imagePath)) throw new Error('Generated image missing')
 
-  const { postId } = await publishPhotoPost(page.metaPageId, page.token, imagePath, caption)
+  const { postId, token } = await publishPhotoWithTokenRetry(pageId, agencyId, imagePath, caption)
 
   let commentId: string | null = null
   if (settings?.comment_link_enabled) {
     const comment = `📖 ${String(item.post_title ?? 'Read more')}:\n${String(item.article_url)}`
-    const result = await postComment(postId, page.token, comment)
+    const result = await postComment(postId, token, comment)
     commentId = result.commentId
   }
 
