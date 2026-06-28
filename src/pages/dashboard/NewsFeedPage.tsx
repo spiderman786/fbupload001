@@ -29,6 +29,7 @@ export function NewsFeedPage() {
   const [savingAiSettings, setSavingAiSettings] = useState(false)
   const [testingAi, setTestingAi] = useState(false)
   const [aiTestResult, setAiTestResult] = useState<NewsAiConnectionTest | null>(null)
+  const [viewItemId, setViewItemId] = useState<string | null>(null)
 
   const [templateName, setTemplateName] = useState('Default News')
   const [layoutPreset, setLayoutPreset] = useState('popcorn')
@@ -149,6 +150,15 @@ export function NewsFeedPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (!viewItemId) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setViewItemId(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [viewItemId])
 
   useEffect(() => {
     return () => {
@@ -331,6 +341,10 @@ export function NewsFeedPage() {
     } catch (err) {
       toast.error(getApiError(err, 'Add feed failed'))
     }
+  }
+
+  function itemPreviewSrc(itemId: string): string {
+    return `${api.news.previewUrl(itemId)}${previewCacheBust[itemId] ? `?t=${previewCacheBust[itemId]}` : ''}`
   }
 
   async function handlePollAll() {
@@ -895,11 +909,21 @@ export function NewsFeedPage() {
                 {data.items.map((item) => (
                   <li key={item.id} className="flex flex-col gap-3 rounded-lg border border-border p-3 sm:flex-row">
                     {item.status === 'ready' || item.status === 'posted' ? (
-                      <img
-                        src={`${api.news.previewUrl(item.id)}${previewCacheBust[item.id] ? `?t=${previewCacheBust[item.id]}` : ''}`}
-                        alt=""
-                        className="h-40 w-32 shrink-0 rounded-md object-cover bg-muted"
-                      />
+                      <button
+                        type="button"
+                        onClick={() => setViewItemId(item.id)}
+                        className="group relative h-40 w-32 shrink-0 overflow-hidden rounded-md bg-muted"
+                        title="View full image"
+                      >
+                        <img
+                          src={itemPreviewSrc(item.id)}
+                          alt=""
+                          className="h-full w-full object-cover transition group-hover:opacity-80"
+                        />
+                        <span className="absolute inset-x-0 bottom-0 bg-black/60 py-1 text-center text-[10px] font-semibold text-white">
+                          View
+                        </span>
+                      </button>
                     ) : null}
                     <div className="min-w-0 flex-1">
                       {item.headline && item.postTitle && item.headline.replace(/\s+/g, ' ').toUpperCase() !== item.postTitle.replace(/\s+/g, ' ').toUpperCase() ? (
@@ -916,25 +940,37 @@ export function NewsFeedPage() {
                         {item.errorMessage && <span className="ml-2 text-destructive">{item.errorMessage}</span>}
                       </p>
                     </div>
-                    {item.status === 'ready' && (
+                    {(item.status === 'ready' || item.status === 'posted') && (
                       <div className="flex shrink-0 flex-wrap gap-2">
                         <button
                           type="button"
-                          onClick={() => handleRegenerateImage(item.id)}
-                          disabled={regeneratingId === item.id}
-                          className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs disabled:opacity-50"
+                          onClick={() => setViewItemId(item.id)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs"
                         >
-                          <RefreshCw className={`h-3.5 w-3.5 ${regeneratingId === item.id ? 'animate-spin' : ''}`} />
-                          {regeneratingId === item.id ? 'Regenerating…' : 'Regenerate'}
+                          <Eye className="h-3.5 w-3.5" />
+                          View image
                         </button>
-                        <button type="button" onClick={() => handlePublish(item.id)} className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground">
-                          <Send className="h-3.5 w-3.5" />
-                          Publish
-                        </button>
-                        <button type="button" onClick={() => handleSkip(item.id)} className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs">
-                          <SkipForward className="h-3.5 w-3.5" />
-                          Skip
-                        </button>
+                        {item.status === 'ready' && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleRegenerateImage(item.id)}
+                              disabled={regeneratingId === item.id}
+                              className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs disabled:opacity-50"
+                            >
+                              <RefreshCw className={`h-3.5 w-3.5 ${regeneratingId === item.id ? 'animate-spin' : ''}`} />
+                              {regeneratingId === item.id ? 'Regenerating…' : 'Regenerate'}
+                            </button>
+                            <button type="button" onClick={() => handlePublish(item.id)} className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground">
+                              <Send className="h-3.5 w-3.5" />
+                              Publish
+                            </button>
+                            <button type="button" onClick={() => handleSkip(item.id)} className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs">
+                              <SkipForward className="h-3.5 w-3.5" />
+                              Skip
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
                   </li>
@@ -946,6 +982,30 @@ export function NewsFeedPage() {
       ) : (
         <div className="marketing-card text-sm text-muted-foreground">
           Could not load news feed data. If you just added this feature, restart the dev server (<code className="text-xs">npm run dev</code>) and refresh.
+        </div>
+      )}
+      {viewItemId && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setViewItemId(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Generated news image preview"
+        >
+          <div className="relative w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => setViewItemId(null)}
+              className="mb-2 ml-auto block rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20"
+            >
+              Close
+            </button>
+            <img
+              src={itemPreviewSrc(viewItemId)}
+              alt="Generated news graphic"
+              className="mx-auto max-h-[85vh] w-full rounded-lg object-contain shadow-2xl"
+            />
+          </div>
         </div>
       )}
     </div>
