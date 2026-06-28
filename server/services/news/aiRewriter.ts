@@ -211,7 +211,9 @@ Tone: ${tone}
 
 Rules for headline:
 - ALL CAPS, single line with a space between every word (required)
-- Maximum 55 characters total
+- Maximum 6 words and 42 characters total
+- Must read naturally across 2–4 lines on the image (multiple words per line, not one word per line)
+- Example: "LOVE ISLAND HOSTS EXPOSE SHOCKING SCANDAL"
 - Short, scannable, no filler (remove "who was", "what to know", etc. when possible)
 - Must fit on 3–4 lines on a 1080px-wide phone graphic
 - Keep names, show titles, and key facts
