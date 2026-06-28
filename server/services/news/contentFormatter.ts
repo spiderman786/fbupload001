@@ -38,6 +38,22 @@ export function pickAccentWords(headline: string, max = 3): string[] {
   return [...picks].slice(0, max)
 }
 
+export function headlineToPostTitle(headline: string): string {
+  const clean = normalizeHeadlineForDisplay(headline)
+  if (!clean) return ''
+  return clean
+    .split(' ')
+    .map((word) => {
+      if (/^[A-Z0-9':]+$/.test(word) && word.length <= 5) return word
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    })
+    .join(' ')
+}
+
+function normalizeHeadlineForDisplay(headline: string): string {
+  return headline.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
 export function formatNewsContent(input: {
   rssTitle: string
   rssDescription: string

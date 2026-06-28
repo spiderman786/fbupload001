@@ -53,6 +53,45 @@ function fitHeadlineLines(headline: string, baseFontSize: number): { lines: stri
   return { lines, fontSize: 32 }
 }
 
+export function normalizeHeadlineText(headline: string): string {
+  return headline.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+/** Check whether a headline fits the 1080×1350 template text area (max 4 lines). */
+export function precheckHeadlineForTemplate(
+  headline: string,
+  fontsJson?: string | null,
+): {
+  fits: boolean
+  lines: string[]
+  fontSize: number
+  lineCount: number
+  normalizedHeadline: string
+} {
+  const fonts = parseFonts(fontsJson ?? null)
+  const normalizedHeadline = normalizeHeadlineText(headline).toUpperCase()
+  const baseSize = fonts.headlineSize ?? fonts.textSize ?? 50
+  const { lines, fontSize } = fitHeadlineLines(normalizedHeadline, baseSize)
+  const fits = lines.length <= 4 && fontSize >= 32 && normalizedHeadline.length <= 85
+  return { fits, lines, fontSize, lineCount: lines.length, normalizedHeadline }
+}
+
+/** Shrink an oversized headline until it fits the template. */
+export function fitHeadlineToTemplate(headline: string, fontsJson?: string | null): string {
+  const check = precheckHeadlineForTemplate(headline, fontsJson)
+  if (check.fits) return check.normalizedHeadline
+
+  const words = check.normalizedHeadline.split(/\s+/).filter(Boolean)
+  while (words.length > 3) {
+    words.pop()
+    const candidate = words.join(' ')
+    const retry = precheckHeadlineForTemplate(candidate, fontsJson)
+    if (retry.fits) return candidate
+  }
+
+  return check.lines.slice(0, 4).join(' ') || check.normalizedHeadline.slice(0, 70)
+}
+
 function splitBrandLines(label: string): [string, string] {
   const parts = label.toUpperCase().split(/\s+/).filter(Boolean)
   if (parts.length === 0) return ['', '']

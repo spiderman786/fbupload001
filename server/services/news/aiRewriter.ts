@@ -1,4 +1,5 @@
 import { pickAccentWords } from './contentFormatter.js'
+import { fitHeadlineToTemplate, normalizeHeadlineText, precheckHeadlineForTemplate } from './imageCompositor.js'
 import { resolveAiCredentials, type AiProvider } from './aiSettings.js'
 
 export type AiRewriteResult = {
@@ -200,19 +201,21 @@ export async function adaptHeadlineForImageGraphic(input: {
   rssDescription?: string
   aiTonePrompt?: string
   agencyId?: string
+  fontsJson?: string | null
 }): Promise<ImageHeadlineResult | null> {
   if (!hasAiConfigured(input.agencyId)) return null
 
   const tone = input.aiTonePrompt?.trim() || 'dramatic, punchy tabloid style for Facebook'
-  const prompt = `Rewrite this news title for a Facebook image graphic overlay.
+  const buildPrompt = (extra = '') => `Rewrite this news title for a Facebook image graphic overlay.
 Tone: ${tone}
 
 Rules for headline:
-- ALL CAPS
-- Maximum 70 characters total
+- ALL CAPS, single line (spaces only — NO line breaks)
+- Maximum 60 characters total
 - Short, scannable, no filler (remove "who was", "what to know", etc. when possible)
-- Must read well split across 3–4 lines on a phone screen
+- Must fit on 3–4 lines on a 1080px-wide phone graphic
 - Keep names, show titles, and key facts
+${extra}
 
 Return JSON only:
 {
@@ -224,10 +227,29 @@ accent_words: 2–3 important words from the headline to highlight in color (nou
 RSS title: ${input.rssTitle.slice(0, 300)}
 RSS description: ${(input.rssDescription ?? '').slice(0, 400)}`
 
-  const parsed = await callAiJson(prompt, 'You write ultra-short Facebook news graphic headlines. JSON only.', input.agencyId)
+  let parsed = await callAiJson(buildPrompt(), 'You write ultra-short Facebook news graphic headlines. JSON only.', input.agencyId)
   if (!parsed) return null
 
-  const headline = String(parsed.headline ?? input.rssTitle).toUpperCase().slice(0, 80)
+  let headline = normalizeHeadlineText(String(parsed.headline ?? input.rssTitle)).toUpperCase().slice(0, 80)
+  let check = precheckHeadlineForTemplate(headline, input.fontsJson)
+
+  if (!check.fits) {
+    parsed = await callAiJson(
+      buildPrompt(`Previous headline "${headline}" was too long (${check.lineCount} lines). Rewrite shorter — max 50 characters.`),
+      'You write ultra-short Facebook news graphic headlines. JSON only.',
+      input.agencyId,
+    )
+    if (parsed) {
+      headline = normalizeHeadlineText(String(parsed.headline ?? headline)).toUpperCase().slice(0, 80)
+      check = precheckHeadlineForTemplate(headline, input.fontsJson)
+    }
+  }
+
+  if (!check.fits) {
+    headline = fitHeadlineToTemplate(headline, input.fontsJson)
+    check = precheckHeadlineForTemplate(headline, input.fontsJson)
+  }
+
   const accent_words =
     Array.isArray(parsed.accent_words) && parsed.accent_words.length
       ? parsed.accent_words.map((w) => String(w).toUpperCase()).slice(0, 4)

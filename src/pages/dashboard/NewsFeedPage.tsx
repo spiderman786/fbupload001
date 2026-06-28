@@ -650,7 +650,7 @@ export function NewsFeedPage() {
               <div className="space-y-2">
                 <label className="text-sm font-medium">AI tone prompt (optional)</label>
                 <input value={aiTonePrompt} onChange={(e) => setAiTonePrompt(e.target.value)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm" placeholder="dramatic and emotional" />
-                <p className="text-xs text-muted-foreground">Used to shorten and style headlines for the on-image overlay when OpenAI is configured.</p>
+                <p className="text-xs text-muted-foreground">Used to shorten and style headlines for the on-image overlay. Headlines are pre-checked against your template (max 4 lines) before the image is generated.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -902,7 +902,14 @@ export function NewsFeedPage() {
                       />
                     ) : null}
                     <div className="min-w-0 flex-1">
-                      <p className="font-medium line-clamp-2">{item.postTitle ?? item.headline}</p>
+                      {item.headline && item.postTitle && item.headline.replace(/\s+/g, ' ').toUpperCase() !== item.postTitle.replace(/\s+/g, ' ').toUpperCase() ? (
+                        <>
+                          <p className="text-xs font-medium text-primary line-clamp-2">On image: {item.headline.replace(/\n+/g, ' ')}</p>
+                          <p className="mt-1 font-medium line-clamp-2">Caption: {item.postTitle}</p>
+                        </>
+                      ) : (
+                        <p className="font-medium line-clamp-2">{item.postTitle ?? item.headline}</p>
+                      )}
                       <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{item.postDescription}</p>
                       <p className="mt-2 text-xs">
                         <span className="rounded bg-muted px-2 py-0.5">{item.status}</span>

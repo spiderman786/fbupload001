@@ -7,8 +7,8 @@ import { publishPhotoPost, postComment } from '../publisher.js'
 import { isOAuthTokenError, refreshPageAccessToken, resolvePageAccessToken, assertPublishableFacebookPage } from '../pageTokens.js'
 import { adaptHeadlineForImageGraphic, maybeRewriteNewsContent } from './aiRewriter.js'
 import { runCompositorJob } from './compositorQueue.js'
-import { formatNewsContent, mergeHashtags } from './contentFormatter.js'
-import { composeNewsImage } from './imageCompositor.js'
+import { formatNewsContent, mergeHashtags, headlineToPostTitle } from './contentFormatter.js'
+import { composeNewsImage, precheckHeadlineForTemplate } from './imageCompositor.js'
 import { fetchRssFeed, scrapeArticleImages, selectBestHeroAndInset } from './rssFetcher.js'
 import { normalizeArticleUrl, parseJsonArray } from './types.js'
 
@@ -29,6 +29,7 @@ async function buildNewsContent(input: {
   defaultHashtags: string[]
   aiRewriteEnabled?: boolean
   aiTonePrompt?: string | null
+  templateFontsJson?: string | null
 }) {
   let content = formatNewsContent({
     rssTitle: input.rssTitle,
@@ -41,9 +42,16 @@ async function buildNewsContent(input: {
     rssTitle: input.rssTitle,
     rssDescription: input.rssDescription,
     aiTonePrompt: input.aiTonePrompt ?? undefined,
+    fontsJson: input.templateFontsJson,
   })
   if (imageHeadline) {
     content = { ...content, headline: imageHeadline.headline, accent_words: imageHeadline.accent_words }
+    if (!input.aiRewriteEnabled) {
+      content.post_title = headlineToPostTitle(imageHeadline.headline)
+    }
+  } else {
+    const fallback = precheckHeadlineForTemplate(content.headline, input.templateFontsJson)
+    content.headline = fallback.normalizedHeadline
   }
 
   if (input.aiRewriteEnabled) {
@@ -131,6 +139,7 @@ export async function processRssArticle(input: {
     defaultHashtags: hashtags,
     aiRewriteEnabled: input.aiRewriteEnabled,
     aiTonePrompt: input.aiTonePrompt ?? (template?.ai_tone_prompt as string) ?? null,
+    templateFontsJson: (template?.fonts_json as string) ?? null,
   })
 
   const itemId = uuid()
@@ -203,6 +212,7 @@ export async function regenerateNewsItemImage(itemId: string, agencyId?: string)
     defaultHashtags: parseJsonArray(item.hashtags_json as string),
     aiRewriteEnabled: !!settings?.ai_rewrite_enabled,
     aiTonePrompt: (template?.ai_tone_prompt as string) ?? null,
+    templateFontsJson: (template?.fonts_json as string) ?? null,
   })
 
   let imagePath = String(item.generated_image_path ?? '')
