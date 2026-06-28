@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { Eye, EyeOff, Newspaper, RefreshCw, Rss, Send, SkipForward } from 'lucide-react'
-import { api, type NewsAiProvider, type NewsOverview, type NewsTemplateColors } from '../../api/client'
+import { api, type NewsAiConnectionTest, type NewsAiProvider, type NewsOverview, type NewsTemplateColors } from '../../api/client'
 import { useToast } from '../../context/ToastContext'
 import { getApiError } from '../../lib/apiError'
 
@@ -27,6 +27,8 @@ export function NewsFeedPage() {
   const [showGeminiKey, setShowGeminiKey] = useState(false)
   const [showOpenaiKey, setShowOpenaiKey] = useState(false)
   const [savingAiSettings, setSavingAiSettings] = useState(false)
+  const [testingAi, setTestingAi] = useState(false)
+  const [aiTestResult, setAiTestResult] = useState<NewsAiConnectionTest | null>(null)
 
   const [templateName, setTemplateName] = useState('Default News')
   const [layoutPreset, setLayoutPreset] = useState('popcorn')
@@ -219,6 +221,25 @@ export function NewsFeedPage() {
       toast.error(getApiError(err, 'Save AI settings failed'))
     } finally {
       setSavingAiSettings(false)
+    }
+  }
+
+  async function handleTestAiConnection() {
+    setTestingAi(true)
+    setAiTestResult(null)
+    try {
+      const result = await api.news.testAiConnection()
+      setAiTestResult(result)
+      if (result.ok) {
+        toast.success(`AI connected — sample: ${result.sampleHeadline ?? 'OK'}`)
+      } else {
+        const err = result.results.find((r) => !r.ok)?.error ?? 'AI test failed'
+        toast.error(err.slice(0, 180))
+      }
+    } catch (err) {
+      toast.error(getApiError(err, 'AI test failed'))
+    } finally {
+      setTestingAi(false)
     }
   }
 
@@ -496,6 +517,15 @@ export function NewsFeedPage() {
               >
                 {savingAiSettings ? 'Saving…' : 'Save AI settings'}
               </button>
+              <button
+                type="button"
+                disabled={testingAi || !data.aiSettings?.aiAvailable}
+                onClick={() => void handleTestAiConnection()}
+                className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-semibold disabled:opacity-50"
+              >
+                <RefreshCw className={`h-4 w-4 ${testingAi ? 'animate-spin' : ''}`} />
+                {testingAi ? 'Testing…' : 'Test AI connection'}
+              </button>
               {data.aiSettings?.geminiConfigured && !data.aiSettings.envGemini && (
                 <button
                   type="button"
@@ -507,6 +537,26 @@ export function NewsFeedPage() {
                 </button>
               )}
             </div>
+            {aiTestResult && (
+              <div className={`rounded-lg border px-3 py-2 text-xs ${aiTestResult.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/30 bg-destructive/5'}`}>
+                {aiTestResult.ok ? (
+                  <p className="text-emerald-800 dark:text-emerald-300">
+                    Connected via {aiTestResult.results.find((r) => r.ok)?.provider ?? 'AI'}
+                    {aiTestResult.results.find((r) => r.ok)?.model ? ` (${aiTestResult.results.find((r) => r.ok)?.model})` : ''}.
+                    Sample headline: <span className="font-semibold">{aiTestResult.sampleHeadline}</span>
+                  </p>
+                ) : (
+                  <ul className="space-y-1 text-destructive">
+                    {aiTestResult.results.map((r) => (
+                      <li key={r.provider}>
+                        <span className="font-semibold uppercase">{r.provider}</span>
+                        {r.model ? ` (${r.model})` : ''}: {r.error ?? 'Failed'}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </form>
 
           <div className="grid gap-6 lg:grid-cols-2">

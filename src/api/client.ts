@@ -334,6 +334,7 @@ export const api = {
       geminiApiKey?: string
       openaiApiKey?: string
     }) => request<{ message: string; aiSettings: NewsAiSettings }>('/news/ai-settings', { method: 'PUT', body: JSON.stringify(body) }),
+    testAiConnection: () => request<NewsAiConnectionTest>('/news/ai-settings/test', { method: 'POST' }),
     createTemplate: (body: {
       name: string
       layoutPreset?: string
@@ -1171,6 +1172,21 @@ export type NewsAiSettings = {
   aiAvailable: boolean
   envGemini: boolean
   envOpenai: boolean
+}
+
+export type NewsAiProviderTestResult = {
+  provider: 'gemini' | 'openai'
+  ok: boolean
+  model?: string
+  headline?: string
+  error?: string
+}
+
+export type NewsAiConnectionTest = {
+  ok: boolean
+  results: NewsAiProviderTestResult[]
+  sampleHeadline?: string
+  error?: string
 }
 
 export type NewsOverview = {

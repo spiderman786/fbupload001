@@ -13,9 +13,89 @@ export type ImageHeadlineResult = {
   accent_words: string[]
 }
 
+export type AiProviderTestResult = {
+  provider: 'gemini' | 'openai'
+  ok: boolean
+  model?: string
+  headline?: string
+  error?: string
+}
+
+export type AiConnectionTestResult = {
+  ok: boolean
+  results: AiProviderTestResult[]
+  sampleHeadline?: string
+}
+
 function hasAiConfigured(agencyId?: string): boolean {
   const { geminiKey, openaiKey } = resolveAiCredentials(agencyId)
   return Boolean(geminiKey || openaiKey)
+}
+
+function geminiModels(): string[] {
+  const primary = process.env.GEMINI_MODEL?.trim()
+  const defaults = ['gemini-2.0-flash-lite', 'gemini-2.0-flash', 'gemini-1.5-flash']
+  if (primary) return [primary, ...defaults.filter((m) => m !== primary)]
+  return defaults
+}
+
+function isQuotaError(message: string): boolean {
+  const lower = message.toLowerCase()
+  return lower.includes('quota') || lower.includes('rate limit') || lower.includes('resource exhausted')
+}
+
+async function callGeminiJsonDetailed(
+  prompt: string,
+  system: string,
+  apiKey: string,
+): Promise<{ ok: true; data: Record<string, unknown>; model: string } | { ok: false; error: string; model?: string }> {
+  let lastError = 'Gemini request failed'
+
+  for (const model of geminiModels()) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.7,
+            responseMimeType: 'application/json',
+          },
+        }),
+      })
+
+      const data = (await res.json()) as {
+        candidates?: { content?: { parts?: { text?: string }[] } }[]
+        error?: { message?: string; status?: string }
+      }
+
+      if (!res.ok) {
+        lastError = data.error?.message ?? `HTTP ${res.status}`
+        console.warn(`[news] Gemini request failed (${model}):`, lastError)
+        if (!isQuotaError(lastError)) {
+          return { ok: false, error: lastError, model }
+        }
+        continue
+      }
+
+      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text
+      if (!raw) {
+        lastError = 'Gemini returned an empty response'
+        continue
+      }
+
+      return { ok: true, data: JSON.parse(raw) as Record<string, unknown>, model }
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err)
+      console.warn(`[news] Gemini request error (${model}):`, lastError)
+    }
+  }
+
+  return { ok: false, error: lastError }
 }
 
 async function callGeminiJson(
@@ -23,46 +103,17 @@ async function callGeminiJson(
   system: string,
   apiKey: string,
 ): Promise<Record<string, unknown> | null> {
-  const model = process.env.GEMINI_MODEL?.trim() || 'gemini-2.0-flash'
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`
-
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          responseMimeType: 'application/json',
-        },
-      }),
-    })
-
-    const data = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[]
-      error?: { message?: string }
-    }
-    if (!res.ok) {
-      console.warn('[news] Gemini request failed:', data.error?.message ?? res.status)
-      return null
-    }
-
-    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text
-    if (!raw) return null
-    return JSON.parse(raw) as Record<string, unknown>
-  } catch (err) {
-    console.warn('[news] Gemini request error:', err instanceof Error ? err.message : err)
-    return null
-  }
+  const result = await callGeminiJsonDetailed(prompt, system, apiKey)
+  return result.ok ? result.data : null
 }
 
-async function callOpenAiJson(
+async function callOpenAiJsonDetailed(
   prompt: string,
   system: string,
   apiKey: string,
-): Promise<Record<string, unknown> | null> {
+): Promise<{ ok: true; data: Record<string, unknown>; model: string } | { ok: false; error: string; model?: string }> {
+  const model = process.env.OPENAI_MODEL ?? 'gpt-4o-mini'
+
   try {
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -71,7 +122,7 @@ async function callOpenAiJson(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
+        model,
         temperature: 0.7,
         response_format: { type: 'json_object' },
         messages: [
@@ -86,17 +137,28 @@ async function callOpenAiJson(
       error?: { message?: string }
     }
     if (!res.ok) {
-      console.warn('[news] OpenAI request failed:', data.error?.message ?? res.status)
-      return null
+      const error = data.error?.message ?? `HTTP ${res.status}`
+      console.warn('[news] OpenAI request failed:', error)
+      return { ok: false, error, model }
     }
 
     const raw = data.choices?.[0]?.message?.content
-    if (!raw) return null
-    return JSON.parse(raw) as Record<string, unknown>
+    if (!raw) return { ok: false, error: 'OpenAI returned an empty response', model }
+    return { ok: true, data: JSON.parse(raw) as Record<string, unknown>, model }
   } catch (err) {
-    console.warn('[news] OpenAI request error:', err instanceof Error ? err.message : err)
-    return null
+    const error = err instanceof Error ? err.message : String(err)
+    console.warn('[news] OpenAI request error:', error)
+    return { ok: false, error }
   }
+}
+
+async function callOpenAiJson(
+  prompt: string,
+  system: string,
+  apiKey: string,
+): Promise<Record<string, unknown> | null> {
+  const result = await callOpenAiJsonDetailed(prompt, system, apiKey)
+  return result.ok ? result.data : null
 }
 
 function providerOrder(provider: AiProvider, geminiKey: string | null, openaiKey: string | null): ('gemini' | 'openai')[] {
@@ -205,4 +267,52 @@ RSS description: ${input.rssDescription.slice(0, 800)}`
     post_title: String(parsed.post_title ?? input.rssTitle).trim().slice(0, 300),
     post_description: String(parsed.post_description ?? input.rssDescription).trim().slice(0, 500),
   }
+}
+
+const TEST_PROMPT = `Rewrite this news title for a Facebook image graphic overlay.
+Return JSON only: {"headline":"SHORT ALL CAPS HEADLINE","accent_words":["WORD1","WORD2"]}
+Rules: ALL CAPS, max 70 characters, punchy tabloid style.
+
+RSS title: Celebrity Couple Shocks Fans With Surprise Breakup After Three Years Together`
+const TEST_SYSTEM = 'You write ultra-short Facebook news graphic headlines. JSON only.'
+
+export async function testNewsAiConnection(agencyId: string): Promise<AiConnectionTestResult> {
+  const { provider, geminiKey, openaiKey } = resolveAiCredentials(agencyId)
+  const order = providerOrder(provider, geminiKey, openaiKey)
+  const results: AiProviderTestResult[] = []
+
+  if (order.length === 0) {
+    return {
+      ok: false,
+      results: [{ provider: 'gemini', ok: false, error: 'No API key configured — add a Gemini or OpenAI key above.' }],
+    }
+  }
+
+  for (const backend of order) {
+    if (backend === 'gemini' && geminiKey) {
+      const res = await callGeminiJsonDetailed(TEST_PROMPT, TEST_SYSTEM, geminiKey)
+      if (!res.ok) {
+        const fail = res as Extract<typeof res, { ok: false }>
+        results.push({ provider: 'gemini', ok: false, model: fail.model, error: fail.error })
+        continue
+      }
+      const headline = String(res.data.headline ?? '').toUpperCase().slice(0, 80)
+      results.push({ provider: 'gemini', ok: true, model: res.model, headline })
+      return { ok: true, results, sampleHeadline: headline }
+    }
+
+    if (backend === 'openai' && openaiKey) {
+      const res = await callOpenAiJsonDetailed(TEST_PROMPT, TEST_SYSTEM, openaiKey)
+      if (!res.ok) {
+        const fail = res as Extract<typeof res, { ok: false }>
+        results.push({ provider: 'openai', ok: false, model: fail.model, error: fail.error })
+        continue
+      }
+      const headline = String(res.data.headline ?? '').toUpperCase().slice(0, 80)
+      results.push({ provider: 'openai', ok: true, model: res.model, headline })
+      return { ok: true, results, sampleHeadline: headline }
+    }
+  }
+
+  return { ok: false, results }
 }

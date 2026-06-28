@@ -9,6 +9,7 @@ import type { AgencyRequest } from '../utils/agency.js'
 import { composeTemplatePreview } from '../services/news/imageCompositor.js'
 import { getAgencyAiSettingsPublic, saveAgencyAiSettings, type AiProvider } from '../services/news/aiSettings.js'
 import { getCompositorQueueStats } from '../services/news/compositorQueue.js'
+import { testNewsAiConnection } from '../services/news/aiRewriter.js'
 import { pollFeedsForAgency, pollFeed, publishNewsItem, regenerateNewsItemImage } from '../services/news/newsPipeline.js'
 import { fetchRssFeed } from '../services/news/rssFetcher.js'
 import { DEFAULT_COLORS, parseBrandType, parseJsonArray, resolveFonts, type NewsFonts } from '../services/news/types.js'
@@ -99,6 +100,15 @@ newsRouter.put('/ai-settings', (req: AgencyRequest, res) => {
     openaiApiKey: openaiApiKey === '' ? null : openaiApiKey,
   })
   res.json({ message: 'AI settings saved', aiSettings })
+})
+
+newsRouter.post('/ai-settings/test', async (req: AgencyRequest, res) => {
+  try {
+    const test = await testNewsAiConnection(req.agency!.id)
+    res.json(test)
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'AI test failed', results: [] })
+  }
 })
 
 newsRouter.get('/overview', (req: AgencyRequest, res) => {
