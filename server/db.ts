@@ -558,6 +558,16 @@ function migrateNews() {
   if (!templateCols.some((c) => c.name === 'brand_type')) {
     db.exec(`ALTER TABLE news_templates ADD COLUMN brand_type TEXT NOT NULL DEFAULT 'page_name'`)
   }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agency_ai_settings (
+      agency_id TEXT PRIMARY KEY REFERENCES agencies(id) ON DELETE CASCADE,
+      gemini_api_key TEXT,
+      openai_api_key TEXT,
+      ai_provider TEXT NOT NULL DEFAULT 'gemini',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `)
 }
 
 function migrateScrapeAndSchedule() {

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { Eye, Newspaper, RefreshCw, Rss, Send, SkipForward } from 'lucide-react'
-import { api, type NewsBrandType, type NewsOverview, type NewsTemplateColors } from '../../api/client'
+import { Eye, EyeOff, Newspaper, RefreshCw, Rss, Send, SkipForward } from 'lucide-react'
+import { api, type NewsAiProvider, type NewsOverview, type NewsTemplateColors } from '../../api/client'
 import { useToast } from '../../context/ToastContext'
 import { getApiError } from '../../lib/apiError'
 
@@ -18,6 +18,15 @@ export function NewsFeedPage() {
   const [data, setData] = useState<NewsOverview | null>(null)
   const [loading, setLoading] = useState(true)
   const [polling, setPolling] = useState(false)
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
+  const [previewCacheBust, setPreviewCacheBust] = useState<Record<string, number>>({})
+
+  const [aiProvider, setAiProvider] = useState<NewsAiProvider>('gemini')
+  const [geminiApiKey, setGeminiApiKey] = useState('')
+  const [openaiApiKey, setOpenaiApiKey] = useState('')
+  const [showGeminiKey, setShowGeminiKey] = useState(false)
+  const [showOpenaiKey, setShowOpenaiKey] = useState(false)
+  const [savingAiSettings, setSavingAiSettings] = useState(false)
 
   const [templateName, setTemplateName] = useState('Default News')
   const [layoutPreset, setLayoutPreset] = useState('popcorn')
@@ -26,9 +35,7 @@ export function NewsFeedPage() {
   const [ctaText, setCtaText] = useState('READ MORE INFO IN THE COMMENT')
   const [defaultHashtagsStr, setDefaultHashtagsStr] = useState('#News')
   const [aiTonePrompt, setAiTonePrompt] = useState('')
-  const [logoPath, setLogoPath] = useState<string | null>(null)
   const [editTemplateId, setEditTemplateId] = useState('')
-  const [brandType, setBrandType] = useState<NewsBrandType>('page_name')
   const [textSize, setTextSize] = useState(50)
   const [previewPageId, setPreviewPageId] = useState('')
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -87,8 +94,6 @@ export function NewsFeedPage() {
     setCtaText(t.ctaText || 'READ MORE INFO IN THE COMMENT')
     setDefaultHashtagsStr(t.defaultHashtags.join(' '))
     setAiTonePrompt(t.aiTonePrompt)
-    setLogoPath(t.logoPath)
-    setBrandType(t.brandType)
     setTextSize(t.fonts.textSize ?? 50)
   }
 
@@ -111,7 +116,11 @@ export function NewsFeedPage() {
         feeds: overview.feeds ?? [],
         items: overview.items ?? [],
         stats: overview.stats ?? { ready: 0, posted: 0, failed: 0 },
+        aiSettings: overview.aiSettings,
       })
+      if (overview.aiSettings) {
+        setAiProvider(overview.aiSettings.provider)
+      }
       const realPages = overview.pages.filter((p) => !p.isMockPage)
       const defaultPageId = realPages[0]?.id || overview.pages[0]?.id || ''
       setFeedPageId((prev) => (prev && realPages.some((p) => p.id === prev) ? prev : defaultPageId))
@@ -151,9 +160,8 @@ export function NewsFeedPage() {
       const blob = await api.news.previewTemplate({
         colors: templateColors,
         fonts: templateFonts,
-        brandType,
+        brandType: 'page_name',
         ctaText,
-        logoPath,
         pageId: previewPageId || undefined,
       })
       setPreviewUrl((prev) => {
@@ -174,11 +182,11 @@ export function NewsFeedPage() {
       layoutPreset,
       colors: templateColors,
       fonts: templateFonts,
-      brandType,
+      brandType: 'page_name' as const,
       ctaText,
       defaultHashtags: parseHashtags(defaultHashtagsStr),
       aiTonePrompt,
-      logoPath,
+      logoPath: null,
     }
     try {
       if (editTemplateId) {
@@ -194,21 +202,37 @@ export function NewsFeedPage() {
     }
   }
 
-  async function handleLogoUpload(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+  async function handleSaveAiSettings(e: FormEvent) {
+    e.preventDefault()
+    setSavingAiSettings(true)
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(String(reader.result))
-        reader.onerror = () => reject(new Error('Read failed'))
-        reader.readAsDataURL(file)
+      const res = await api.news.saveAiSettings({
+        provider: aiProvider,
+        ...(geminiApiKey.trim() ? { geminiApiKey: geminiApiKey.trim() } : {}),
+        ...(openaiApiKey.trim() ? { openaiApiKey: openaiApiKey.trim() } : {}),
       })
-      const res = await api.news.uploadLogo({ dataUrl, fileName: file.name })
-      setLogoPath(res.logoPath)
-      toast.success('Logo uploaded')
+      setGeminiApiKey('')
+      setOpenaiApiKey('')
+      toast.success(res.message)
+      await load()
     } catch (err) {
-      toast.error(getApiError(err, 'Logo upload failed'))
+      toast.error(getApiError(err, 'Save AI settings failed'))
+    } finally {
+      setSavingAiSettings(false)
+    }
+  }
+
+  async function handleClearGeminiKey() {
+    setSavingAiSettings(true)
+    try {
+      await api.news.saveAiSettings({ provider: aiProvider, geminiApiKey: '' })
+      setGeminiApiKey('')
+      toast.success('Gemini key removed')
+      await load()
+    } catch (err) {
+      toast.error(getApiError(err, 'Remove key failed'))
+    } finally {
+      setSavingAiSettings(false)
     }
   }
 
@@ -311,6 +335,20 @@ export function NewsFeedPage() {
     }
   }
 
+  async function handleRegenerateImage(itemId: string) {
+    setRegeneratingId(itemId)
+    try {
+      await api.news.regenerateItemImage(itemId)
+      setPreviewCacheBust((prev) => ({ ...prev, [itemId]: Date.now() }))
+      toast.success('Image regenerated with AI headline')
+      await load()
+    } catch (err) {
+      toast.error(getApiError(err, 'Regenerate failed'))
+    } finally {
+      setRegeneratingId(null)
+    }
+  }
+
   async function handleSkip(itemId: string) {
     try {
       await api.news.skipItem(itemId)
@@ -376,6 +414,101 @@ export function NewsFeedPage() {
             ))}
           </div>
 
+          <form onSubmit={handleSaveAiSettings} className="marketing-card space-y-4">
+            <h2 className="font-semibold">AI headline settings</h2>
+            <p className="text-xs text-muted-foreground">
+              Google Gemini free tier is recommended — get a key at{' '}
+              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                Google AI Studio
+              </a>
+              . Used to shorten titles for the image template and optionally rewrite captions.
+            </p>
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className={`rounded px-2 py-0.5 ${data.aiSettings?.aiAvailable ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'bg-muted text-muted-foreground'}`}>
+                {data.aiSettings?.aiAvailable ? 'AI ready' : 'No API key configured'}
+              </span>
+              {data.aiSettings?.geminiConfigured && (
+                <span className="rounded bg-muted px-2 py-0.5 text-muted-foreground">Gemini {data.aiSettings.envGemini ? '(server)' : '(saved)'}</span>
+              )}
+              {data.aiSettings?.openaiConfigured && (
+                <span className="rounded bg-muted px-2 py-0.5 text-muted-foreground">OpenAI {data.aiSettings.envOpenai ? '(server)' : '(saved)'}</span>
+              )}
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Preferred provider</label>
+              <select
+                value={aiProvider}
+                onChange={(e) => setAiProvider(e.target.value as NewsAiProvider)}
+                className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+              >
+                <option value="gemini">Google Gemini (recommended, free tier)</option>
+                <option value="auto">Auto — Gemini first, then OpenAI</option>
+                <option value="openai">OpenAI only</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Gemini API key</label>
+              <div className="relative">
+                <input
+                  type={showGeminiKey ? 'text' : 'password'}
+                  value={geminiApiKey}
+                  onChange={(e) => setGeminiApiKey(e.target.value)}
+                  placeholder={data.aiSettings?.geminiConfigured ? '•••••••• (leave blank to keep current)' : 'AIza...'}
+                  className="h-10 w-full rounded-md border border-border bg-background px-3 pr-10 text-sm"
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowGeminiKey((v) => !v)}
+                  className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground"
+                  aria-label={showGeminiKey ? 'Hide key' : 'Show key'}
+                >
+                  {showGeminiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">OpenAI API key (optional fallback)</label>
+              <div className="relative">
+                <input
+                  type={showOpenaiKey ? 'text' : 'password'}
+                  value={openaiApiKey}
+                  onChange={(e) => setOpenaiApiKey(e.target.value)}
+                  placeholder={data.aiSettings?.openaiConfigured ? '•••••••• (leave blank to keep current)' : 'sk-...'}
+                  className="h-10 w-full rounded-md border border-border bg-background px-3 pr-10 text-sm"
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowOpenaiKey((v) => !v)}
+                  className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground"
+                  aria-label={showOpenaiKey ? 'Hide key' : 'Show key'}
+                >
+                  {showOpenaiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="submit"
+                disabled={savingAiSettings}
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+              >
+                {savingAiSettings ? 'Saving…' : 'Save AI settings'}
+              </button>
+              {data.aiSettings?.geminiConfigured && !data.aiSettings.envGemini && (
+                <button
+                  type="button"
+                  disabled={savingAiSettings}
+                  onClick={() => void handleClearGeminiKey()}
+                  className="rounded-lg border border-border px-4 py-2 text-sm disabled:opacity-50"
+                >
+                  Remove Gemini key
+                </button>
+              )}
+            </div>
+          </form>
+
           <div className="grid gap-6 lg:grid-cols-2">
             <form onSubmit={handleCreateTemplate} className="marketing-card space-y-4">
               <h2 className="font-semibold">Template editor</h2>
@@ -436,25 +569,13 @@ export function NewsFeedPage() {
                 <p className="text-xs text-muted-foreground">1 = smallest · 100 = largest</p>
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium">Brand display</label>
-                <select
-                  value={brandType}
-                  onChange={(e) => setBrandType(e.target.value as NewsBrandType)}
-                  className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
-                >
-                  <option value="page_name">Page name (default)</option>
-                  <option value="logo">Logo image</option>
-                  <option value="none">None</option>
-                </select>
-              </div>
-              {brandType === 'page_name' && (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Preview page</label>
-                  {data.pages.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      <Link to="/facebook/accounts" className="text-primary hover:underline">Connect a Facebook page</Link> to preview its name.
-                    </p>
-                  ) : (
+                <label className="text-sm font-medium">Page name on image</label>
+                {data.pages.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    <Link to="/facebook/accounts" className="text-primary hover:underline">Connect a Facebook page</Link> to show its name on each graphic.
+                  </p>
+                ) : (
+                  <>
                     <select
                       value={previewPageId}
                       onChange={(e) => setPreviewPageId(e.target.value)}
@@ -464,9 +585,10 @@ export function NewsFeedPage() {
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
                     </select>
-                  )}
-                </div>
-              )}
+                    <p className="text-xs text-muted-foreground">Each published graphic uses the assigned page&apos;s Facebook name (not a logo).</p>
+                  </>
+                )}
+              </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">CTA text on image</label>
                 <input value={ctaText} onChange={(e) => setCtaText(e.target.value)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm" placeholder="READ MORE INFO IN THE COMMENT" />
@@ -478,11 +600,7 @@ export function NewsFeedPage() {
               <div className="space-y-2">
                 <label className="text-sm font-medium">AI tone prompt (optional)</label>
                 <input value={aiTonePrompt} onChange={(e) => setAiTonePrompt(e.target.value)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm" placeholder="dramatic and emotional" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Logo PNG</label>
-                <input type="file" accept="image/*" onChange={handleLogoUpload} className="text-sm" />
-                {logoPath && <p className="text-xs text-muted-foreground truncate">Saved: {logoPath}</p>}
+                <p className="text-xs text-muted-foreground">Used to shorten and style headlines for the on-image overlay when OpenAI is configured.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -619,7 +737,7 @@ export function NewsFeedPage() {
                 </label>
                 <label className="flex items-center gap-2 text-sm">
                   <input type="checkbox" checked={aiRewriteEnabled} onChange={(e) => setAiRewriteEnabled(e.target.checked)} />
-                  AI rewrite headlines (requires OPENAI_API_KEY)
+                  AI rewrite full caption (requires AI key above; image headlines always use AI when configured)
                 </label>
                 <button type="submit" className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">Save page settings</button>
               </form>
@@ -728,7 +846,7 @@ export function NewsFeedPage() {
                   <li key={item.id} className="flex flex-col gap-3 rounded-lg border border-border p-3 sm:flex-row">
                     {item.status === 'ready' || item.status === 'posted' ? (
                       <img
-                        src={api.news.previewUrl(item.id)}
+                        src={`${api.news.previewUrl(item.id)}${previewCacheBust[item.id] ? `?t=${previewCacheBust[item.id]}` : ''}`}
                         alt=""
                         className="h-40 w-32 shrink-0 rounded-md object-cover bg-muted"
                       />
@@ -742,7 +860,16 @@ export function NewsFeedPage() {
                       </p>
                     </div>
                     {item.status === 'ready' && (
-                      <div className="flex shrink-0 gap-2">
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleRegenerateImage(item.id)}
+                          disabled={regeneratingId === item.id}
+                          className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs disabled:opacity-50"
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 ${regeneratingId === item.id ? 'animate-spin' : ''}`} />
+                          {regeneratingId === item.id ? 'Regenerating…' : 'Regenerate'}
+                        </button>
                         <button type="button" onClick={() => handlePublish(item.id)} className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground">
                           <Send className="h-3.5 w-3.5" />
                           Publish

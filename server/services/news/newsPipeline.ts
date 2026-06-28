@@ -5,12 +5,12 @@ import { v4 as uuid } from 'uuid'
 import { db } from '../../db.js'
 import { publishPhotoPost, postComment } from '../publisher.js'
 import { isOAuthTokenError, refreshPageAccessToken, resolvePageAccessToken, assertPublishableFacebookPage } from '../pageTokens.js'
-import { maybeRewriteNewsContent } from './aiRewriter.js'
+import { adaptHeadlineForImageGraphic, maybeRewriteNewsContent } from './aiRewriter.js'
 import { runCompositorJob } from './compositorQueue.js'
 import { formatNewsContent, mergeHashtags } from './contentFormatter.js'
 import { composeNewsImage } from './imageCompositor.js'
 import { fetchRssFeed, scrapeArticleImages, selectBestHeroAndInset } from './rssFetcher.js'
-import { normalizeArticleUrl, parseBrandType, parseJsonArray } from './types.js'
+import { normalizeArticleUrl, parseJsonArray } from './types.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const newsImagesDir = path.join(__dirname, '..', '..', '..', 'data', 'news-images')
@@ -20,6 +20,82 @@ function isDuplicate(pageId: string, articleUrl: string): boolean {
     .prepare('SELECT id FROM posted_articles WHERE page_id = ? AND article_url = ? LIMIT 1')
     .get(pageId, articleUrl) as { id: string } | undefined
   return !!row
+}
+
+async function buildNewsContent(input: {
+  agencyId: string
+  rssTitle: string
+  rssDescription: string
+  defaultHashtags: string[]
+  aiRewriteEnabled?: boolean
+  aiTonePrompt?: string | null
+}) {
+  let content = formatNewsContent({
+    rssTitle: input.rssTitle,
+    rssDescription: input.rssDescription,
+    defaultHashtags: input.defaultHashtags,
+  })
+
+  const imageHeadline = await adaptHeadlineForImageGraphic({
+    agencyId: input.agencyId,
+    rssTitle: input.rssTitle,
+    rssDescription: input.rssDescription,
+    aiTonePrompt: input.aiTonePrompt ?? undefined,
+  })
+  if (imageHeadline) {
+    content = { ...content, headline: imageHeadline.headline, accent_words: imageHeadline.accent_words }
+  }
+
+  if (input.aiRewriteEnabled) {
+    const rewritten = await maybeRewriteNewsContent({
+      agencyId: input.agencyId,
+      rssTitle: input.rssTitle,
+      rssDescription: input.rssDescription,
+      aiTonePrompt: input.aiTonePrompt ?? undefined,
+    })
+    if (rewritten) {
+      content = {
+        ...content,
+        headline: imageHeadline?.headline ?? rewritten.headline,
+        accent_words: imageHeadline?.accent_words ?? rewritten.accent_words,
+        post_title: rewritten.post_title,
+        post_description: rewritten.post_description,
+      }
+    }
+  }
+
+  return content
+}
+
+async function composeItemImage(options: {
+  agencyId: string
+  pageId: string
+  template: Record<string, unknown> | undefined
+  heroUrl: string
+  insetUrl: string
+  headline: string
+  accentWords: string[]
+  outputPath: string
+}) {
+  const pageRow = db
+    .prepare('SELECT name FROM facebook_pages WHERE id = ?')
+    .get(options.pageId) as { name: string } | undefined
+
+  await runCompositorJob(() =>
+    composeNewsImage({
+      heroUrl: options.heroUrl,
+      insetUrl: options.insetUrl,
+      headline: options.headline,
+      accentWords: options.accentWords,
+      colorsJson: (options.template?.colors_json as string) ?? null,
+      fontsJson: (options.template?.fonts_json as string) ?? null,
+      brandType: 'page_name',
+      pageName: pageRow?.name ?? null,
+      logoPath: null,
+      ctaText: (options.template?.cta_text as string) ?? '',
+      outputPath: options.outputPath,
+    }),
+  )
 }
 
 export async function processRssArticle(input: {
@@ -39,10 +115,6 @@ export async function processRssArticle(input: {
     ? (db.prepare('SELECT * FROM news_templates WHERE id = ?').get(input.templateId) as Record<string, unknown> | undefined)
     : undefined
 
-  const pageRow = db
-    .prepare('SELECT name FROM facebook_pages WHERE id = ?')
-    .get(input.pageId) as { name: string } | undefined
-
   const scraped = await scrapeArticleImages(articleUrl)
   const imageList = [...scraped, input.article.imageUrl].filter(Boolean) as string[]
   const { hero, inset } = await selectBestHeroAndInset(imageList)
@@ -52,41 +124,28 @@ export async function processRssArticle(input: {
   }
 
   const hashtags = mergeHashtags(input.defaultHashtagsJson ?? (template?.default_hashtags_json as string), [])
-  let content = formatNewsContent({
+  const content = await buildNewsContent({
+    agencyId: input.agencyId,
     rssTitle: input.article.title,
     rssDescription: input.article.description,
     defaultHashtags: hashtags,
+    aiRewriteEnabled: input.aiRewriteEnabled,
+    aiTonePrompt: input.aiTonePrompt ?? (template?.ai_tone_prompt as string) ?? null,
   })
-
-  if (input.aiRewriteEnabled) {
-    const rewritten = await maybeRewriteNewsContent({
-      rssTitle: input.article.title,
-      rssDescription: input.article.description,
-      aiTonePrompt: input.aiTonePrompt ?? (template?.ai_tone_prompt as string) ?? undefined,
-    })
-    if (rewritten) {
-      content = { ...content, ...rewritten, hashtags }
-    }
-  }
 
   const itemId = uuid()
   const imagePath = path.join(newsImagesDir, input.agencyId, `${itemId}.png`)
 
-  await runCompositorJob(() =>
-    composeNewsImage({
-      heroUrl: hero,
-      insetUrl: inset ?? hero,
-      headline: content.headline,
-      accentWords: content.accent_words,
-      colorsJson: (template?.colors_json as string) ?? null,
-      fontsJson: (template?.fonts_json as string) ?? null,
-      brandType: parseBrandType(template?.brand_type as string | undefined),
-      pageName: pageRow?.name ?? null,
-      logoPath: (template?.logo_path as string) ?? null,
-      ctaText: (template?.cta_text as string) ?? '',
-      outputPath: imagePath,
-    }),
-  )
+  await composeItemImage({
+    agencyId: input.agencyId,
+    pageId: input.pageId,
+    template,
+    heroUrl: hero,
+    insetUrl: inset ?? hero,
+    headline: content.headline,
+    accentWords: content.accent_words,
+    outputPath: imagePath,
+  })
 
   db.prepare(`
     INSERT INTO news_items (
@@ -117,6 +176,71 @@ export async function processRssArticle(input: {
   return itemId
 }
 
+export async function regenerateNewsItemImage(itemId: string, agencyId?: string): Promise<void> {
+  const item = db.prepare('SELECT * FROM news_items WHERE id = ?').get(itemId) as Record<string, unknown> | undefined
+  if (!item) throw new Error('News item not found')
+  if (agencyId && String(item.agency_id) !== agencyId) throw new Error('News item not found')
+  if (item.status !== 'ready') throw new Error('Can only regenerate ready items')
+
+  const pageId = String(item.page_id)
+  const templateId = item.template_id as string | null
+  const template = templateId
+    ? (db.prepare('SELECT * FROM news_templates WHERE id = ?').get(templateId) as Record<string, unknown> | undefined)
+    : undefined
+
+  const settings = db.prepare('SELECT * FROM page_news_settings WHERE page_id = ?').get(pageId) as
+    | Record<string, unknown>
+    | undefined
+
+  const hero = String(item.hero_image_url ?? '')
+  const inset = String(item.inset_image_url ?? hero)
+  if (!hero) throw new Error('Hero image URL missing')
+
+  const content = await buildNewsContent({
+    agencyId: String(item.agency_id),
+    rssTitle: String(item.rss_title ?? item.headline ?? ''),
+    rssDescription: String(item.rss_description ?? ''),
+    defaultHashtags: parseJsonArray(item.hashtags_json as string),
+    aiRewriteEnabled: !!settings?.ai_rewrite_enabled,
+    aiTonePrompt: (template?.ai_tone_prompt as string) ?? null,
+  })
+
+  let imagePath = String(item.generated_image_path ?? '')
+  if (!imagePath) {
+    imagePath = path.join(newsImagesDir, String(item.agency_id), `${itemId}.png`)
+  }
+  fs.mkdirSync(path.dirname(imagePath), { recursive: true })
+
+  await composeItemImage({
+    agencyId: String(item.agency_id),
+    pageId,
+    template,
+    heroUrl: hero,
+    insetUrl: inset,
+    headline: content.headline,
+    accentWords: content.accent_words,
+    outputPath: imagePath,
+  })
+
+  db.prepare(`
+    UPDATE news_items SET
+      headline = ?,
+      accent_words_json = ?,
+      post_title = ?,
+      post_description = ?,
+      generated_image_path = ?,
+      error_message = NULL
+    WHERE id = ?
+  `).run(
+    content.headline,
+    JSON.stringify(content.accent_words),
+    content.post_title,
+    content.post_description,
+    imagePath,
+    itemId,
+  )
+}
+
 async function publishPhotoWithTokenRetry(
   pageId: string,
   agencyId: string,
@@ -139,7 +263,7 @@ async function publishPhotoWithTokenRetry(
 
     const refreshed = await refreshPageAccessToken(pageId, agencyId)
     if (!refreshed) {
-      throw new Error('Facebook session expired — reconnect your account under Facebook → Accounts')
+      throw new Error('Facebook session expired — reconnect your account under Facebook → Accounts', { cause: err })
     }
 
     const { postId } = await publishPhotoPost(refreshed.metaPageId, refreshed.token, imagePath, caption)
@@ -210,15 +334,23 @@ export async function pollFeed(feedId: string): Promise<number> {
 
   try {
     const articles = await fetchRssFeed(String(feed.url))
+    const templateId = (settings?.template_id as string) ?? (feed.template_id as string) ?? null
+    const template = templateId
+      ? (db.prepare('SELECT ai_tone_prompt FROM news_templates WHERE id = ?').get(templateId) as
+          | { ai_tone_prompt: string | null }
+          | undefined)
+      : undefined
+
     const jobs = articles.slice(0, 5).map((article) =>
       processRssArticle({
         agencyId: String(feed.agency_id),
         feedId: String(feed.id),
         pageId,
-        templateId: (settings?.template_id as string) ?? (feed.template_id as string) ?? null,
+        templateId,
         article,
         defaultHashtagsJson: (settings?.default_hashtags_json as string) ?? null,
         aiRewriteEnabled: !!settings?.ai_rewrite_enabled,
+        aiTonePrompt: template?.ai_tone_prompt ?? null,
       }),
     )
     const results = await Promise.allSettled(jobs)

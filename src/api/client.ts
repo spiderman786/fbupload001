@@ -328,6 +328,12 @@ export const api = {
   },
   news: {
     overview: () => request<NewsOverview>('/news/overview'),
+    getAiSettings: () => request<{ aiSettings: NewsAiSettings }>('/news/ai-settings'),
+    saveAiSettings: (body: {
+      provider?: NewsAiProvider
+      geminiApiKey?: string
+      openaiApiKey?: string
+    }) => request<{ message: string; aiSettings: NewsAiSettings }>('/news/ai-settings', { method: 'PUT', body: JSON.stringify(body) }),
     createTemplate: (body: {
       name: string
       layoutPreset?: string
@@ -399,6 +405,8 @@ export const api = {
     pollFeed: (id: string) => request<{ message: string; created: number }>(`/news/feeds/${id}/poll`, { method: 'POST' }),
     publishItem: (id: string) => request<{ message: string; postId: string }>(`/news/items/${id}/publish`, { method: 'POST' }),
     skipItem: (id: string) => request<{ message: string }>(`/news/items/${id}/skip`, { method: 'POST' }),
+    regenerateItemImage: (id: string) =>
+      request<{ message: string; item: NewsItemRow }>(`/news/items/${id}/regenerate-image`, { method: 'POST' }),
     testFetch: (url: string) =>
       request<{ count: number; articles: { title: string; link: string; imageUrl: string | null }[] }>('/news/test-fetch', {
         method: 'POST',
@@ -1154,10 +1162,22 @@ export type NewsPageSettingsBody = {
   scheduleOffsetMinutes?: number
 }
 
+export type NewsAiProvider = 'gemini' | 'openai' | 'auto'
+
+export type NewsAiSettings = {
+  provider: NewsAiProvider
+  geminiConfigured: boolean
+  openaiConfigured: boolean
+  aiAvailable: boolean
+  envGemini: boolean
+  envOpenai: boolean
+}
+
 export type NewsOverview = {
   templates: NewsTemplateRow[]
   feeds: NewsFeedRow[]
   pages: NewsPageRow[]
   items: NewsItemRow[]
   stats: { ready: number; posted: number; failed: number }
+  aiSettings?: NewsAiSettings
 }

@@ -7,8 +7,9 @@ import { authMiddleware, requireVerified } from '../middleware/auth.js'
 import { agencyMiddleware, requireRole } from '../middleware/agency.js'
 import type { AgencyRequest } from '../utils/agency.js'
 import { composeTemplatePreview } from '../services/news/imageCompositor.js'
+import { getAgencyAiSettingsPublic, saveAgencyAiSettings, type AiProvider } from '../services/news/aiSettings.js'
 import { getCompositorQueueStats } from '../services/news/compositorQueue.js'
-import { pollFeedsForAgency, pollFeed, publishNewsItem } from '../services/news/newsPipeline.js'
+import { pollFeedsForAgency, pollFeed, publishNewsItem, regenerateNewsItemImage } from '../services/news/newsPipeline.js'
 import { fetchRssFeed } from '../services/news/rssFetcher.js'
 import { DEFAULT_COLORS, parseBrandType, parseJsonArray, resolveFonts, type NewsFonts } from '../services/news/types.js'
 import { isMockMetaPageId } from '../services/facebook.js'
@@ -83,6 +84,23 @@ function mapItem(row: Record<string, unknown>) {
   }
 }
 
+newsRouter.get('/ai-settings', (req: AgencyRequest, res) => {
+  res.json({ aiSettings: getAgencyAiSettingsPublic(req.agency!.id) })
+})
+
+newsRouter.put('/ai-settings', (req: AgencyRequest, res) => {
+  const { provider, geminiApiKey, openaiApiKey } = req.body ?? {}
+  const normalizedProvider: AiProvider | undefined =
+    provider === 'gemini' || provider === 'openai' || provider === 'auto' ? provider : undefined
+
+  const aiSettings = saveAgencyAiSettings(req.agency!.id, {
+    provider: normalizedProvider,
+    geminiApiKey: geminiApiKey === '' ? null : geminiApiKey,
+    openaiApiKey: openaiApiKey === '' ? null : openaiApiKey,
+  })
+  res.json({ message: 'AI settings saved', aiSettings })
+})
+
 newsRouter.get('/overview', (req: AgencyRequest, res) => {
   const agencyId = req.agency!.id
 
@@ -136,6 +154,7 @@ newsRouter.get('/overview', (req: AgencyRequest, res) => {
   res.json({
     templates,
     feeds,
+    aiSettings: getAgencyAiSettingsPublic(agencyId),
     pages: pages.map((p) => ({
       id: p.id,
       name: p.name,
@@ -163,7 +182,7 @@ newsRouter.get('/overview', (req: AgencyRequest, res) => {
 })
 
 newsRouter.post('/templates/preview', async (req: AgencyRequest, res) => {
-  const { colors, fonts, ctaText, headline, logoPath, brandType, pageId, pageName } = req.body ?? {}
+  const { colors, fonts, ctaText, headline, pageId, pageName } = req.body ?? {}
   try {
     let resolvedPageName = pageName?.trim() || null
     if (!resolvedPageName && pageId) {
@@ -178,8 +197,8 @@ newsRouter.post('/templates/preview', async (req: AgencyRequest, res) => {
       fontsJson: fonts ? JSON.stringify(resolveFonts(fonts)) : null,
       ctaText: ctaText ?? '',
       headline: headline?.trim() || undefined,
-      logoPath: logoPath ?? null,
-      brandType: parseBrandType(brandType),
+      logoPath: null,
+      brandType: 'page_name',
       pageName: resolvedPageName,
     })
     res.type('png').send(png)
@@ -642,6 +661,25 @@ newsRouter.post('/feeds/:id/poll', async (req: AgencyRequest, res) => {
     res.json({ message: `Created ${created} items`, created })
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Poll failed' })
+  }
+})
+
+newsRouter.post('/items/:id/regenerate-image', async (req: AgencyRequest, res) => {
+  const item = db
+    .prepare('SELECT id FROM news_items WHERE id = ? AND agency_id = ?')
+    .get(routeParam(req.params.id), req.agency!.id)
+  if (!item) {
+    res.status(404).json({ error: 'Item not found' })
+    return
+  }
+  try {
+    await regenerateNewsItemImage(routeParam(req.params.id), req.agency!.id)
+    const updated = db
+      .prepare('SELECT * FROM news_items WHERE id = ?')
+      .get(routeParam(req.params.id)) as Record<string, unknown>
+    res.json({ message: 'Image regenerated', item: mapItem(updated) })
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Regenerate failed' })
   }
 })
 
