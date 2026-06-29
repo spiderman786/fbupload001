@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, Plus, Search, X } from 'lucide-react'
 import { api } from '../api/client'
-import { COMMON_TIMEZONES } from '../config/timezones'
 import { parseCsvSourceMappings } from '../lib/parseSourceUrl'
+import {
+  activeSchedulePreview,
+  formatScheduleTimes,
+  globalBestScheduleTimes,
+  postingScheduleLabel,
+  resolveScheduleTimesForSave,
+  type PostingScheduleMode,
+} from '../lib/postingSchedule'
+import { PostingScheduleSection } from './PostingScheduleSection'
 import { useToast } from '../context/ToastContext'
 import { getApiError } from '../lib/apiError'
 
@@ -41,29 +49,6 @@ function accountLabel(acc: FbAccount) {
   return acc.display_name?.trim() || `Account ${acc.meta_user_id.slice(-6)}`
 }
 
-function PostsPerDayGrid({ value, onChange }: { value: number; onChange: (n: number) => void }) {
-  return (
-    <div>
-      <p className="mb-2 text-sm font-semibold">Posts Per Day</p>
-      <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
-        {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
-          <button
-            key={n}
-            type="button"
-            onClick={() => onChange(n)}
-            className={`rounded-lg border px-2 py-2 text-xs font-semibold uppercase ${
-              value === n ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'
-            }`}
-          >
-            {n} {n === 1 ? 'post' : 'posts'}
-          </button>
-        ))}
-      </div>
-      <p className="mt-2 text-xs text-muted-foreground">Selected: {value} post{value !== 1 ? 's' : ''} per day</p>
-    </div>
-  )
-}
-
 export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onClose: () => void; onComplete: () => void }) {
   const toast = useToast()
   const [mode, setMode] = useState<AddMode>('single')
@@ -79,6 +64,10 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([])
   const [selectedPages, setSelectedPages] = useState<SelectedPage[]>([])
   const [postsPerDay, setPostsPerDay] = useState(3)
+  const [scheduleMode, setScheduleMode] = useState<PostingScheduleMode>('global')
+  const [customScheduleTimes, setCustomScheduleTimes] = useState(() =>
+    formatScheduleTimes(globalBestScheduleTimes(3)),
+  )
   const [timezone, setTimezone] = useState(
     Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York',
   )
@@ -108,6 +97,8 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
     setPageSearch('')
     setPageListPage(1)
     setPostsPerDay(3)
+    setScheduleMode('global')
+    setCustomScheduleTimes(formatScheduleTimes(globalBestScheduleTimes(3)))
     setSourceUsername('')
     setCsvText('')
     setSelectedSourceId('')
@@ -315,7 +306,12 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
       }
 
       for (const pageId of connectedIds) {
-        await api.pages.updateAutomationSettings(pageId, { postsPerDay, timezone })
+        const schedule = resolveScheduleTimesForSave(scheduleMode, postsPerDay, customScheduleTimes)
+        await api.pages.updateAutomationSettings(pageId, {
+          postsPerDay,
+          timezone,
+          ...schedule,
+        })
       }
 
       if (mode === 'single' || mode === 'bulk') {
@@ -351,7 +347,18 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
     return selectedPages.length > 0
   }
 
+  function validateScheduleSettings(): string | null {
+    if (scheduleMode !== 'fixed') return null
+    const times = customScheduleTimes.split(/[,;\s]+/).filter(Boolean)
+    if (!times.length) return 'Enter at least one schedule time for custom fixed mode'
+    if (times.length !== postsPerDay) {
+      return `Enter exactly ${postsPerDay} schedule time(s) to match posts per day`
+    }
+    return null
+  }
+
   function canProceedStep2() {
+    if (validateScheduleSettings()) return false
     if (mode === 'csv') {
       const { rows, errors } = getCsvMappings()
       return rows.length > 0 && rows.length <= selectedPages.length && errors.length === 0
@@ -365,7 +372,12 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
       toast.error(mode === 'single' ? 'Select one page to continue' : 'Select at least one page')
       return
     }
-    if (wizardStep === 2 && mode !== 'single' && !canProceedStep2()) {
+    if (wizardStep === 2 && !canProceedStep2()) {
+      const scheduleErr = validateScheduleSettings()
+      if (scheduleErr) {
+        toast.error(scheduleErr)
+        return
+      }
       const { errors } = mode === 'csv' ? getCsvMappings() : { errors: [] as string[] }
       toast.error(
         errors[0] ??
@@ -627,21 +639,16 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
                   />
                 </div>
               </div>
-              <PostsPerDayGrid value={postsPerDay} onChange={setPostsPerDay} />
-              <div>
-                <p className="mb-2 text-sm font-semibold">Timezone</p>
-                <select
-                  value={timezone}
-                  onChange={(e) => setTimezone(e.target.value)}
-                  className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
-                >
-                  {COMMON_TIMEZONES.map((tz) => (
-                    <option key={tz.value} value={tz.value}>
-                      {tz.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <PostingScheduleSection
+                postsPerDay={postsPerDay}
+                onPostsPerDayChange={setPostsPerDay}
+                scheduleMode={scheduleMode}
+                onScheduleModeChange={setScheduleMode}
+                timezone={timezone}
+                onTimezoneChange={setTimezone}
+                customScheduleTimes={customScheduleTimes}
+                onCustomScheduleTimesChange={setCustomScheduleTimes}
+              />
             </div>
           )}
 
@@ -715,21 +722,16 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
                 </div>
               </div>
               )}
-              <PostsPerDayGrid value={postsPerDay} onChange={setPostsPerDay} />
-              <div>
-                <p className="mb-2 text-sm font-semibold">Timezone</p>
-                <select
-                  value={timezone}
-                  onChange={(e) => setTimezone(e.target.value)}
-                  className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
-                >
-                  {COMMON_TIMEZONES.map((tz) => (
-                    <option key={tz.value} value={tz.value}>
-                      {tz.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <PostingScheduleSection
+                postsPerDay={postsPerDay}
+                onPostsPerDayChange={setPostsPerDay}
+                scheduleMode={scheduleMode}
+                onScheduleModeChange={setScheduleMode}
+                timezone={timezone}
+                onTimezoneChange={setTimezone}
+                customScheduleTimes={customScheduleTimes}
+                onCustomScheduleTimesChange={setCustomScheduleTimes}
+              />
             </div>
           )}
 
@@ -747,7 +749,15 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
                   {mode === 'csv' && (
                     <li>{csvPreview.rows.length} source URL mapping(s) with auto-detected usernames</li>
                   )}
-                  <li>{postsPerDay} posts per day · {timezone}</li>
+                  <li>
+                    {postsPerDay} posts per day · {postingScheduleLabel(scheduleMode)} · {timezone}
+                  </li>
+                  {scheduleMode !== 'dailyrandom' && (
+                    <li>
+                      Times:{' '}
+                      {activeSchedulePreview(scheduleMode, postsPerDay, customScheduleTimes).join(', ')}
+                    </li>
+                  )}
                 </ul>
               </div>
               <ul className="max-h-48 space-y-1 overflow-y-auto text-sm">
