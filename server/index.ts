@@ -102,6 +102,15 @@ app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Not found' })
 })
 
+app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (res.headersSent) {
+    next(err)
+    return
+  }
+  console.error('[server] unhandled error:', err)
+  res.status(500).json({ error: err instanceof Error ? err.message : 'Internal server error' })
+})
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[server] Running on http://0.0.0.0:${PORT}`)
   console.log(`[server] Facebook OAuth: ${process.env.FACEBOOK_APP_ID ? 'configured' : 'mock mode'}`)

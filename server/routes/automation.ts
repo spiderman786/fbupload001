@@ -37,62 +37,73 @@ automationRouter.get('/assignments', (req: AgencyRequest, res) => {
 })
 
 automationRouter.put('/assignments/:pageId', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
-  const { sourceId } = req.body ?? {}
-  if (!sourceId || typeof sourceId !== 'string') {
-    res.status(400).json({ error: 'sourceId is required' })
-    return
-  }
-  const page = db
-    .prepare('SELECT id FROM facebook_pages WHERE id = ? AND agency_id = ?')
-    .get(routeParam(req.params.pageId), req.agency!.id)
-  if (!page) {
-    res.status(404).json({ error: 'Page not found' })
-    return
-  }
-
-  const source = db
-    .prepare('SELECT id FROM source_accounts WHERE id = ? AND agency_id = ?')
-    .get(sourceId, req.agency!.id)
-  if (!source) {
-    res.status(404).json({ error: 'Source not found' })
-    return
-  }
-
-  const previous = db
-    .prepare('SELECT source_account_id FROM page_source_assignments WHERE page_id = ? AND agency_id = ?')
-    .get(routeParam(req.params.pageId), req.agency!.id) as { source_account_id: string } | undefined
-
-  db.prepare(`
-    INSERT INTO page_source_assignments (page_id, source_account_id, user_id, agency_id)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(page_id) DO UPDATE SET source_account_id = excluded.source_account_id, agency_id = excluded.agency_id
-  `).run(routeParam(req.params.pageId), sourceId, req.user!.id, req.agency!.id)
-
-  if (previous && previous.source_account_id === sourceId) {
-    const pageHealth = db
-      .prepare('SELECT health_status FROM facebook_pages WHERE id = ?')
-      .get(routeParam(req.params.pageId)) as { health_status: string } | undefined
-    if (pageHealth?.health_status === 'source_exhausted') {
-      reactivateSourceForRescrape(routeParam(req.params.pageId))
-      void tickPrefillQueue()
-      res.json({ message: 'Source re-sync started — scraping creator again' })
+  try {
+    const pageId = routeParam(req.params.pageId)
+    const { sourceId } = req.body ?? {}
+    if (!sourceId || typeof sourceId !== 'string') {
+      res.status(400).json({ error: 'sourceId is required' })
       return
     }
-  }
+    const page = db
+      .prepare('SELECT id FROM facebook_pages WHERE id = ? AND agency_id = ?')
+      .get(pageId, req.agency!.id)
+    if (!page) {
+      res.status(404).json({ error: 'Page not found' })
+      return
+    }
 
-  if (!previous || previous.source_account_id !== sourceId) {
-    await purgeQueuedJobsForPage(routeParam(req.params.pageId), req.agency!.id)
-    markSourceScrapingPending(routeParam(req.params.pageId))
-    db.prepare('UPDATE page_source_assignments SET catalog_total = NULL WHERE page_id = ?').run(routeParam(req.params.pageId))
-    void probeSourceCatalog(routeParam(req.params.pageId)).catch((err) =>
-      console.warn('[catalog] probe failed:', err instanceof Error ? err.message : err),
-    )
-    await syncPagePrefillQueue(routeParam(req.params.pageId), req.agency!.id)
-  } else {
-    void tickPrefillQueue()
-  }
+    const source = db
+      .prepare('SELECT id FROM source_accounts WHERE id = ? AND agency_id = ?')
+      .get(sourceId, req.agency!.id)
+    if (!source) {
+      res.status(404).json({ error: 'Source not found' })
+      return
+    }
 
-  res.json({ message: 'Source assigned to page' })
+    const previous = db
+      .prepare(`
+        SELECT source_account_id FROM page_source_assignments
+        WHERE page_id = ? AND (agency_id = ? OR agency_id IS NULL)
+      `)
+      .get(pageId, req.agency!.id) as { source_account_id: string } | undefined
+
+    db.prepare(`
+      INSERT INTO page_source_assignments (page_id, source_account_id, user_id, agency_id)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(page_id) DO UPDATE SET
+        source_account_id = excluded.source_account_id,
+        agency_id = excluded.agency_id
+    `).run(pageId, sourceId, req.user!.id, req.agency!.id)
+
+    if (previous && previous.source_account_id === sourceId) {
+      const pageHealth = db
+        .prepare('SELECT health_status FROM facebook_pages WHERE id = ?')
+        .get(pageId) as { health_status: string } | undefined
+      if (pageHealth?.health_status === 'source_exhausted') {
+        reactivateSourceForRescrape(pageId)
+        void tickPrefillQueue()
+        res.json({ message: 'Source re-sync started — scraping creator again' })
+        return
+      }
+    }
+
+    if (!previous || previous.source_account_id !== sourceId) {
+      await purgeQueuedJobsForPage(pageId, req.agency!.id)
+      markSourceScrapingPending(pageId)
+      db.prepare('UPDATE page_source_assignments SET catalog_total = NULL WHERE page_id = ?').run(pageId)
+      void probeSourceCatalog(pageId).catch((err) =>
+        console.warn('[catalog] probe failed:', err instanceof Error ? err.message : err),
+      )
+      await syncPagePrefillQueue(pageId, req.agency!.id)
+    } else {
+      void tickPrefillQueue()
+    }
+
+    res.json({ message: 'Source assigned to page' })
+  } catch (err) {
+    console.error('[automation] assign source failed:', err)
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to assign source' })
+  }
 })
 
 automationRouter.delete('/assignments/:pageId', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {

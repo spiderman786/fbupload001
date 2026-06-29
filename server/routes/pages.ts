@@ -447,41 +447,46 @@ pagesRouter.post('/:pageId/queue/:jobId/skip', requireRole('owner', 'admin'), as
 })
 
 pagesRouter.patch('/:id/automation-settings', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {
-  if (!requirePage(req, routeParam(req.params.id))) {
-    res.status(404).json({ error: 'Page not found' })
-    return
+  try {
+    if (!requirePage(req, routeParam(req.params.id))) {
+      res.status(404).json({ error: 'Page not found' })
+      return
+    }
+    const pageId = routeParam(req.params.id)
+    const { postsPerDay, postingLogic, timezone, scheduleTimes, hashtags, regenerateRandomTimes } = req.body ?? {}
+    const current = getPageAutomationSettings(pageId)
+    let nextTimes = Array.isArray(scheduleTimes) ? scheduleTimes.map(String) : undefined
+
+    if (regenerateRandomTimes === true) {
+      const count = postsPerDay !== undefined ? Number(postsPerDay) : current.postsPerDay
+      nextTimes = generateRandomScheduleTimes(count)
+    } else if (postingLogic === 'dailyrandom' && postingLogic !== current.postingLogic && !nextTimes) {
+      nextTimes = generateRandomScheduleTimes(postsPerDay !== undefined ? Number(postsPerDay) : current.postsPerDay)
+    }
+
+    const settings = upsertPageAutomationSettings(pageId, {
+      postsPerDay: postsPerDay !== undefined ? Number(postsPerDay) : undefined,
+      postingLogic: postingLogic !== undefined ? String(postingLogic) : undefined,
+      timezone: timezone !== undefined ? String(timezone) : undefined,
+      scheduleTimes: nextTimes,
+      hashtags: Array.isArray(hashtags) ? hashtags.map(String) : undefined,
+    })
+
+    if (nextTimes || scheduleTimes) {
+      db.prepare('UPDATE page_automation_settings SET last_schedule_fire = NULL WHERE page_id = ?').run(pageId)
+    }
+
+    let queueSync: { trimmed: number; created: number; target: number } | null = null
+    if (postsPerDay !== undefined && Number(postsPerDay) !== current.postsPerDay) {
+      const { syncPagePrefillQueue } = await import('../services/prefillScheduler.js')
+      queueSync = await syncPagePrefillQueue(pageId, req.agency!.id)
+    }
+
+    res.json({ settings, queueSync })
+  } catch (err) {
+    console.error('[pages] automation-settings failed:', err)
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to save automation settings' })
   }
-  const pageId = routeParam(req.params.id)
-  const { postsPerDay, postingLogic, timezone, scheduleTimes, hashtags, regenerateRandomTimes } = req.body ?? {}
-  const current = getPageAutomationSettings(pageId)
-  let nextTimes = Array.isArray(scheduleTimes) ? scheduleTimes.map(String) : undefined
-
-  if (regenerateRandomTimes === true) {
-    const count = postsPerDay !== undefined ? Number(postsPerDay) : current.postsPerDay
-    nextTimes = generateRandomScheduleTimes(count)
-  } else if (postingLogic === 'dailyrandom' && postingLogic !== current.postingLogic && !nextTimes) {
-    nextTimes = generateRandomScheduleTimes(postsPerDay !== undefined ? Number(postsPerDay) : current.postsPerDay)
-  }
-
-  const settings = upsertPageAutomationSettings(pageId, {
-    postsPerDay: postsPerDay !== undefined ? Number(postsPerDay) : undefined,
-    postingLogic: postingLogic !== undefined ? String(postingLogic) : undefined,
-    timezone: timezone !== undefined ? String(timezone) : undefined,
-    scheduleTimes: nextTimes,
-    hashtags: Array.isArray(hashtags) ? hashtags.map(String) : undefined,
-  })
-
-  if (nextTimes || scheduleTimes) {
-    db.prepare('UPDATE page_automation_settings SET last_schedule_fire = NULL WHERE page_id = ?').run(pageId)
-  }
-
-  let queueSync: { trimmed: number; created: number; target: number } | null = null
-  if (postsPerDay !== undefined && Number(postsPerDay) !== current.postsPerDay) {
-    const { syncPagePrefillQueue } = await import('../services/prefillScheduler.js')
-    queueSync = await syncPagePrefillQueue(pageId, req.agency!.id)
-  }
-
-  res.json({ settings, queueSync })
 })
 
 pagesRouter.patch('/:id', requireRole('owner', 'admin'), async (req: AgencyRequest, res) => {

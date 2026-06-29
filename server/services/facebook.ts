@@ -2,6 +2,7 @@ import { v4 as uuid } from 'uuid'
 import { db } from '../db.js'
 import { getByocCredentials, isFacebookConfiguredForAgency } from './byoc.js'
 import { seedFollowerBaseline, syncPageFollowers } from './followerSync.js'
+import { ensurePageAutomationSettings } from './pageAutomationSettings.js'
 
 export function isFacebookConfigured(agencyId?: string): boolean {
   if (agencyId) return isFacebookConfiguredForAgency(agencyId)
@@ -207,12 +208,52 @@ export async function connectSpecificPagesForAgency(
   const wanted = [...new Set(pageIds.map((p) => String(p).trim()).filter(Boolean))]
   if (!wanted.length) return []
 
-  const fromGraph = await fetchPagesByMetaIds(agencyId, accessToken, wanted)
-  if (fromGraph.length === 0) {
-    throw new Error('None of the page IDs are accessible with this Facebook account')
+  const connected: string[] = []
+  const needGraph: string[] = []
+
+  for (const metaPageId of wanted) {
+    const existing = db
+      .prepare(
+        'SELECT id FROM facebook_pages WHERE agency_id = ? AND meta_page_id = ? AND facebook_account_id = ?',
+      )
+      .get(agencyId, metaPageId, accountId) as { id: string } | undefined
+
+    if (existing) {
+      ensurePageAutomationSettings(existing.id)
+      connected.push(existing.id)
+    } else {
+      needGraph.push(metaPageId)
+    }
   }
 
-  return upsertPagesForAgency(agencyId, userId, accountId, fromGraph, options)
+  if (needGraph.length > 0) {
+    const fromGraph = await fetchPagesByMetaIds(agencyId, accessToken, needGraph)
+    if (fromGraph.length > 0) {
+      const graphConnected = await upsertPagesForAgency(agencyId, userId, accountId, fromGraph, options)
+      connected.push(...graphConnected)
+    }
+  }
+
+  if (connected.length === 0) {
+    for (const metaPageId of wanted) {
+      const existing = db
+        .prepare('SELECT id FROM facebook_pages WHERE agency_id = ? AND meta_page_id = ?')
+        .get(agencyId, metaPageId) as { id: string } | undefined
+      if (existing) {
+        db.prepare('UPDATE facebook_pages SET facebook_account_id = ? WHERE id = ?').run(accountId, existing.id)
+        ensurePageAutomationSettings(existing.id)
+        connected.push(existing.id)
+      }
+    }
+  }
+
+  if (connected.length === 0) {
+    throw new Error(
+      'Could not connect the selected page(s). Re-authorize the Facebook account or confirm the page is still linked in Meta.',
+    )
+  }
+
+  return [...new Set(connected)]
 }
 
 async function upsertPagesForAgency(
@@ -255,6 +296,7 @@ async function upsertPagesForAgency(
         }
       }
       connected.push(existing.id)
+      ensurePageAutomationSettings(existing.id)
       continue
     }
 
@@ -264,6 +306,7 @@ async function upsertPagesForAgency(
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'active')
     `).run(id, userId, agencyId, accountId, page.id, page.name, page.followers ?? '0', page.accessToken ?? null)
     seedFollowerBaseline(id, page.fanCount)
+    ensurePageAutomationSettings(id)
     connected.push(id)
   }
 

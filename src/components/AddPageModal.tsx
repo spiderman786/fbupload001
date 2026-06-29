@@ -310,6 +310,10 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
         }
       }
 
+      if (!connectedIds.length) {
+        throw { error: 'No pages were connected. Try reconnecting the Facebook account under Accounts.' }
+      }
+
       for (const pageId of connectedIds) {
         await api.pages.updateAutomationSettings(pageId, { postsPerDay, timezone })
       }
