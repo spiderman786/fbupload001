@@ -10,7 +10,7 @@ import { composeTemplatePreview } from '../services/news/imageCompositor.js'
 import { getAgencyAiSettingsPublic, saveAgencyAiSettings, type AiProvider } from '../services/news/aiSettings.js'
 import { getCompositorQueueStats } from '../services/news/compositorQueue.js'
 import { testNewsAiConnection } from '../services/news/aiRewriter.js'
-import { pollFeedsForAgency, pollFeed, publishNewsItem, regenerateNewsItemImage } from '../services/news/newsPipeline.js'
+import { pollFeedsForAgency, pollFeed, publishNewsItem, regenerateNewsItemImage, updateNewsItemContent } from '../services/news/newsPipeline.js'
 import { fetchRssFeed } from '../services/news/rssFetcher.js'
 import { DEFAULT_COLORS, parseBrandType, parseJsonArray, resolveFonts, type NewsFonts } from '../services/news/types.js'
 import { isMockMetaPageId } from '../services/facebook.js'
@@ -76,6 +76,8 @@ function mapItem(row: Record<string, unknown>) {
     postDescription: row.post_description ?? null,
     hashtags: parseJsonArray(row.hashtags_json as string),
     heroImageUrl: row.hero_image_url ?? null,
+    insetImageUrl: row.inset_image_url ?? null,
+    accentWords: parseJsonArray(row.accent_words_json as string),
     generatedImagePath: row.generated_image_path ?? null,
     fbPostId: row.fb_post_id ?? null,
     status: row.status,
@@ -671,6 +673,46 @@ newsRouter.post('/feeds/:id/poll', async (req: AgencyRequest, res) => {
     res.json({ message: `Created ${created} items`, created })
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Poll failed' })
+  }
+})
+
+newsRouter.patch('/items/:id', async (req: AgencyRequest, res) => {
+  const item = db
+    .prepare('SELECT id FROM news_items WHERE id = ? AND agency_id = ?')
+    .get(routeParam(req.params.id), req.agency!.id)
+  if (!item) {
+    res.status(404).json({ error: 'Item not found' })
+    return
+  }
+
+  const {
+    headline,
+    postTitle,
+    postDescription,
+    accentWords,
+    heroImageUrl,
+    insetImageUrl,
+    heroImageDataUrl,
+    insetImageDataUrl,
+  } = req.body ?? {}
+
+  try {
+    await updateNewsItemContent(routeParam(req.params.id), req.agency!.id, {
+      headline,
+      postTitle,
+      postDescription,
+      accentWords: Array.isArray(accentWords) ? accentWords.map(String) : undefined,
+      heroImageUrl,
+      insetImageUrl,
+      heroImageDataUrl,
+      insetImageDataUrl,
+    })
+    const updated = db
+      .prepare('SELECT * FROM news_items WHERE id = ?')
+      .get(routeParam(req.params.id)) as Record<string, unknown>
+    res.json({ message: 'Item updated and image regenerated', item: mapItem(updated) })
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Update failed' })
   }
 })
 

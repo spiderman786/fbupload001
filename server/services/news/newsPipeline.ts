@@ -7,8 +7,8 @@ import { publishPhotoPost, postComment } from '../publisher.js'
 import { isOAuthTokenError, refreshPageAccessToken, resolvePageAccessToken, assertPublishableFacebookPage } from '../pageTokens.js'
 import { adaptHeadlineForImageGraphic, maybeRewriteNewsContent } from './aiRewriter.js'
 import { runCompositorJob } from './compositorQueue.js'
-import { formatNewsContent, mergeHashtags, headlineToPostTitle } from './contentFormatter.js'
-import { composeNewsImage, precheckHeadlineForTemplate } from './imageCompositor.js'
+import { formatNewsContent, mergeHashtags, headlineToPostTitle, pickAccentWords } from './contentFormatter.js'
+import { composeNewsImage, precheckHeadlineForTemplate, fitHeadlineToTemplate, normalizeHeadlineText } from './imageCompositor.js'
 import { fetchRssFeed, scrapeArticleImages, selectBestHeroAndInset } from './rssFetcher.js'
 import { normalizeArticleUrl, parseJsonArray } from './types.js'
 
@@ -84,6 +84,8 @@ async function composeItemImage(options: {
   headline: string
   accentWords: string[]
   outputPath: string
+  heroLocalPath?: string
+  insetLocalPath?: string
 }) {
   const pageRow = db
     .prepare('SELECT name FROM facebook_pages WHERE id = ?')
@@ -102,7 +104,128 @@ async function composeItemImage(options: {
       logoPath: null,
       ctaText: (options.template?.cta_text as string) ?? '',
       outputPath: options.outputPath,
+      heroLocalPath: options.heroLocalPath,
+      insetLocalPath: options.insetLocalPath,
     }),
+  )
+}
+
+function saveUploadedNewsImage(agencyId: string, itemId: string, dataUrl: string, suffix: string): string {
+  const match = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/)
+  if (!match) throw new Error('Invalid image upload — use JPG or PNG')
+  const ext = match[1] === 'jpeg' ? 'jpg' : match[1]!
+  const buffer = Buffer.from(match[2]!, 'base64')
+  if (buffer.length > 8 * 1024 * 1024) throw new Error('Image must be under 8MB')
+  const dir = path.join(newsImagesDir, agencyId, 'uploads')
+  fs.mkdirSync(dir, { recursive: true })
+  const filePath = path.join(dir, `${itemId}-${suffix}.${ext}`)
+  fs.writeFileSync(filePath, buffer)
+  return filePath
+}
+
+export async function updateNewsItemContent(
+  itemId: string,
+  agencyId: string,
+  input: {
+    headline?: string
+    postTitle?: string
+    postDescription?: string
+    accentWords?: string[]
+    heroImageUrl?: string
+    insetImageUrl?: string
+    heroImageDataUrl?: string
+    insetImageDataUrl?: string
+  },
+): Promise<void> {
+  const item = db.prepare('SELECT * FROM news_items WHERE id = ?').get(itemId) as Record<string, unknown> | undefined
+  if (!item) throw new Error('News item not found')
+  if (String(item.agency_id) !== agencyId) throw new Error('News item not found')
+  if (item.status !== 'ready') throw new Error('Can only edit ready items')
+
+  const pageId = String(item.page_id)
+  const templateId = item.template_id as string | null
+  const template = templateId
+    ? (db.prepare('SELECT * FROM news_templates WHERE id = ?').get(templateId) as Record<string, unknown> | undefined)
+    : undefined
+  const fontsJson = (template?.fonts_json as string) ?? null
+
+  let headline = normalizeHeadlineText(String(input.headline ?? item.headline ?? item.rss_title ?? '')).toUpperCase()
+  if (!headline.trim()) throw new Error('Headline on image is required')
+  headline = fitHeadlineToTemplate(headline, fontsJson)
+
+  const postTitle = String(input.postTitle ?? item.post_title ?? headlineToPostTitle(headline)).trim()
+  const postDescription = String(input.postDescription ?? item.post_description ?? '').trim().slice(0, 500)
+  const accentWords =
+    input.accentWords?.length
+      ? input.accentWords.map((w) => w.toUpperCase().trim()).filter(Boolean).slice(0, 4)
+      : parseJsonArray(item.accent_words_json as string).length
+        ? parseJsonArray(item.accent_words_json as string)
+        : pickAccentWords(headline)
+
+  let hero = String(input.heroImageUrl ?? item.hero_image_url ?? '').trim()
+  let inset = String(input.insetImageUrl ?? item.inset_image_url ?? hero).trim()
+  let heroLocalPath: string | undefined
+  let insetLocalPath: string | undefined
+
+  if (input.heroImageDataUrl) {
+    heroLocalPath = saveUploadedNewsImage(agencyId, itemId, input.heroImageDataUrl, 'hero')
+    hero = heroLocalPath
+  }
+  if (input.insetImageDataUrl) {
+    insetLocalPath = saveUploadedNewsImage(agencyId, itemId, input.insetImageDataUrl, 'inset')
+    inset = insetLocalPath
+  } else if (input.heroImageDataUrl && !input.insetImageDataUrl && !input.insetImageUrl) {
+    insetLocalPath = heroLocalPath
+    inset = hero
+  }
+
+  if (!hero) throw new Error('Hero image is required — paste a URL or upload a picture')
+
+  heroLocalPath = heroLocalPath ?? (path.isAbsolute(hero) && fs.existsSync(hero) ? hero : undefined)
+  insetLocalPath = insetLocalPath ?? (path.isAbsolute(inset) && fs.existsSync(inset) ? inset : undefined)
+
+  let imagePath = String(item.generated_image_path ?? '')
+  if (!imagePath) {
+    imagePath = path.join(newsImagesDir, agencyId, `${itemId}.png`)
+  }
+  fs.mkdirSync(path.dirname(imagePath), { recursive: true })
+
+  await composeItemImage({
+    agencyId,
+    pageId,
+    template,
+    heroUrl: hero,
+    insetUrl: inset,
+    headline,
+    accentWords,
+    outputPath: imagePath,
+    heroLocalPath,
+    insetLocalPath,
+  })
+
+  const storedHero = input.heroImageUrl?.trim() || hero
+  const storedInset = input.insetImageUrl?.trim() || inset
+
+  db.prepare(`
+    UPDATE news_items SET
+      headline = ?,
+      accent_words_json = ?,
+      post_title = ?,
+      post_description = ?,
+      hero_image_url = ?,
+      inset_image_url = ?,
+      generated_image_path = ?,
+      error_message = NULL
+    WHERE id = ?
+  `).run(
+    headline,
+    JSON.stringify(accentWords),
+    postTitle,
+    postDescription,
+    storedHero,
+    storedInset,
+    imagePath,
+    itemId,
   )
 }
 

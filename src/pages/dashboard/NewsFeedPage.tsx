@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { Eye, EyeOff, Newspaper, RefreshCw, Rss, Send, SkipForward } from 'lucide-react'
+import { Eye, EyeOff, ImagePlus, Newspaper, Pencil, RefreshCw, Rss, Send, SkipForward } from 'lucide-react'
 import { api, type NewsAiConnectionTest, type NewsAiProvider, type NewsOverview, type NewsTemplateColors } from '../../api/client'
 import { useToast } from '../../context/ToastContext'
 import { getApiError } from '../../lib/apiError'
@@ -30,6 +30,16 @@ export function NewsFeedPage() {
   const [testingAi, setTestingAi] = useState(false)
   const [aiTestResult, setAiTestResult] = useState<NewsAiConnectionTest | null>(null)
   const [viewItemId, setViewItemId] = useState<string | null>(null)
+  const [editHeadline, setEditHeadline] = useState('')
+  const [editPostTitle, setEditPostTitle] = useState('')
+  const [editPostDescription, setEditPostDescription] = useState('')
+  const [editAccentWords, setEditAccentWords] = useState('')
+  const [editHeroUrl, setEditHeroUrl] = useState('')
+  const [editInsetUrl, setEditInsetUrl] = useState('')
+  const [heroUploadDataUrl, setHeroUploadDataUrl] = useState<string | null>(null)
+  const [insetUploadDataUrl, setInsetUploadDataUrl] = useState<string | null>(null)
+  const [heroUploadName, setHeroUploadName] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
 
   const [templateName, setTemplateName] = useState('Default News')
   const [layoutPreset, setLayoutPreset] = useState('popcorn')
@@ -152,6 +162,21 @@ export function NewsFeedPage() {
   }, [load])
 
   useEffect(() => {
+    if (!viewItemId || !data) return
+    const item = data.items.find((i) => i.id === viewItemId)
+    if (!item) return
+    setEditHeadline(item.headline ?? '')
+    setEditPostTitle(item.postTitle ?? '')
+    setEditPostDescription(item.postDescription ?? '')
+    setEditAccentWords(item.accentWords?.join(', ') ?? '')
+    setEditHeroUrl(item.heroImageUrl?.startsWith('http') ? item.heroImageUrl : '')
+    setEditInsetUrl(item.insetImageUrl?.startsWith('http') ? item.insetImageUrl : '')
+    setHeroUploadDataUrl(null)
+    setInsetUploadDataUrl(null)
+    setHeroUploadName('')
+  }, [viewItemId, data])
+
+  useEffect(() => {
     if (!viewItemId) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setViewItemId(null)
@@ -159,6 +184,64 @@ export function NewsFeedPage() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [viewItemId])
+
+  async function readImageFile(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => reject(new Error('Could not read image file'))
+      reader.readAsDataURL(file)
+    })
+  }
+
+  async function handleHeroFileChange(file: File | null) {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please choose a JPG or PNG image')
+      return
+    }
+    setHeroUploadDataUrl(await readImageFile(file))
+    setHeroUploadName(file.name)
+  }
+
+  async function handleInsetFileChange(file: File | null) {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please choose a JPG or PNG image')
+      return
+    }
+    setInsetUploadDataUrl(await readImageFile(file))
+  }
+
+  async function handleSaveItemEdit() {
+    if (!viewItemId) return
+    setSavingEdit(true)
+    try {
+      const accentWords = editAccentWords
+        .split(/[\s,]+/)
+        .map((w) => w.trim().toUpperCase())
+        .filter(Boolean)
+      const res = await api.news.updateItem(viewItemId, {
+        headline: editHeadline.trim(),
+        postTitle: editPostTitle.trim(),
+        postDescription: editPostDescription.trim(),
+        accentWords: accentWords.length ? accentWords : undefined,
+        heroImageUrl: editHeroUrl.trim() || undefined,
+        insetImageUrl: editInsetUrl.trim() || undefined,
+        heroImageDataUrl: heroUploadDataUrl ?? undefined,
+        insetImageDataUrl: insetUploadDataUrl ?? undefined,
+      })
+      setPreviewCacheBust((prev) => ({ ...prev, [viewItemId]: Date.now() }))
+      setData((prev) =>
+        prev ? { ...prev, items: prev.items.map((i) => (i.id === viewItemId ? res.item : i)) } : prev,
+      )
+      toast.success('Graphic updated with your edits')
+    } catch (err) {
+      toast.error(getApiError(err, 'Save failed'))
+    } finally {
+      setSavingEdit(false)
+    }
+  }
 
   useEffect(() => {
     return () => {
@@ -406,6 +489,8 @@ export function NewsFeedPage() {
 
   const publishablePages = data?.pages.filter((p) => !p.isMockPage) ?? []
   const mockFeedAssigned = data?.feeds.some((f) => f.isMockPage) ?? false
+  const viewingItem = viewItemId ? data?.items.find((i) => i.id === viewItemId) : undefined
+  const canEditViewingItem = viewingItem?.status === 'ready'
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -921,7 +1006,7 @@ export function NewsFeedPage() {
                           className="h-full w-full object-cover transition group-hover:opacity-80"
                         />
                         <span className="absolute inset-x-0 bottom-0 bg-black/60 py-1 text-center text-[10px] font-semibold text-white">
-                          View
+                          {item.status === 'ready' ? 'Edit' : 'View'}
                         </span>
                       </button>
                     ) : null}
@@ -947,8 +1032,8 @@ export function NewsFeedPage() {
                           onClick={() => setViewItemId(item.id)}
                           className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs"
                         >
-                          <Eye className="h-3.5 w-3.5" />
-                          View image
+                          {item.status === 'ready' ? <Pencil className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                          {item.status === 'ready' ? 'Edit' : 'View image'}
                         </button>
                         {item.status === 'ready' && (
                           <>
@@ -986,25 +1071,181 @@ export function NewsFeedPage() {
       )}
       {viewItemId && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4"
           onClick={() => setViewItemId(null)}
           role="dialog"
           aria-modal="true"
-          aria-label="Generated news image preview"
+          aria-label="Edit news graphic"
         >
-          <div className="relative w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              onClick={() => setViewItemId(null)}
-              className="mb-2 ml-auto block rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20"
-            >
-              Close
-            </button>
-            <img
-              src={itemPreviewSrc(viewItemId)}
-              alt="Generated news graphic"
-              className="mx-auto max-h-[85vh] w-full rounded-lg object-contain shadow-2xl"
-            />
+          <div
+            className="relative my-auto w-full max-w-5xl rounded-xl border border-border bg-card shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <div>
+                <h2 className="font-semibold">{canEditViewingItem ? 'Edit graphic & text' : 'Graphic preview'}</h2>
+                <p className="text-xs text-muted-foreground">
+                  {canEditViewingItem
+                    ? 'Fix the headline on the image, caption text, or swap the photo — then save to regenerate.'
+                    : 'This item was already posted — preview only.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewItemId(null)}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold hover:bg-muted"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="grid gap-6 p-4 lg:grid-cols-2">
+              <div className="space-y-3">
+                <p className="text-xs font-medium text-muted-foreground">Preview (1080×1350)</p>
+                <button
+                  type="button"
+                  onClick={() => canEditViewingItem && document.getElementById('news-hero-upload')?.click()}
+                  className={`group relative block w-full overflow-hidden rounded-lg border border-border bg-muted ${canEditViewingItem ? 'cursor-pointer' : 'cursor-default'}`}
+                  title={canEditViewingItem ? 'Click to replace hero photo' : undefined}
+                >
+                  <img
+                    src={itemPreviewSrc(viewItemId)}
+                    alt="Generated news graphic"
+                    className="mx-auto max-h-[70vh] w-full object-contain"
+                  />
+                  {canEditViewingItem && (
+                    <span className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-black/60 py-2 text-xs font-semibold text-white opacity-0 transition group-hover:opacity-100">
+                      <ImagePlus className="h-3.5 w-3.5" />
+                      Replace photo
+                    </span>
+                  )}
+                </button>
+                {heroUploadName && (
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400">New photo selected: {heroUploadName}</p>
+                )}
+              </div>
+
+              {canEditViewingItem ? (
+                <form
+                  className="space-y-4"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    void handleSaveItemEdit()
+                  }}
+                >
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Headline on image</label>
+                    <textarea
+                      value={editHeadline}
+                      onChange={(e) => setEditHeadline(e.target.value)}
+                      rows={3}
+                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm uppercase"
+                      placeholder="SHORT HEADLINE FOR THE GRAPHIC"
+                    />
+                    <p className="text-xs text-muted-foreground">This is the big text burned into the picture. Edit it here if AI got it wrong.</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Highlighted words (optional)</label>
+                    <input
+                      value={editAccentWords}
+                      onChange={(e) => setEditAccentWords(e.target.value)}
+                      className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm uppercase"
+                      placeholder="WORD1, WORD2"
+                    />
+                    <p className="text-xs text-muted-foreground">Words shown in accent color on the image. Comma-separated.</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Caption title</label>
+                    <input
+                      value={editPostTitle}
+                      onChange={(e) => setEditPostTitle(e.target.value)}
+                      className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Caption description</label>
+                    <textarea
+                      value={editPostDescription}
+                      onChange={(e) => setEditPostDescription(e.target.value)}
+                      rows={4}
+                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Hero photo URL</label>
+                    <input
+                      value={editHeroUrl}
+                      onChange={(e) => setEditHeroUrl(e.target.value)}
+                      className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                      placeholder="https://..."
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Upload hero photo</label>
+                    <input
+                      id="news-hero-upload"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={(e) => void handleHeroFileChange(e.target.files?.[0] ?? null)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => document.getElementById('news-hero-upload')?.click()}
+                      className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-semibold hover:bg-muted"
+                    >
+                      <ImagePlus className="h-4 w-4" />
+                      Choose image file
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Inset photo URL (optional)</label>
+                    <input
+                      value={editInsetUrl}
+                      onChange={(e) => setEditInsetUrl(e.target.value)}
+                      className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                      placeholder="https://... (small square crop)"
+                    />
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="block w-full text-xs text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-primary-foreground"
+                      onChange={(e) => void handleInsetFileChange(e.target.files?.[0] ?? null)}
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    <button
+                      type="submit"
+                      disabled={savingEdit || !editHeadline.trim()}
+                      className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                    >
+                      <Pencil className={`h-4 w-4 ${savingEdit ? 'animate-pulse' : ''}`} />
+                      {savingEdit ? 'Saving…' : 'Save & update image'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={regeneratingId === viewItemId}
+                      onClick={() => void handleRegenerateImage(viewItemId)}
+                      className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                    >
+                      <RefreshCw className={`h-4 w-4 ${regeneratingId === viewItemId ? 'animate-spin' : ''}`} />
+                      Re-run AI
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="flex items-center text-sm text-muted-foreground">
+                  Posted items cannot be edited here. Duplicate the RSS item on the next poll or edit before publishing.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

@@ -398,15 +398,23 @@ export async function composeNewsImage(options: {
   logoPath?: string | null
   ctaText?: string
   outputPath: string
+  heroLocalPath?: string
+  insetLocalPath?: string
 }): Promise<string> {
-  const heroBuf = await downloadImageBuffer(upgradeImageUrl(options.heroUrl))
+  const heroBuf = options.heroLocalPath
+    ? await fs.promises.readFile(options.heroLocalPath)
+    : await downloadImageBuffer(upgradeImageUrl(options.heroUrl))
   if (!heroBuf) throw new Error('Could not download hero image')
 
-  let insetBuf = options.insetUrl === options.heroUrl
-    ? await sharp(heroBuf).extract({ left: 80, top: 80, width: 400, height: 400 }).toBuffer()
-    : await downloadImageBuffer(upgradeImageUrl(options.insetUrl))
-
-  if (!insetBuf) insetBuf = heroBuf
+  let insetBuf: Buffer
+  if (options.insetLocalPath) {
+    insetBuf = await fs.promises.readFile(options.insetLocalPath)
+  } else if (options.insetUrl === options.heroUrl) {
+    insetBuf = await sharp(heroBuf).extract({ left: 80, top: 80, width: 400, height: 400 }).toBuffer()
+  } else {
+    const downloaded = await downloadImageBuffer(upgradeImageUrl(options.insetUrl))
+    insetBuf = downloaded ?? heroBuf
+  }
 
   fs.mkdirSync(path.dirname(options.outputPath), { recursive: true })
 

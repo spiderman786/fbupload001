@@ -453,6 +453,20 @@ export const api = {
     skipItem: (id: string) => request<{ message: string }>(`/news/items/${id}/skip`, { method: 'POST' }),
     regenerateItemImage: (id: string) =>
       request<{ message: string; item: NewsItemRow }>(`/news/items/${id}/regenerate-image`, { method: 'POST' }),
+    updateItem: (
+      id: string,
+      body: {
+        headline?: string
+        postTitle?: string
+        postDescription?: string
+        accentWords?: string[]
+        heroImageUrl?: string
+        insetImageUrl?: string
+        heroImageDataUrl?: string
+        insetImageDataUrl?: string
+      },
+    ) =>
+      request<{ message: string; item: NewsItemRow }>(`/news/items/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     testFetch: (url: string) =>
       request<{ count: number; articles: { title: string; link: string; imageUrl: string | null }[] }>('/news/test-fetch', {
         method: 'POST',
@@ -1149,8 +1163,10 @@ export type NewsItemRow = {
   headline: string | null
   postTitle: string | null
   postDescription: string | null
+  accentWords: string[]
   hashtags: string[]
   heroImageUrl: string | null
+  insetImageUrl: string | null
   generatedImagePath: string | null
   fbPostId: string | null
   status: string
