@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { AuthLayout } from '../components/AuthLayout'
 import { api } from '../api/client'
 import { useAuth } from '../context/AuthContext'
@@ -7,9 +7,10 @@ import { useAuth } from '../context/AuthContext'
 export function VerifyEmailPage() {
   const location = useLocation()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { setSession } = useAuth()
   const state = (location.state as { email?: string; agencySubdomain?: string; agencyUrl?: string } | null) ?? null
-  const email = state?.email ?? ''
+  const email = state?.email ?? searchParams.get('email') ?? ''
   const agencyUrl = state?.agencyUrl
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
@@ -44,7 +45,9 @@ export function VerifyEmailPage() {
     return (
       <AuthLayout>
         <p className="text-center text-sm text-muted-foreground">
-          No email provided. <Link to="/signup" className="text-primary hover:underline">Sign up</Link> first.
+          No email provided.{' '}
+          <Link to="/signup" className="text-primary hover:underline">Sign up</Link> first, or{' '}
+          <Link to="/login" className="text-primary hover:underline">sign in</Link> if you already have an account.
         </p>
       </AuthLayout>
     )

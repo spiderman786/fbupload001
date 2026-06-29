@@ -29,7 +29,7 @@ export function LoginPage() {
     } catch (err) {
       const data = err as { error?: string; needsVerification?: boolean; email?: string }
       if (data.needsVerification && data.email) {
-        navigate('/verify-email', { state: { email: data.email } })
+        navigate(`/verify-email?email=${encodeURIComponent(data.email)}`, { state: { email: data.email } })
         return
       }
       setError(data.error ?? 'Login failed')

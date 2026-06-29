@@ -11,12 +11,13 @@ import {
   type AuthRequest,
 } from '../middleware/auth.js'
 import { generateVerificationCode, isGmail } from '../utils/helpers.js'
-import { sendVerificationEmail, sendPasswordResetEmail } from '../services/email.js'
+import { sendVerificationEmail, sendPasswordResetEmail, userFacingEmailError } from '../services/email.js'
 import {
   buildSessionPayload,
   assertAgencySubdomainMember,
   clearAgencyCookie,
   createAgencyForUser,
+  deleteUnverifiedSignup,
   getAgencySubdomainUrl,
   resolveAgency,
   setAgencyCookie,
@@ -77,10 +78,15 @@ authRouter.post('/signup', async (req, res) => {
     return
   }
 
-  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase())
+  const existing = db.prepare('SELECT id, email_verified FROM users WHERE email = ?').get(email.toLowerCase()) as
+    | { id: string; email_verified: number }
+    | undefined
   if (existing) {
-    res.status(409).json({ error: 'An account with this email already exists' })
-    return
+    if (existing.email_verified) {
+      res.status(409).json({ error: 'An account with this email already exists' })
+      return
+    }
+    deleteUnverifiedSignup(existing.id)
   }
 
   const code = generateVerificationCode()
@@ -93,23 +99,20 @@ authRouter.post('/signup', async (req, res) => {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, email.toLowerCase(), fullName, hash, phoneCountryCode ?? '+92', phoneNumber, code, expires)
 
+  const whatsapp = `${phoneCountryCode ?? '+92'}${phoneNumber}`.replace(/\s+/g, '')
   const createdAgency = createAgencyForUser(
     id,
     (agencyName?.trim() || `${fullName}'s Agency`),
     0,
     subdomainFromSignupName(fullName, email),
+    whatsapp,
   )
 
   try {
     await sendVerificationEmail(email, code)
   } catch (error) {
-    // Avoid trapping users in an unverified account when delivery fails.
-    db.prepare('DELETE FROM users WHERE id = ?').run(id)
-    const message =
-      error instanceof Error && error.message.trim()
-        ? error.message
-        : 'Failed to send verification code. Please check SMTP configuration.'
-    res.status(502).json({ error: message })
+    deleteUnverifiedSignup(id)
+    res.status(502).json({ error: userFacingEmailError(error) })
     return
   }
 
@@ -200,11 +203,7 @@ authRouter.post('/send-verification', async (req, res) => {
     await sendVerificationEmail(email, code)
     res.json({ message: 'Verification code resent' })
   } catch (error) {
-    const message =
-      error instanceof Error && error.message.trim()
-        ? error.message
-        : 'Failed to resend verification code. Please check SMTP configuration.'
-    res.status(502).json({ error: message })
+    res.status(502).json({ error: userFacingEmailError(error) })
   }
 })
 
@@ -296,12 +295,7 @@ authRouter.post('/forgot-password', async (req, res) => {
       await sendPasswordResetEmail(normalized, code)
     } catch (err) {
       console.error('[auth] password reset email failed:', err)
-      res.status(503).json({
-        error:
-          err instanceof Error
-            ? err.message
-            : 'Failed to send reset email. Please check SMTP configuration.',
-      })
+      res.status(503).json({ error: userFacingEmailError(err) })
       return
     }
   }

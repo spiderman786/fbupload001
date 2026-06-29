@@ -15,6 +15,7 @@ type ProviderDefaults = { host: string; port: number; secure: boolean }
 const SMTP_PROVIDER_DEFAULTS: Record<string, ProviderDefaults> = {
   gmail: { host: 'smtp.gmail.com', port: 587, secure: false },
   outlook: { host: 'smtp.office365.com', port: 587, secure: false },
+  privateemail: { host: 'mail.privateemail.com', port: 465, secure: true },
 }
 
 function asBool(value: string | undefined, fallback: boolean): boolean {
@@ -35,7 +36,7 @@ function getSmtpConfig(): SmtpConfig | null {
   const secure = asBool(process.env.SMTP_SECURE, providerDefaults?.secure ?? port === 465)
 
   if (provider && !providerDefaults) {
-    throw new Error(`Unsupported SMTP_PROVIDER "${provider}". Use "gmail" or "outlook".`)
+    throw new Error(`Unsupported SMTP_PROVIDER "${provider}". Use "gmail", "outlook", or "privateemail".`)
   }
 
   if (!user || !pass || !from) {
@@ -122,11 +123,15 @@ function createSmtpSession(socket: SocketLike) {
     return new Promise((resolve, reject) => pending.push({ resolve, reject }))
   }
 
-  async function command(cmd: string, expectedFirstDigit: '2' | '3' = '2'): Promise<string> {
+  async function command(
+    cmd: string,
+    expectedFirstDigit: '2' | '3' = '2',
+    label = cmd,
+  ): Promise<string> {
     socket.write(`${cmd}\r\n`)
     const reply = await waitForReply()
     if (!reply.startsWith(expectedFirstDigit)) {
-      throw new Error(`SMTP command failed (${cmd}): ${reply}`)
+      throw new Error(`SMTP command failed (${label}): ${reply}`)
     }
     return reply
   }
@@ -172,9 +177,9 @@ async function sendViaSmtp(config: SmtpConfig, to: string, subject: string, body
     stage = 'auth-login'
     await session.command('AUTH LOGIN', '3')
     stage = 'auth-user'
-    await session.command(Buffer.from(config.user).toString('base64'), '3')
+    await session.command(Buffer.from(config.user).toString('base64'), '3', 'AUTH USER')
     stage = 'auth-pass'
-    await session.command(Buffer.from(config.pass).toString('base64'), '2')
+    await session.command(Buffer.from(config.pass).toString('base64'), '2', 'AUTH PASS')
     stage = 'mail-from'
     await session.command(`MAIL FROM:<${config.from}>`)
     stage = 'rcpt-to'
@@ -206,13 +211,29 @@ async function sendViaSmtp(config: SmtpConfig, to: string, subject: string, body
     await session.command('QUIT')
   } catch (error) {
     const details = errorText(error)
-    throw new Error(
-      `SMTP send failed at "${stage}" (${config.host}:${config.port}, secure=${config.secure}): ${details}`,
-      { cause: error },
-    )
+    console.error(`[email] SMTP send failed at "${stage}" (${config.host}:${config.port}): ${details}`)
+    throw new Error(`SMTP send failed at "${stage}": ${details}`, { cause: error })
   } finally {
     socket.destroy()
   }
+}
+
+/** Safe message for API responses — never expose SMTP credentials or internal host details. */
+export function userFacingEmailError(error: unknown): string {
+  const raw = error instanceof Error ? error.message.trim() : String(error).trim()
+  if (!raw) {
+    return 'We could not send the email right now. Please try again in a few minutes.'
+  }
+  if (/not configured|partially configured|unsupported smtp_provider/i.test(raw)) {
+    return 'Email delivery is not configured on the server. Please contact support.'
+  }
+  if (/auth-pass|auth-user|authentication failed|\b535\b/i.test(raw)) {
+    return 'We could not send the verification email right now (mail server login failed). Please try again later or contact support.'
+  }
+  if (process.env.NODE_ENV === 'production') {
+    return 'We could not send the email right now. Please try again in a few minutes or contact support.'
+  }
+  return raw
 }
 
 export async function sendVerificationEmail(email: string, code: string): Promise<void> {

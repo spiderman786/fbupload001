@@ -9,11 +9,19 @@ export function setUnauthorizedHandler(handler: (() => void) | null) {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    ...options,
-  })
+  let res: Response
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...options.headers },
+      ...options,
+    })
+  } catch {
+    throw {
+      error:
+        'Could not reach the server. Check your internet connection. If you are on an office network, try mobile data or ask IT to allow app.fbuploadplus.com.',
+    } as ApiError
+  }
 
   const data = await res.json().catch(() => ({} as Partial<ApiError>))
   if (!res.ok) {

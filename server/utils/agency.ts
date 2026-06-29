@@ -136,6 +136,7 @@ export function createAgencyForUser(
   name: string,
   initialTokens = 0,
   preferredSubdomain?: string,
+  whatsappNumber?: string | null,
 ): { agencyId: string; subdomain: string } {
   const agencyId = uuid()
   const subdomain = ensureUniqueSubdomain(preferredSubdomain ?? makeSubdomainBase(name))
@@ -143,7 +144,7 @@ export function createAgencyForUser(
     agencyId,
     name,
     initialTokens,
-    null,
+    whatsappNumber ?? null,
     subdomain,
   )
   db.prepare('INSERT INTO agency_members (id, agency_id, user_id, role) VALUES (?, ?, ?, ?)').run(
@@ -153,6 +154,25 @@ export function createAgencyForUser(
     'owner',
   )
   return { agencyId, subdomain }
+}
+
+/** Remove an unverified signup and any agencies they solely own (e.g. SMTP failure or re-signup). */
+export function deleteUnverifiedSignup(userId: string): void {
+  const ownedAgencies = db
+    .prepare(`
+      SELECT a.id FROM agencies a
+      JOIN agency_members m ON m.agency_id = a.id AND m.user_id = ? AND m.role = 'owner'
+    `)
+    .all(userId) as { id: string }[]
+
+  db.transaction(() => {
+    for (const { id } of ownedAgencies) {
+      db.prepare('DELETE FROM agency_members WHERE agency_id = ?').run(id)
+      db.prepare('DELETE FROM token_transactions WHERE agency_id = ?').run(id)
+      db.prepare('DELETE FROM agencies WHERE id = ?').run(id)
+    }
+    db.prepare('DELETE FROM users WHERE id = ? AND email_verified = 0').run(userId)
+  })()
 }
 
 export function getAgencySubdomainUrl(subdomain: string): string | null {
