@@ -26,7 +26,7 @@ export function getOAuthUrl(agencyId: string, state: string, byocCredentialId?: 
     client_id: creds.appId,
     redirect_uri: creds.redirectUri,
     state,
-    scope: 'pages_show_list,pages_manage_posts,pages_read_engagement,publish_video,pages_manage_metadata',
+    scope: 'pages_show_list,pages_manage_posts,pages_read_engagement,pages_manage_metadata',
     response_type: 'code',
   })
   return `https://www.facebook.com/v21.0/dialog/oauth?${params}`
