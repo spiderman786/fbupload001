@@ -39,7 +39,7 @@ function getSmtpConfig(): SmtpConfig | null {
   if (!host) return null
 
   const port = Number(process.env.SMTP_PORT ?? providerDefaults?.port ?? 587)
-  const user = process.env.SMTP_USER?.trim()
+  const user = process.env.SMTP_USER?.trim() || process.env.SMTP_FROM?.trim()
   const pass = process.env.SMTP_PASS?.trim()
   const from = process.env.SMTP_FROM?.trim() || user
   const secure = asBool(process.env.SMTP_SECURE, providerDefaults?.secure ?? port === 465)
@@ -59,6 +59,101 @@ function getSmtpConfig(): SmtpConfig | null {
   }
 
   return { host, port, user, pass, from, secure }
+}
+
+export type SmtpConfigStatus = {
+  configured: boolean
+  host: string | null
+  port: number | null
+  secure: boolean | null
+  user: string | null
+  from: string | null
+  issues: string[]
+}
+
+export function getSmtpConfigStatus(): SmtpConfigStatus {
+  const issues: string[] = []
+  try {
+    const config = getSmtpConfig()
+    if (!config) {
+      return { configured: false, host: null, port: null, secure: null, user: null, from: null, issues: ['SMTP not configured'] }
+    }
+    if (!process.env.SMTP_USER?.trim() && process.env.SMTP_FROM?.trim()) {
+      issues.push('SMTP_USER is missing — using SMTP_FROM for login (set both to the same mailbox email)')
+    }
+    if (config.from.toLowerCase() !== config.user.toLowerCase()) {
+      issues.push('SMTP_FROM should match SMTP_USER for Private Email')
+    }
+    return {
+      configured: true,
+      host: config.host,
+      port: config.port,
+      secure: config.secure,
+      user: config.user,
+      from: config.from,
+      issues,
+    }
+  } catch (error) {
+    issues.push(error instanceof Error ? error.message : String(error))
+    return {
+      configured: false,
+      host: process.env.SMTP_HOST?.trim() ?? null,
+      port: Number(process.env.SMTP_PORT ?? 0) || null,
+      secure: asBool(process.env.SMTP_SECURE, false),
+      user: process.env.SMTP_USER?.trim() ?? process.env.SMTP_FROM?.trim() ?? null,
+      from: process.env.SMTP_FROM?.trim() ?? null,
+      issues,
+    }
+  }
+}
+
+/** Test SMTP login only (no email sent). For ops diagnostics. */
+export async function testSmtpConnection(): Promise<{ ok: true } | { ok: false; stage: string; error: string }> {
+  let config: SmtpConfig
+  try {
+    const loaded = getSmtpConfig()
+    if (!loaded) return { ok: false, stage: 'config', error: 'SMTP not configured' }
+    config = loaded
+  } catch (error) {
+    return { ok: false, stage: 'config', error: errorText(error) }
+  }
+
+  let socket = await createSocket(config)
+  let session = createSmtpSession(socket)
+  let stage = 'connect'
+
+  try {
+    stage = 'greeting'
+    const greeting = await session.waitForReply()
+    if (!greeting.startsWith('2')) throw new Error(`SMTP greeting failed: ${greeting}`)
+
+    stage = 'ehlo'
+    await session.command('EHLO fbuploadplus.app')
+    if (!config.secure) {
+      stage = 'starttls'
+      await session.command('STARTTLS')
+      socket = await new Promise<tls.TLSSocket>((resolve, reject) => {
+        const upgraded = tls.connect({ socket, servername: config.host, rejectUnauthorized: true }, () => resolve(upgraded))
+        upgraded.once('error', (error) => reject(new Error(`SMTP TLS upgrade failed: ${errorText(error)}`)))
+      })
+      session = createSmtpSession(socket)
+      stage = 'ehlo-after-starttls'
+      await session.command('EHLO fbuploadplus.app')
+    }
+    stage = 'auth-login'
+    await session.command('AUTH LOGIN', '3')
+    stage = 'auth-user'
+    await session.command(Buffer.from(config.user).toString('base64'), '3', 'AUTH USER')
+    stage = 'auth-pass'
+    await session.command(Buffer.from(config.pass).toString('base64'), '2', 'AUTH PASS')
+    stage = 'quit'
+    await session.command('QUIT')
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, stage, error: errorText(error) }
+  } finally {
+    socket.destroy()
+  }
 }
 
 type SocketLike = net.Socket | tls.TLSSocket
@@ -243,7 +338,16 @@ export function userFacingEmailError(error: unknown): string {
     return 'Email delivery is not configured on the server. Please contact support.'
   }
   if (/auth-pass|auth-user|authentication failed|\b535\b/i.test(raw)) {
-    return 'We could not send the verification email right now (mail server login failed). Please try again later or contact support.'
+    return 'We could not send the verification email right now (mail server login failed). Check SMTP_USER and SMTP_PASS in Railway.'
+  }
+  if (/mail-from|sender|550|553/i.test(raw)) {
+    return 'Mail server rejected the sender address. Set SMTP_FROM to the same email as SMTP_USER.'
+  }
+  if (/rcpt-to|recipient|554/i.test(raw)) {
+    return 'Mail server rejected the recipient. Check that the Gmail address is valid.'
+  }
+  if (/placeholder value/i.test(raw)) {
+    return 'SMTP password is still a placeholder. Set the real Private Email password in Railway Variables.'
   }
   if (process.env.NODE_ENV === 'production') {
     return 'We could not send the email right now. Please try again in a few minutes or contact support.'

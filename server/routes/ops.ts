@@ -18,6 +18,7 @@ import { getAgencyHealthScores, globalOpsSearch, getJobErrorGroups } from '../se
 import { getAllPlatformSettings, setPlatformSetting, setAgencyMaintenance, type PlatformFlag } from '../services/platformSettings.js'
 import { pollLiveEvents } from '../services/opsLiveFeed.js'
 import { explainJobFailure } from '../services/jobExplain.js'
+import { getSmtpConfigStatus, testSmtpConnection } from '../services/email.js'
 
 import { routeParam } from '../utils/routeParam.js'
 export const opsRouter = Router()
@@ -496,6 +497,7 @@ opsRouter.get('/system', ...guard, (_req, res) => {
   res.json({
     worker: readWorkerHeartbeat(),
     proxy: getProxyPoolStats(),
+    smtp: getSmtpConfigStatus(),
     dbPath,
     dbSizeBytes: dbSize,
     oldestPendingJob: oldestPending ?? null,
@@ -518,6 +520,12 @@ opsRouter.post('/impersonate/:agencyId', ...guard, (req: PlatformAdminRequest, r
 opsRouter.get('/search', ...guard, (req, res) => {
   const q = String(req.query.q ?? '')
   res.json(globalOpsSearch(q))
+})
+
+opsRouter.post('/smtp-test', ...guard, async (_req, res) => {
+  const status = getSmtpConfigStatus()
+  const result = await testSmtpConnection()
+  res.json({ status, result })
 })
 
 opsRouter.get('/health', ...guard, (_req, res) => {
