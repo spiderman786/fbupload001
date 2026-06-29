@@ -47,7 +47,10 @@ export function getPageAutomationSettings(pageId: string): PageAutomationSetting
 
 export function upsertPageAutomationSettings(pageId: string, input: Partial<PageAutomationSettings>) {
   const current = getPageAutomationSettings(pageId)
-  const next = { ...current, ...input }
+  const patch = Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined),
+  ) as Partial<PageAutomationSettings>
+  const next = { ...current, ...patch }
 
   db.prepare(`
     INSERT INTO page_automation_settings (page_id, posts_per_day, posting_logic, timezone, schedule_times, hashtags, updated_at)
