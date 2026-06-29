@@ -23,6 +23,15 @@ function asBool(value: string | undefined, fallback: boolean): boolean {
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase())
 }
 
+const SMTP_PLACEHOLDER_PASSWORDS = new Set([
+  'your-app-password',
+  'your-password',
+  'your-password-or-app-password',
+  'your-16-char-app-password',
+  'changeme',
+  'password',
+])
+
 function getSmtpConfig(): SmtpConfig | null {
   const provider = process.env.SMTP_PROVIDER?.trim().toLowerCase()
   const providerDefaults = provider ? SMTP_PROVIDER_DEFAULTS[provider] : undefined
@@ -31,7 +40,7 @@ function getSmtpConfig(): SmtpConfig | null {
 
   const port = Number(process.env.SMTP_PORT ?? providerDefaults?.port ?? 587)
   const user = process.env.SMTP_USER?.trim()
-  const pass = process.env.SMTP_PASS
+  const pass = process.env.SMTP_PASS?.trim()
   const from = process.env.SMTP_FROM?.trim() || user
   const secure = asBool(process.env.SMTP_SECURE, providerDefaults?.secure ?? port === 465)
 
@@ -41,6 +50,12 @@ function getSmtpConfig(): SmtpConfig | null {
 
   if (!user || !pass || !from) {
     throw new Error('SMTP is partially configured. Set SMTP_USER, SMTP_PASS, and SMTP_FROM (or SMTP_USER).')
+  }
+
+  if (SMTP_PLACEHOLDER_PASSWORDS.has(pass.toLowerCase())) {
+    throw new Error(
+      'SMTP_PASS is still a placeholder value. Set the real mailbox password in Railway Variables.',
+    )
   }
 
   return { host, port, user, pass, from, secure }
