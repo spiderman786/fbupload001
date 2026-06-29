@@ -12,15 +12,19 @@ export function resolveAppBaseDomain(): string {
 /** OAuth callback URLs this agency must whitelist in Meta Developer. */
 export function getAgencyOAuthRedirectUris(subdomain?: string | null): string[] {
   const base = resolveAppBaseDomain()
-  const uris = [`https://app.${base}/facebook/callback`]
+  const appUri = `https://app.${base}/facebook/callback`
   if (subdomain?.trim()) {
-    uris.push(`https://${subdomain.trim().toLowerCase()}.${base}/facebook/callback`)
+    const agencyUri = `https://${subdomain.trim().toLowerCase()}.${base}/facebook/callback`
+    return [agencyUri, appUri]
   }
-  return [...new Set(uris)]
+  return [appUri]
 }
 
 export function primaryOAuthRedirectUri(subdomain?: string | null): string {
   const uris = getAgencyOAuthRedirectUris(subdomain)
+  if (subdomain?.trim() && uris.length > 1) {
+    return uris[0]!
+  }
   if (typeof window !== 'undefined') {
     const host = window.location.hostname.toLowerCase()
     const match = uris.find((u) => {
@@ -32,5 +36,5 @@ export function primaryOAuthRedirectUri(subdomain?: string | null): string {
     })
     if (match) return match
   }
-  return uris[0]
+  return uris[0]!
 }

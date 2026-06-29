@@ -3,6 +3,7 @@ import type { Response } from 'express'
 import { db } from '../db.js'
 import { sanitizeUser, type AuthRequest } from '../middleware/auth.js'
 import { isPlatformAdmin } from '../services/platformAdmin.js'
+import { cookieDomain } from './appUrls.js'
 
 export type AgencyRole = 'owner' | 'admin' | 'staff'
 
@@ -25,6 +26,7 @@ export const COOKIE_AGENCY_OPTIONS = {
   sameSite: 'lax' as const,
   maxAge: 30 * 24 * 60 * 60 * 1000,
   path: '/',
+  ...(cookieDomain() ? { domain: cookieDomain() } : {}),
 }
 
 export type AgencyRequest = AuthRequest & { agency?: AgencySession }
@@ -200,7 +202,7 @@ export function setAgencyCookie(res: Response, agencyId: string) {
 }
 
 export function clearAgencyCookie(res: Response) {
-  res.clearCookie(AGENCY_COOKIE, { path: '/' })
+  res.clearCookie(AGENCY_COOKIE, { path: '/', ...(cookieDomain() ? { domain: cookieDomain() } : {}) })
 }
 
 export function assertAgencyMember(userId: string, agencyId: string): AgencySession | null {

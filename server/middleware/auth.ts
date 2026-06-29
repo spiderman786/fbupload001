@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken'
+import { cookieDomain } from '../utils/appUrls.js'
 import type { Request, Response, NextFunction } from 'express'
 import { db, type UserRow } from '../db.js'
 
@@ -78,4 +79,5 @@ export const COOKIE_OPTIONS = {
   sameSite: 'lax' as const,
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: '/',
+  ...(cookieDomain() ? { domain: cookieDomain() } : {}),
 }

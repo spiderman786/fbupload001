@@ -228,12 +228,28 @@ export const api = {
     },
     getMagicLink: (byocCredentialId?: string) => {
       const q = byocCredentialId ? `?byocCredentialId=${encodeURIComponent(byocCredentialId)}` : ''
-      return request<{ id: string; url: string; expiresAt: string; byocCredentialId: string | null }>(
-        `/facebook/magic-link${q}`,
-      )
+      return request<{
+        id: string
+        url: string
+        appUrl: string
+        agencyCallbackUrl: string | null
+        appCallbackUrl: string
+        agencySubdomain: string | null
+        expiresAt: string
+        byocCredentialId: string | null
+      }>(`/facebook/magic-link${q}`)
     },
     createMagicLink: (byocCredentialId?: string, options?: { regenerate?: boolean; label?: string }) =>
-      request<{ id: string; url: string; expiresAt: string; byocCredentialId: string | null }>(
+      request<{
+        id: string
+        url: string
+        appUrl: string
+        agencyCallbackUrl: string | null
+        appCallbackUrl: string
+        agencySubdomain: string | null
+        expiresAt: string
+        byocCredentialId: string | null
+      }>(
         '/facebook/magic-link',
         {
           method: 'POST',

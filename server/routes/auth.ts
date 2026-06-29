@@ -24,6 +24,7 @@ import {
   subdomainFromSignupName,
 } from '../utils/agency.js'
 import { isPublicSignupEnabled } from '../utils/signup.js'
+import { cookieDomain } from '../utils/appUrls.js'
 
 export const authRouter = Router()
 
@@ -248,7 +249,7 @@ authRouter.post('/login', async (req, res) => {
 })
 
 authRouter.post('/logout', (_req, res) => {
-  res.clearCookie('token', { path: '/' })
+  res.clearCookie('token', { path: '/', ...(cookieDomain() ? { domain: cookieDomain() } : {}) })
   clearAgencyCookie(res)
   res.json({ message: 'Logged out' })
 })

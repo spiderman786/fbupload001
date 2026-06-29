@@ -1,6 +1,7 @@
 import { v4 as uuid } from 'uuid'
 import { db } from '../db.js'
 import { getOAuthUrl } from './facebook.js'
+import { buildMagicConnectUrls } from '../utils/appUrls.js'
 
 const MAGIC_LINK_TTL_MS = 90 * 24 * 60 * 60 * 1000
 const OAUTH_STATE_TTL_MS = 15 * 60 * 1000
@@ -15,12 +16,11 @@ export type MagicLinkRow = {
   created_at: string
 }
 
-function clientBaseUrl(): string {
-  return (process.env.CLIENT_URL ?? 'http://localhost:5173').replace(/\/$/, '')
-}
-
-export function buildMagicConnectUrl(token: string): string {
-  return `${clientBaseUrl()}/facebook/connect/${token}`
+function getAgencySubdomain(agencyId: string): string | null {
+  const row = db.prepare('SELECT subdomain FROM agencies WHERE id = ?').get(agencyId) as
+    | { subdomain: string | null }
+    | undefined
+  return row?.subdomain?.trim() || null
 }
 
 function purgeExpired() {
@@ -49,23 +49,45 @@ function findActiveMagicLink(agencyId: string, byocCredentialId: string | null):
     .get(agencyId) as MagicLinkRow | undefined
 }
 
+export type MagicLinkResponse = {
+  id: string
+  url: string
+  appUrl: string
+  agencyCallbackUrl: string | null
+  appCallbackUrl: string
+  agencySubdomain: string | null
+  expiresAt: string
+  byocCredentialId: string | null
+}
+
+function toMagicLinkResponse(
+  id: string,
+  expiresAt: string,
+  byocCredentialId: string | null,
+  agencySubdomain: string | null,
+): MagicLinkResponse {
+  const urls = buildMagicConnectUrls(id, agencySubdomain)
+  return {
+    id,
+    expiresAt,
+    byocCredentialId,
+    ...urls,
+  }
+}
+
 export function getOrCreateMagicLink(
   agencyId: string,
   userId: string,
   byocCredentialId: string | null,
   options?: { regenerate?: boolean; label?: string },
-): { id: string; url: string; expiresAt: string; byocCredentialId: string | null } {
+): MagicLinkResponse {
   purgeExpired()
+  const agencySubdomain = getAgencySubdomain(agencyId)
 
   if (!options?.regenerate) {
     const existing = findActiveMagicLink(agencyId, byocCredentialId)
     if (existing) {
-      return {
-        id: existing.id,
-        url: buildMagicConnectUrl(existing.id),
-        expiresAt: existing.expires_at,
-        byocCredentialId: existing.byoc_credential_id,
-      }
+      return toMagicLinkResponse(existing.id, existing.expires_at, existing.byoc_credential_id, agencySubdomain)
     }
   } else if (byocCredentialId) {
     db.prepare('DELETE FROM facebook_oauth_magic_links WHERE agency_id = ? AND byoc_credential_id = ?').run(
@@ -83,7 +105,7 @@ export function getOrCreateMagicLink(
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(id, agencyId, userId, byocCredentialId, options?.label ?? null, expiresAt)
 
-  return { id, url: buildMagicConnectUrl(id), expiresAt, byocCredentialId }
+  return toMagicLinkResponse(id, expiresAt, byocCredentialId, agencySubdomain)
 }
 
 export function getMagicLink(token: string): MagicLinkRow | undefined {

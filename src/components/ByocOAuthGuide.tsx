@@ -75,8 +75,14 @@ export function ByocOAuthGuide({ subdomain, compact, verified }: Props) {
           <strong className="text-foreground">Valid OAuth Redirect URIs</strong>.
         </p>
         <div className="space-y-3">
-          <CopyField label="Primary callback (app)" value={primary} />
-          {secondary ? <CopyField label="Agency workspace callback" value={secondary} /> : null}
+          {secondary ? (
+            <>
+              <CopyField label={`Agency callback (${subdomain})`} value={primary} />
+              <CopyField label="App callback (fallback)" value={secondary} />
+            </>
+          ) : (
+            <CopyField label="OAuth callback" value={primary} />
+          )}
         </div>
       </div>
 
