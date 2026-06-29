@@ -12,13 +12,25 @@ export function getActiveJobCount() {
   return activeCount
 }
 
+const PAGE_PUBLISH_BUSY = `
+  SELECT 1 FROM reel_jobs busy
+  WHERE busy.target_page_id = j.target_page_id
+    AND busy.id != j.id
+    AND busy.status IN ('pending', 'downloading', 'publishing')
+    AND busy.job_type != 'prefill'
+    AND (busy.meta_post_id IS NULL OR busy.meta_post_id = '')
+`
+
 function claimNextJobId(): string | null {
   return db.transaction(() => {
+    // Only one active publish worker per page — prevents draining the whole queue at once.
     const publishing = db
       .prepare(`
-        SELECT id FROM reel_jobs
-        WHERE status = 'publishing' AND (meta_post_id IS NULL OR meta_post_id = '')
-        ORDER BY created_at ASC
+        SELECT j.id FROM reel_jobs j
+        WHERE j.status = 'publishing'
+          AND (j.meta_post_id IS NULL OR j.meta_post_id = '')
+          AND NOT EXISTS (${PAGE_PUBLISH_BUSY})
+        ORDER BY j.created_at ASC
         LIMIT 1
       `)
       .get() as { id: string } | undefined
@@ -35,13 +47,17 @@ function claimNextJobId(): string | null {
 
     const pending = db
       .prepare(`
-        SELECT id FROM reel_jobs
-        WHERE status = 'pending'
-          AND (meta_post_id IS NULL OR meta_post_id = '')
-          AND (scheduled_for IS NULL OR scheduled_for <= datetime('now'))
+        SELECT j.id FROM reel_jobs j
+        WHERE j.status = 'pending'
+          AND (j.meta_post_id IS NULL OR j.meta_post_id = '')
+          AND (j.scheduled_for IS NULL OR j.scheduled_for <= datetime('now'))
+          AND (
+            j.job_type = 'prefill'
+            OR NOT EXISTS (${PAGE_PUBLISH_BUSY})
+          )
         ORDER BY
-          CASE job_type WHEN 'direct' THEN 0 WHEN 'prefill' THEN 1 ELSE 2 END,
-          created_at ASC
+          CASE j.job_type WHEN 'direct' THEN 0 WHEN 'prefill' THEN 1 ELSE 2 END,
+          j.created_at ASC
         LIMIT 1
       `)
       .get() as { id: string } | undefined

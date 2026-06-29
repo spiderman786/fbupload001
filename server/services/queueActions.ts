@@ -183,7 +183,15 @@ export async function purgeQueuedJobsForPage(pageId: string, agencyId: string) {
     .all(pageId, agencyId) as { id: string }[]
 
   for (const job of jobs) {
-    await removeQueuedJob(job.id, pageId, agencyId)
+    try {
+      await removeQueuedJob(job.id, pageId, agencyId)
+    } catch (err) {
+      console.warn(
+        `[purge] could not remove queued job ${job.id}:`,
+        err instanceof Error ? err.message : err,
+      )
+      db.prepare('DELETE FROM reel_jobs WHERE id = ?').run(job.id)
+    }
   }
   return jobs.length
 }

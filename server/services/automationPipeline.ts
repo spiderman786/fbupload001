@@ -156,10 +156,23 @@ type PublishClaim = 'proceed' | 'already_published' | 'contended'
 function tryClaimPublishJob(jobId: string): PublishClaim {
   return db.transaction(() => {
     const row = db
-      .prepare('SELECT status, meta_post_id FROM reel_jobs WHERE id = ?')
-      .get(jobId) as { status: string; meta_post_id: string | null } | undefined
+      .prepare('SELECT status, meta_post_id, target_page_id FROM reel_jobs WHERE id = ?')
+      .get(jobId) as { status: string; meta_post_id: string | null; target_page_id: string } | undefined
     if (!row) throw new Error('Job not found')
     if (row.meta_post_id) return 'already_published'
+
+    const peer = db
+      .prepare(`
+        SELECT id FROM reel_jobs
+        WHERE target_page_id = ?
+          AND id != ?
+          AND status IN ('downloading', 'publishing')
+          AND job_type != 'prefill'
+          AND (meta_post_id IS NULL OR meta_post_id = '')
+        LIMIT 1
+      `)
+      .get(row.target_page_id, jobId)
+    if (peer) return 'contended'
 
     const claimed = db
       .prepare(`
@@ -209,6 +222,16 @@ async function publishCleanedFile(
       WHERE id = ? AND status != 'published'
     `).run(jobId)
     return
+  }
+
+  if (!canPagePostToday(pageId)) {
+    const job = loadJob(jobId)
+    if (job.cleaned_file_path) {
+      db.prepare("UPDATE reel_jobs SET status = 'queued' WHERE id = ? AND status != 'published'").run(jobId)
+      appendJobLog(jobId, 'publish', 'Daily post limit reached — returned to queue for a later slot', 'warn')
+      return
+    }
+    throw new Error('Daily post limit reached for this page')
   }
 
   let claim = tryClaimPublishJob(jobId)

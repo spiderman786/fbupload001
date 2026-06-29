@@ -270,7 +270,7 @@ RSS description: ${(input.rssDescription ?? '').slice(0, 400)}`
 
   if (!check.fits) {
     headline = fitHeadlineToTemplate(headline, input.fontsJson)
-    check = precheckHeadlineForTemplate(headline, input.fontsJson)
+    precheckHeadlineForTemplate(headline, input.fontsJson)
   }
 
   const accent_words =

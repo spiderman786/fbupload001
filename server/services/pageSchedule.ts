@@ -1,7 +1,7 @@
 import { db } from '../db.js'
-import { getCurrentTimeHHMM, getTodayDateInTimezone } from '../utils/timezone.js'
+import { getCurrentTimeHHMM, getTodayDateInTimezone, normalizeHHMM } from '../utils/timezone.js'
 import { canPagePostToday } from './pageQuota.js'
-import { claimQueuedJobForPublish, countQueuedForPage } from './reelQueue.js'
+import { claimQueuedJobForPublish, countQueuedForPage, pageHasInflightPublishJob } from './reelQueue.js'
 import { createAutomationJob } from './automationPipeline.js'
 import { enqueueJob } from './jobQueue.js'
 import { dedupeQueuedJobsForPageSync } from './queueActions.js'
@@ -28,20 +28,9 @@ function tryClaimScheduleFire(pageId: string, fireKey: string): boolean {
   return result.changes > 0
 }
 
-function pageHasInflightPublish(pageId: string): boolean {
-  const inflight = db
-    .prepare(`
-      SELECT id FROM reel_jobs
-      WHERE target_page_id = ? AND status IN ('pending', 'downloading', 'publishing')
-      LIMIT 1
-    `)
-    .get(pageId)
-  return Boolean(inflight)
-}
-
 function enqueueScheduledPublish(agencyId: string, userId: string, pageId: string) {
   if (!canPagePostToday(pageId)) return
-  if (pageHasInflightPublish(pageId)) return
+  if (pageHasInflightPublishJob(pageId)) return
 
   dedupeQueuedJobsForPageSync(pageId, agencyId)
 
@@ -80,7 +69,7 @@ export function processPageAutomationSchedules() {
 
   for (const page of pages) {
     const tz = page.timezone || 'America/New_York'
-    const times = parseScheduleTimes(page.schedule_times)
+    const times = parseScheduleTimes(page.schedule_times).map(normalizeHHMM)
     if (!times.length) continue
 
     const currentTime = getCurrentTimeHHMM(tz)

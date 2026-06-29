@@ -50,9 +50,25 @@ export function getPrefillTarget(pageId: string): number {
   return getPageQueueTarget(pageId)
 }
 
+/** True when this page already has a publish pipeline in flight (prefill downloads excluded). */
+export function pageHasInflightPublishJob(pageId: string): boolean {
+  const inflight = db
+    .prepare(`
+      SELECT id FROM reel_jobs
+      WHERE target_page_id = ?
+        AND status IN ('pending', 'downloading', 'publishing')
+        AND job_type != 'prefill'
+      LIMIT 1
+    `)
+    .get(pageId)
+  return Boolean(inflight)
+}
+
 /** Atomically move oldest queued reel to publishing and return its job id. */
 export function claimQueuedJobForPublish(pageId: string, jobType: QueueJobType): string | null {
   return db.transaction(() => {
+    if (pageHasInflightPublishJob(pageId)) return null
+
     for (let attempt = 0; attempt < 20; attempt++) {
       const row = db
         .prepare(`
@@ -64,6 +80,8 @@ export function claimQueuedJobForPublish(pageId: string, jobType: QueueJobType):
         .get(pageId) as { id: string } | undefined
 
       if (!row) return null
+
+      if (pageHasInflightPublishJob(pageId)) return null
 
       const result = db
         .prepare(`

@@ -3,13 +3,13 @@ import { db } from '../db.js'
 import { createAutomationJob } from './automationPipeline.js'
 import { canPagePostToday } from './pageQuota.js'
 import { enqueueJob } from './jobQueue.js'
-import { claimQueuedJobForPublish, countQueuedForPage } from './reelQueue.js'
+import { claimQueuedJobForPublish, countQueuedForPage, pageHasInflightPublishJob } from './reelQueue.js'
 import { dedupeQueuedJobsForPageSync } from './queueActions.js'
 import { syncAllUsersFollowers } from './followerSync.js'
 import { resetAllDailyQuotas } from './pageQuota.js'
 import { runMaintenance } from './cleanup.js'
 import { processPageAutomationSchedules } from './pageSchedule.js'
-import { DEFAULT_SCHEDULE_TIMEZONE, getCurrentTimeHHMM } from '../utils/timezone.js'
+import { DEFAULT_SCHEDULE_TIMEZONE, getCurrentTimeHHMM, normalizeHHMM } from '../utils/timezone.js'
 import { tickTimezoneQuotaResets } from '../utils/pageDayStats.js'
 import { SCHEDULER_PAGES_BATCH_SIZE } from '../utils/pagination.js'
 
@@ -25,16 +25,7 @@ function enqueuePageJob(
   scheduledFor?: string,
 ) {
   if (!canPagePostToday(pageId)) return
-
-  const inflight = db
-    .prepare(`
-      SELECT id FROM reel_jobs
-      WHERE target_page_id = ? AND status IN ('pending', 'downloading', 'publishing')
-      LIMIT 1
-    `)
-    .get(pageId)
-
-  if (inflight) return
+  if (pageHasInflightPublishJob(pageId)) return
 
   dedupeQueuedJobsForPageSync(pageId, agencyId)
 
@@ -59,7 +50,17 @@ function processScheduledSlots(mode: 'direct' | 'inapp') {
   for (const slot of slots) {
     const tz = (slot.timezone as string) || DEFAULT_SCHEDULE_TIMEZONE
     const currentTime = getCurrentTimeHHMM(tz)
-    if (slot.time !== currentTime) continue
+    if (normalizeHHMM(slot.time as string) !== currentTime) continue
+
+    const claimed = db
+      .prepare(`
+        UPDATE schedule_slots
+        SET status = 'completed', last_run_at = datetime('now')
+        WHERE id = ? AND status = 'upcoming'
+      `)
+      .run(slot.id as string)
+    if (claimed.changes === 0) continue
+
     const pageIds = (
       db.prepare('SELECT page_id FROM schedule_slot_pages WHERE slot_id = ?').all(slot.id as string) as {
         page_id: string
@@ -99,7 +100,6 @@ function processScheduledSlots(mode: 'direct' | 'inapp') {
       )
     }
 
-    db.prepare("UPDATE schedule_slots SET status = 'completed', last_run_at = datetime('now') WHERE id = ?").run(slot.id)
     setTimeout(() => {
       db.prepare("UPDATE schedule_slots SET status = 'upcoming' WHERE id = ?").run(slot.id)
     }, 60_000)
