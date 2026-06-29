@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ChevronDown } from 'lucide-react'
 import { AuthLayout } from '../components/AuthLayout'
@@ -32,7 +32,12 @@ export function SignupPage() {
   const [agencyName, setAgencyName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [signupOpen, setSignupOpen] = useState<boolean | null>(null)
   const workspacePreview = useMemo(() => previewSubdomain(fullName), [fullName])
+
+  useEffect(() => {
+    api.auth.signupStatus().then((r) => setSignupOpen(r.enabled)).catch(() => setSignupOpen(false))
+  }, [])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -55,6 +60,26 @@ export function SignupPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  if (signupOpen === false) {
+    return (
+      <AuthLayout>
+        <div className="mb-6">
+          <h2 className="text-xl font-bold tracking-tight">Signup is closed</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            New agencies are created by invite only. If you were invited to a team, use the invite link from your email.
+            Otherwise ask an agency owner to send you a team invite.
+          </p>
+        </div>
+        <Link
+          to="/login"
+          className="flex h-11 w-full items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+        >
+          Sign in
+        </Link>
+      </AuthLayout>
+    )
   }
 
   return (

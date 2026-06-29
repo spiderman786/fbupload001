@@ -1,8 +1,9 @@
 import type { FormEvent } from 'react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { AuthLayout } from '../components/AuthLayout'
 import { useAuth } from '../context/AuthContext'
+import { api } from '../api/client'
 
 export function LoginPage() {
   const { login } = useAuth()
@@ -18,6 +19,11 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [signupOpen, setSignupOpen] = useState(false)
+
+  useEffect(() => {
+    api.auth.signupStatus().then((r) => setSignupOpen(r.enabled)).catch(() => setSignupOpen(false))
+  }, [])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -93,10 +99,12 @@ export function LoginPage() {
         </button>
       </form>
 
-      <p className="mt-6 border-t border-border pt-6 text-center text-sm text-muted-foreground">
-        Don&apos;t have an account?{' '}
-        <Link to="/signup" className="font-semibold text-primary hover:underline">Sign up as agency</Link>
-      </p>
+      {signupOpen && (
+        <p className="mt-6 border-t border-border pt-6 text-center text-sm text-muted-foreground">
+          Don&apos;t have an account?{' '}
+          <Link to="/signup" className="font-semibold text-primary hover:underline">Sign up as agency</Link>
+        </p>
+      )}
     </AuthLayout>
   )
 }

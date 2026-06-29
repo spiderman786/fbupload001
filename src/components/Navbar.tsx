@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Menu, X } from 'lucide-react'
+import { api } from '../api/client'
 
 const navLinks = [
   { href: '/#how-it-works', label: 'How It Works' },
@@ -10,6 +11,11 @@ const navLinks = [
 
 export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [signupOpen, setSignupOpen] = useState(false)
+
+  useEffect(() => {
+    api.auth.signupStatus().then((r) => setSignupOpen(r.enabled)).catch(() => setSignupOpen(false))
+  }, [])
 
   return (
     <nav className="fixed top-0 right-0 left-0 z-50 bg-background/80 py-5 backdrop-blur-md">
@@ -41,13 +47,15 @@ export function Navbar() {
             >
               Log in
             </Link>
-            <Link
-              to="/signup"
-              className="group inline-flex items-center rounded-full bg-primary px-6 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
-            >
-              Sign up
-              <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
-            </Link>
+            {signupOpen && (
+              <Link
+                to="/signup"
+                className="group inline-flex items-center rounded-full bg-primary px-6 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                Sign up
+                <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
+              </Link>
+            )}
           </div>
         </div>
 
@@ -80,13 +88,15 @@ export function Navbar() {
             >
               Log in
             </Link>
-            <Link
-              to="/signup"
-              className="rounded-full bg-primary px-6 py-2 text-center text-sm font-semibold text-primary-foreground"
-              onClick={() => setMobileOpen(false)}
-            >
-              Sign up
-            </Link>
+            {signupOpen && (
+              <Link
+                to="/signup"
+                className="rounded-full bg-primary px-6 py-2 text-center text-sm font-semibold text-primary-foreground"
+                onClick={() => setMobileOpen(false)}
+              >
+                Sign up
+              </Link>
+            )}
           </div>
         </div>
       )}

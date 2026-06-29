@@ -23,8 +23,13 @@ import {
   setAgencyCookie,
   subdomainFromSignupName,
 } from '../utils/agency.js'
+import { isPublicSignupEnabled } from '../utils/signup.js'
 
 export const authRouter = Router()
+
+authRouter.get('/signup-status', (_req, res) => {
+  res.json({ enabled: isPublicSignupEnabled() })
+})
 
 function getRequestSubdomainHost(req: { headers: Record<string, unknown> & { host?: string } }): string | null {
   const forwarded = req.headers['x-forwarded-host'] as string | string[] | undefined
@@ -63,6 +68,13 @@ authRouter.get('/session', authMiddleware, (req: AuthRequest, res) => {
 })
 
 authRouter.post('/signup', async (req, res) => {
+  if (!isPublicSignupEnabled()) {
+    res.status(403).json({
+      error: 'Public signup is closed. Ask an existing agency owner for a team invite, or contact support.',
+    })
+    return
+  }
+
   const { fullName, email, password, phoneCountryCode, phoneNumber, agencyName } = req.body ?? {}
 
   if (!fullName || !email || !password || !phoneNumber) {

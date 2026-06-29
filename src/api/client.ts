@@ -45,6 +45,7 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(body),
       }),
+    signupStatus: () => request<{ enabled: boolean }>('/auth/signup-status'),
     verify: (body: { email: string; code: string }) =>
       request<SessionResponse & { message: string }>('/auth/verify', { method: 'POST', body: JSON.stringify(body) }),
     resendVerification: (email: string) =>
