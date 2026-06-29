@@ -352,6 +352,35 @@ function migrate() {
   migrateMultiByoc()
   migrateOps()
   migratePasswordReset()
+  migrateFacebookOAuth()
+}
+
+function migrateFacebookOAuth() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS facebook_oauth_magic_links (
+      id TEXT PRIMARY KEY,
+      agency_id TEXT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      byoc_credential_id TEXT REFERENCES byoc_credentials(id) ON DELETE SET NULL,
+      label TEXT,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_facebook_oauth_magic_agency ON facebook_oauth_magic_links(agency_id);
+    CREATE INDEX IF NOT EXISTS idx_facebook_oauth_magic_byoc ON facebook_oauth_magic_links(agency_id, byoc_credential_id);
+
+    CREATE TABLE IF NOT EXISTS facebook_oauth_states (
+      state TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      agency_id TEXT NOT NULL,
+      byoc_credential_id TEXT,
+      magic_link_id TEXT,
+      expires_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_facebook_oauth_states_expires ON facebook_oauth_states(expires_at);
+  `)
 }
 
 function migratePasswordReset() {

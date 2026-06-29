@@ -226,6 +226,26 @@ export const api = {
       const q = byocCredentialId ? `?byocCredentialId=${encodeURIComponent(byocCredentialId)}` : ''
       return request<{ url: string; byocCredentialId?: string | null }>(`/facebook/oauth${q}`)
     },
+    getMagicLink: (byocCredentialId?: string) => {
+      const q = byocCredentialId ? `?byocCredentialId=${encodeURIComponent(byocCredentialId)}` : ''
+      return request<{ id: string; url: string; expiresAt: string; byocCredentialId: string | null }>(
+        `/facebook/magic-link${q}`,
+      )
+    },
+    createMagicLink: (byocCredentialId?: string, options?: { regenerate?: boolean; label?: string }) =>
+      request<{ id: string; url: string; expiresAt: string; byocCredentialId: string | null }>(
+        '/facebook/magic-link',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            ...(byocCredentialId ? { byocCredentialId } : {}),
+            ...(options?.regenerate ? { regenerate: true } : {}),
+            ...(options?.label ? { label: options.label } : {}),
+          }),
+        },
+      ),
+    startMagicLink: (token: string) =>
+      request<{ url: string; state: string }>(`/facebook/magic-link/${encodeURIComponent(token)}/start`),
     callback: (code: string, state?: string) =>
       request<{ message: string; pagesConnected: number }>('/facebook/callback', {
         method: 'POST',

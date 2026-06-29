@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Globe, Link2, Pause, Play, Trash2 } from 'lucide-react'
 import { api, type ByocApp, type FacebookPage } from '../../api/client'
 import { ByocOAuthGuide } from '../../components/ByocOAuthGuide'
+import { MagicConnectLink } from '../../components/MagicConnectLink'
 import { StatusBadge } from '../../components/StatusBadge'
 import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
@@ -140,6 +141,9 @@ export function PagesPage() {
               </Link>{' '}
               to connect more accounts.
             </p>
+          )}
+          {!mockMode && selectedAppId && (
+            <MagicConnectLink byocCredentialId={selectedAppId} appLabel={selectedApp?.label} compact />
           )}
           <p className="text-xs text-muted-foreground">
             Manage apps in{' '}

@@ -14,14 +14,15 @@ import {
 import { getByocCredentialById, isFacebookConfiguredForAgency, listByocApps } from '../services/byoc.js'
 import { CONNECT_PAGES_BATCH_SIZE, assertOwnerUnlimitedPages } from '../utils/pagination.js'
 import type { AgencyRequest } from '../utils/agency.js'
+import {
+  consumeOAuthState,
+  getOrCreateMagicLink,
+  saveOAuthState,
+  startMagicLinkOAuth,
+} from '../services/facebookOAuthLinks.js'
 
 import { routeParam } from '../utils/routeParam.js'
 export const facebookRouter = Router()
-
-const oauthStates = new Map<
-  string,
-  { userId: string; agencyId: string; byocCredentialId: string | null; expires: number }
->()
 
 function resolveByocCredentialId(agencyId: string, byocCredentialId?: string | null): string | null {
   if (byocCredentialId) {
@@ -41,17 +42,53 @@ facebookRouter.get('/status', authMiddleware, requireVerified, agencyMiddleware,
   res.json({ configured, mockMode: !configured, appCount: apps.length })
 })
 
+facebookRouter.get('/magic-link', authMiddleware, requireVerified, agencyMiddleware, requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
+  try {
+    const byocCredentialId =
+      typeof req.query.byocCredentialId === 'string' ? req.query.byocCredentialId : null
+    const resolvedId = byocCredentialId ? resolveByocCredentialId(req.agency!.id, byocCredentialId) : resolveByocCredentialId(req.agency!.id, null)
+    const link = getOrCreateMagicLink(req.agency!.id, req.user!.id, resolvedId)
+    res.json(link)
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to create connect link' })
+  }
+})
+
+facebookRouter.post('/magic-link', authMiddleware, requireVerified, agencyMiddleware, requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
+  try {
+    const byocCredentialId =
+      typeof req.body?.byocCredentialId === 'string' ? req.body.byocCredentialId : null
+    const resolvedId = byocCredentialId ? resolveByocCredentialId(req.agency!.id, byocCredentialId) : resolveByocCredentialId(req.agency!.id, null)
+    const link = getOrCreateMagicLink(req.agency!.id, req.user!.id, resolvedId, {
+      regenerate: Boolean(req.body?.regenerate),
+      label: typeof req.body?.label === 'string' ? req.body.label : undefined,
+    })
+    res.json(link)
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to create connect link' })
+  }
+})
+
+facebookRouter.get('/magic-link/:token/start', authMiddleware, requireVerified, agencyMiddleware, requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
+  try {
+    const result = startMagicLinkOAuth(routeParam(req.params.token), req.user!.id, req.agency!.id)
+    res.json(result)
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Invalid connect link' })
+  }
+})
+
 facebookRouter.get('/oauth', authMiddleware, requireVerified, agencyMiddleware, requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
   try {
     const byocCredentialId =
       typeof req.query.byocCredentialId === 'string' ? req.query.byocCredentialId : null
     const resolvedId = resolveByocCredentialId(req.agency!.id, byocCredentialId)
     const state = uuid()
-    oauthStates.set(state, {
+    saveOAuthState({
+      state,
       userId: req.user!.id,
       agencyId: req.agency!.id,
       byocCredentialId: resolvedId,
-      expires: Date.now() + 10 * 60 * 1000,
     })
     res.json({ url: getOAuthUrl(req.agency!.id, state, resolvedId), byocCredentialId: resolvedId })
   } catch (err) {
@@ -66,13 +103,12 @@ facebookRouter.post('/callback', authMiddleware, requireVerified, agencyMiddlewa
   let byocCredentialId: string | null = null
 
   if (state) {
-    const stored = oauthStates.get(state)
-    if (!stored || stored.expires < Date.now() || stored.userId !== userId || stored.agencyId !== agencyId) {
+    const stored = consumeOAuthState(state, userId, agencyId)
+    if (!stored) {
       res.status(400).json({ error: 'Invalid or expired OAuth state' })
       return
     }
     byocCredentialId = stored.byocCredentialId
-    oauthStates.delete(state)
   } else if (process.env.NODE_ENV === 'production') {
     res.status(400).json({ error: 'Missing OAuth state' })
     return

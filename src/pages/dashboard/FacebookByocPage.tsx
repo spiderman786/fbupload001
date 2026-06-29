@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Eye, EyeOff, Plus, Settings, Trash2 } from 'lucide-react'
 import { api, type ByocApp } from '../../api/client'
 import { ByocOAuthGuide } from '../../components/ByocOAuthGuide'
+import { MagicConnectLink } from '../../components/MagicConnectLink'
 import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
 import { getApiError } from '../../lib/apiError'
@@ -145,6 +146,8 @@ export function FacebookByocPage() {
                   </div>
 
                   <ByocOAuthGuide subdomain={agency?.subdomain} compact verified />
+
+                  <MagicConnectLink byocCredentialId={app.id} appLabel={app.label} />
 
                   <div className="space-y-1">
                     <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Redirect URI saved</p>

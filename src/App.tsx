@@ -11,6 +11,7 @@ import { VerifyEmailPage } from './pages/VerifyEmailPage'
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
 import { ResetPasswordPage } from './pages/ResetPasswordPage'
 import { FacebookCallbackPage } from './pages/FacebookCallbackPage'
+import { FacebookConnectMagicPage } from './pages/FacebookConnectMagicPage'
 import { TermsPage } from './pages/TermsPage'
 import { PrivacyPage } from './pages/PrivacyPage'
 import { OverviewPage } from './pages/dashboard/OverviewPage'
@@ -58,6 +59,7 @@ function App() {
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/facebook/callback" element={<ProtectedRoute><FacebookCallbackPage /></ProtectedRoute>} />
+          <Route path="/facebook/connect/:token" element={<FacebookConnectMagicPage />} />
           <Route path="/accept-invite" element={<AcceptInvitePage />} />
 
           <Route element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
