@@ -23,6 +23,7 @@ import { proxyPoolRouter } from './routes/proxyPool.js'
 import { opsRouter } from './routes/ops.js'
 import { newsRouter } from './routes/news.js'
 import { seedPlatformAdmin, logPlatformAdminMode } from './services/platformAdmin.js'
+import { getSmtpConfigStatus, testSmtpConnection } from './services/email.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const dataDir = path.join(__dirname, '..', 'data')
@@ -32,6 +33,15 @@ initDb()
 await seedPlatformAdmin()
 logPlatformAdminMode()
 initProxyPool()
+
+if (process.env.NODE_ENV === 'production') {
+  const smtpStatus = getSmtpConfigStatus()
+  const maskedUser = smtpStatus.user?.replace(/(^.).+(@.+$)/, '$1***$2') ?? null
+  console.log('[smtp] config:', { ...smtpStatus, user: maskedUser })
+  testSmtpConnection()
+    .then((result) => console.log('[smtp] login test:', result))
+    .catch((err) => console.error('[smtp] login test error:', err))
+}
 
 const app = express()
 const PORT = Number(process.env.PORT ?? 3001)

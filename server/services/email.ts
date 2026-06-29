@@ -32,17 +32,22 @@ const SMTP_PLACEHOLDER_PASSWORDS = new Set([
   'password',
 ])
 
+function trimEnv(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined
+  return value.trim().replace(/^["']|["']$/g, '')
+}
+
 function getSmtpConfig(): SmtpConfig | null {
-  const provider = process.env.SMTP_PROVIDER?.trim().toLowerCase()
+  const provider = trimEnv(process.env.SMTP_PROVIDER)?.toLowerCase()
   const providerDefaults = provider ? SMTP_PROVIDER_DEFAULTS[provider] : undefined
-  const host = process.env.SMTP_HOST?.trim() || providerDefaults?.host
+  const host = trimEnv(process.env.SMTP_HOST) || providerDefaults?.host
   if (!host) return null
 
-  const port = Number(process.env.SMTP_PORT ?? providerDefaults?.port ?? 587)
-  const user = process.env.SMTP_USER?.trim() || process.env.SMTP_FROM?.trim()
-  const pass = process.env.SMTP_PASS?.trim()
-  const from = process.env.SMTP_FROM?.trim() || user
-  const secure = asBool(process.env.SMTP_SECURE, providerDefaults?.secure ?? port === 465)
+  const port = Number(trimEnv(process.env.SMTP_PORT) ?? providerDefaults?.port ?? 587)
+  const user = trimEnv(process.env.SMTP_USER) || trimEnv(process.env.SMTP_FROM)
+  const pass = trimEnv(process.env.SMTP_PASS)
+  const from = user
+  const secure = asBool(trimEnv(process.env.SMTP_SECURE), providerDefaults?.secure ?? port === 465)
 
   if (provider && !providerDefaults) {
     throw new Error(`Unsupported SMTP_PROVIDER "${provider}". Use "gmail", "outlook", or "privateemail".`)
@@ -81,8 +86,9 @@ export function getSmtpConfigStatus(): SmtpConfigStatus {
     if (!process.env.SMTP_USER?.trim() && process.env.SMTP_FROM?.trim()) {
       issues.push('SMTP_USER is missing — using SMTP_FROM for login (set both to the same mailbox email)')
     }
-    if (config.from.toLowerCase() !== config.user.toLowerCase()) {
-      issues.push('SMTP_FROM should match SMTP_USER for Private Email')
+    const fromEnv = trimEnv(process.env.SMTP_FROM)
+    if (fromEnv && fromEnv.toLowerCase() !== config.user.toLowerCase()) {
+      issues.push(`SMTP_FROM (${fromEnv}) differs from SMTP_USER — sending as ${config.user}`)
     }
     return {
       configured: true,
@@ -250,6 +256,27 @@ function createSmtpSession(socket: SocketLike) {
 }
 
 async function sendViaSmtp(config: SmtpConfig, to: string, subject: string, body: string): Promise<void> {
+  const attempts: SmtpConfig[] = [config]
+  if (config.host === 'mail.privateemail.com' && config.port === 465 && config.secure) {
+    attempts.push({ ...config, port: 587, secure: false })
+  }
+
+  let lastError: unknown
+  for (let i = 0; i < attempts.length; i++) {
+    try {
+      await sendViaSmtpOnce(attempts[i]!, to, subject, body)
+      return
+    } catch (error) {
+      lastError = error
+      if (i < attempts.length - 1) {
+        console.warn(`[email] SMTP attempt failed on port ${attempts[i]!.port}, retrying port ${attempts[i + 1]!.port}`)
+      }
+    }
+  }
+  throw lastError
+}
+
+async function sendViaSmtpOnce(config: SmtpConfig, to: string, subject: string, body: string): Promise<void> {
   let socket = await createSocket(config)
   let session = createSmtpSession(socket)
   let stage = 'connect'
@@ -334,23 +361,32 @@ export function userFacingEmailError(error: unknown): string {
   if (!raw) {
     return 'We could not send the email right now. Please try again in a few minutes.'
   }
+
+  const stageMatch = raw.match(/SMTP send failed at "([^"]+)"/i)
+  const stage = stageMatch?.[1]
+
   if (/not configured|partially configured|unsupported smtp_provider/i.test(raw)) {
-    return 'Email delivery is not configured on the server. Please contact support.'
-  }
-  if (/auth-pass|auth-user|authentication failed|\b535\b/i.test(raw)) {
-    return 'We could not send the verification email right now (mail server login failed). Check SMTP_USER and SMTP_PASS in Railway.'
-  }
-  if (/mail-from|sender|550|553/i.test(raw)) {
-    return 'Mail server rejected the sender address. Set SMTP_FROM to the same email as SMTP_USER.'
-  }
-  if (/rcpt-to|recipient|554/i.test(raw)) {
-    return 'Mail server rejected the recipient. Check that the Gmail address is valid.'
+    return 'Email delivery is not configured on the server. Contact support.'
   }
   if (/placeholder value/i.test(raw)) {
-    return 'SMTP password is still a placeholder. Set the real Private Email password in Railway Variables.'
+    return 'SMTP password is still a placeholder. Set the real Private Email password in Railway.'
+  }
+  if (/auth-pass|auth-user|authentication failed|\b535\b/i.test(raw)) {
+    return 'Mail login failed. In Railway, set SMTP_USER and SMTP_PASS to the mailer@fbuploadplus.com mailbox and its password (test login at privateemail.com first).'
+  }
+  if (/mail-from|sender|\b550\b|\b553\b/i.test(raw) || stage === 'mail-from') {
+    return 'Mail server rejected the sender. Set SMTP_FROM and SMTP_USER both to mailer@fbuploadplus.com.'
+  }
+  if (/rcpt-to|recipient|\b554\b/i.test(raw) || stage === 'rcpt-to') {
+    return 'Mail server rejected the recipient address.'
+  }
+  if (/data|tls|connect|greeting|ehlo/i.test(raw) || stage === 'data' || stage === 'data-body') {
+    return `Mail delivery failed at step "${stage ?? 'send'}". Check Railway logs for [email] SMTP, or try SMTP_PORT=587 and SMTP_SECURE=false.`
   }
   if (process.env.NODE_ENV === 'production') {
-    return 'We could not send the email right now. Please try again in a few minutes or contact support.'
+    return stage
+      ? `We could not send the email (failed at ${stage}). Check Railway logs or SMTP settings.`
+      : 'We could not send the email right now. Please try again in a few minutes or contact support.'
   }
   return raw
 }
