@@ -1050,7 +1050,7 @@ export function NewsFeedPage() {
               {previewUrl && (
                 <div className="space-y-2">
                   <p className="text-xs font-medium text-muted-foreground">Sample post preview (1080×1350)</p>
-                  <img src={previewUrl} alt="Template preview" className="w-full max-w-xs rounded-lg border border-border shadow-sm" />
+                  <img src={previewUrl} alt="Template preview" className="w-full max-w-sm rounded-lg border border-border shadow-sm" />
                 </div>
               )}
             </form>

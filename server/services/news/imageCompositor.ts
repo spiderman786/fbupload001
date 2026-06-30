@@ -36,18 +36,6 @@ function showInsetForLayout(layoutPreset: string): boolean {
   return normalizeLayoutPreset(layoutPreset) !== 'popcorn_hero'
 }
 
-function buildHeroFadeOverlay(barTop: number): Buffer {
-  return Buffer.from(`<svg width="${CANVAS_W}" height="${barTop}" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="heroFade" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="50%" stop-color="#000000" stop-opacity="0"/>
-        <stop offset="100%" stop-color="#000000" stop-opacity="0.5"/>
-      </linearGradient>
-    </defs>
-    <rect x="0" y="0" width="${CANVAS_W}" height="${barTop}" fill="url(#heroFade)"/>
-  </svg>`)
-}
-
 function escapeXml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
@@ -443,21 +431,59 @@ export const TEMPLATE_PREVIEW_ACCENT_WORDS = ['ATMOSPHERIC', 'THRILLER', 'TRUTHS
 async function createSampleHeroBuffer(_accentColor: string): Promise<Buffer> {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS_W}" height="${HERO_H}">
     <defs>
-      <linearGradient id="hero" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#2a2a3a"/>
-        <stop offset="100%" stop-color="#1a1a24"/>
+      <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#5a6f8c"/>
+        <stop offset="100%" stop-color="#2a3544"/>
       </linearGradient>
-    </defs>
-    <rect width="${CANVAS_W}" height="${HERO_H}" fill="url(#hero)"/>
-    <rect x="0" y="${HERO_H - 120}" width="${CANVAS_W}" height="120" fill="url(#fade)" opacity="0.35"/>
-    <defs>
-      <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#000000" stop-opacity="0"/>
-        <stop offset="100%" stop-color="#000000" stop-opacity="1"/>
+      <linearGradient id="curtain" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="#5c1224"/>
+        <stop offset="50%" stop-color="#922038"/>
+        <stop offset="100%" stop-color="#4a0e1c"/>
       </linearGradient>
+      <radialGradient id="spot" cx="50%" cy="35%" r="55%">
+        <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+      </radialGradient>
     </defs>
+    <rect width="${CANVAS_W}" height="${HERO_H}" fill="url(#sky)"/>
+    <rect x="0" y="0" width="180" height="${HERO_H}" fill="url(#curtain)" opacity="0.85"/>
+    <rect x="${CANVAS_W - 180}" y="0" width="180" height="${HERO_H}" fill="url(#curtain)" opacity="0.85"/>
+    <rect width="${CANVAS_W}" height="${HERO_H}" fill="url(#spot)"/>
+    <ellipse cx="360" cy="560" rx="130" ry="190" fill="#c4a484"/>
+    <ellipse cx="360" cy="420" rx="72" ry="88" fill="#e8dcc8"/>
+    <ellipse cx="720" cy="550" rx="118" ry="178" fill="#2a3a52"/>
+    <ellipse cx="720" cy="410" rx="68" ry="82" fill="#d8cbb8"/>
+    <rect x="280" y="680" width="520" height="140" fill="#1a2230" opacity="0.35"/>
   </svg>`
   return sharp(Buffer.from(svg)).png().toBuffer()
+}
+
+async function createSampleInsetBuffer(accentColor: string): Promise<Buffer> {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400">
+    <defs>
+      <linearGradient id="insetBg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#3d5268"/>
+        <stop offset="100%" stop-color="#1a2430"/>
+      </linearGradient>
+    </defs>
+    <rect width="400" height="400" fill="url(#insetBg)"/>
+    <ellipse cx="200" cy="175" rx="88" ry="102" fill="#e8dcc8"/>
+    <ellipse cx="200" cy="330" rx="120" ry="95" fill="${accentColor}" opacity="0.35"/>
+    <ellipse cx="200" cy="330" rx="95" ry="72" fill="#243044"/>
+  </svg>`
+  return sharp(Buffer.from(svg)).png().toBuffer()
+}
+
+function buildHeroFadeOverlay(barTop: number, opacity = 0.5): Buffer {
+  return Buffer.from(`<svg width="${CANVAS_W}" height="${barTop}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="heroFade" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="50%" stop-color="#000000" stop-opacity="0"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="${opacity}"/>
+      </linearGradient>
+    </defs>
+    <rect x="0" y="0" width="${CANVAS_W}" height="${barTop}" fill="url(#heroFade)"/>
+  </svg>`)
 }
 
 async function renderNewsCanvas(options: {
@@ -474,6 +500,7 @@ async function renderNewsCanvas(options: {
   layoutPreset?: string
   ctaText?: string
   imageCrop?: NewsImageCrop | null
+  heroFadeOpacity?: number
 }): Promise<Buffer> {
   const colors = parseColors(options.colorsJson)
   const fonts = parseFonts(options.fontsJson)
@@ -516,7 +543,7 @@ async function renderNewsCanvas(options: {
     ${cta ? `<text x="${CANVAS_W / 2}" y="${CANVAS_H - 36}" text-anchor="middle" font-family="${FONT_STACK}" font-size="${fonts.ctaSize}" font-weight="700" fill="${colors.cta}">${escapeXml(cta.toUpperCase())}</text>` : ''}
   </svg>`)
 
-  const heroFade = usePopcornLayout ? buildHeroFadeOverlay(barTop) : null
+  const heroFade = usePopcornLayout ? buildHeroFadeOverlay(barTop, options.heroFadeOpacity ?? 0.5) : null
 
   const composites: OverlayOptions[] = [{ input: heroLayer, top: 0, left: 0 }]
   if (heroFade) composites.push({ input: heroFade, top: 0, left: 0 })
@@ -581,7 +608,7 @@ export async function composeTemplatePreview(options: {
   const accentWords = options.accentWords?.length ? options.accentWords : TEMPLATE_PREVIEW_ACCENT_WORDS
 
   const heroBuf = await createSampleHeroBuffer(parseColors(options.colorsJson).accent)
-  const insetBuf = await sharp(heroBuf).extract({ left: 120, top: HERO_H - 420, width: 400, height: 400 }).toBuffer()
+  const insetBuf = await createSampleInsetBuffer(parseColors(options.colorsJson).accent)
 
   return renderNewsCanvas({
     heroBuf,
@@ -596,6 +623,7 @@ export async function composeTemplatePreview(options: {
     pagePictureBuf: options.pagePictureBuf ?? null,
     layoutPreset: options.layoutPreset ?? 'popcorn',
     ctaText: options.ctaText ?? '',
+    heroFadeOpacity: 0.32,
   })
 }
 
