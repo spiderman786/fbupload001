@@ -396,10 +396,12 @@ export const api = {
       fonts?: NewsTemplateFonts
       ctaText?: string
       headline?: string
+      accentWords?: string[]
       logoPath?: string | null
       brandType?: NewsBrandType
       pageId?: string
       pageName?: string
+      layoutPreset?: string
     }) => {
       const res = await fetch(`${BASE}/news/templates/preview`, {
         method: 'POST',
@@ -451,8 +453,14 @@ export const api = {
     pollFeed: (id: string) => request<{ message: string; created: number }>(`/news/feeds/${id}/poll`, { method: 'POST' }),
     publishItem: (id: string) => request<{ message: string; postId: string }>(`/news/items/${id}/publish`, { method: 'POST' }),
     skipItem: (id: string) => request<{ message: string }>(`/news/items/${id}/skip`, { method: 'POST' }),
-    regenerateItemImage: (id: string) =>
-      request<{ message: string; item: NewsItemRow }>(`/news/items/${id}/regenerate-image`, { method: 'POST' }),
+    regenerateItemImage: (
+      id: string,
+      body?: { aiInstruction?: string; rewriteCaption?: boolean },
+    ) =>
+      request<{ message: string; item: NewsItemRow }>(`/news/items/${id}/regenerate-image`, {
+        method: 'POST',
+        body: JSON.stringify(body ?? {}),
+      }),
     deleteItem: (id: string) => request<{ message: string }>(`/news/items/${id}`, { method: 'DELETE' }),
     updateItem: (
       id: string,
@@ -1125,7 +1133,7 @@ export type NewsTemplateFonts = {
   pageNameSize?: number
 }
 
-export type NewsBrandType = 'page_name' | 'logo' | 'none'
+export type NewsBrandType = 'page_picture' | 'page_name' | 'logo' | 'none'
 
 export type NewsTemplateRow = {
   id: string

@@ -13,7 +13,7 @@ export type NewsFonts = {
   pageNameSize?: number
 }
 
-export type NewsBrandType = 'page_name' | 'logo' | 'none'
+export type NewsBrandType = 'page_picture' | 'page_name' | 'logo' | 'none'
 
 export type NewsTemplate = {
   id: string
@@ -130,8 +130,8 @@ export function parseFonts(raw: string | null): NewsFonts {
 }
 
 export function parseBrandType(raw: string | null | undefined): NewsBrandType {
-  if (raw === 'logo' || raw === 'none') return raw
-  return 'page_name'
+  if (raw === 'page_name' || raw === 'logo' || raw === 'none') return raw
+  return 'page_picture'
 }
 
 export type NewsImageCrop = {

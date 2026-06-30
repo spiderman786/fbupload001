@@ -10,7 +10,8 @@ import { runCompositorJob } from './compositorQueue.js'
 import { formatNewsContent, mergeHashtags, headlineToPostTitle, pickAccentWords } from './contentFormatter.js'
 import { composeNewsImage, fitHeadlineToTemplate, normalizeHeadlineText, ensureSpacedHeadline, repairHeadlineSpacing } from './imageCompositor.js'
 import { fetchRssFeed, scrapeArticleImages, selectBestHeroAndInset } from './rssFetcher.js'
-import { normalizeArticleUrl, parseJsonArray, parseImageCrop, type NewsImageCrop } from './types.js'
+import { normalizeArticleUrl, parseBrandType, parseJsonArray, parseImageCrop, type NewsImageCrop } from './types.js'
+import { resolvePageProfilePictureBuffer } from '../pagePicture.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const newsImagesDir = path.join(__dirname, '..', '..', '..', 'data', 'news-images')
@@ -30,6 +31,8 @@ async function buildNewsContent(input: {
   aiRewriteEnabled?: boolean
   aiTonePrompt?: string | null
   templateFontsJson?: string | null
+  aiInstruction?: string | null
+  forceCaptionRewrite?: boolean
 }) {
   let content = formatNewsContent({
     rssTitle: input.rssTitle,
@@ -42,6 +45,7 @@ async function buildNewsContent(input: {
     rssTitle: input.rssTitle,
     rssDescription: input.rssDescription,
     aiTonePrompt: input.aiTonePrompt ?? undefined,
+    aiInstruction: input.aiInstruction ?? undefined,
     fontsJson: input.templateFontsJson,
   })
   if (imageHeadline) {
@@ -61,12 +65,13 @@ async function buildNewsContent(input: {
     input.templateFontsJson,
   )
 
-  if (input.aiRewriteEnabled) {
+  if (input.aiRewriteEnabled || input.forceCaptionRewrite) {
     const rewritten = await maybeRewriteNewsContent({
       agencyId: input.agencyId,
       rssTitle: input.rssTitle,
       rssDescription: input.rssDescription,
       aiTonePrompt: input.aiTonePrompt ?? undefined,
+      aiInstruction: input.aiInstruction ?? undefined,
     })
     if (rewritten) {
       content = {
@@ -100,6 +105,11 @@ async function composeItemImage(options: {
     .prepare('SELECT name FROM facebook_pages WHERE id = ?')
     .get(options.pageId) as { name: string } | undefined
 
+  const brandType = parseBrandType(options.template?.brand_type as string | undefined)
+  const layoutPreset = (options.template?.layout_preset as string) ?? 'popcorn'
+  const pagePictureBuf =
+    brandType === 'page_picture' ? await resolvePageProfilePictureBuffer(options.pageId) : null
+
   await runCompositorJob(() =>
     composeNewsImage({
       heroUrl: options.heroUrl,
@@ -108,9 +118,11 @@ async function composeItemImage(options: {
       accentWords: options.accentWords,
       colorsJson: (options.template?.colors_json as string) ?? null,
       fontsJson: (options.template?.fonts_json as string) ?? null,
-      brandType: 'page_name',
+      brandType,
       pageName: pageRow?.name ?? null,
-      logoPath: null,
+      logoPath: (options.template?.logo_path as string) ?? null,
+      pagePictureBuf,
+      layoutPreset,
       ctaText: (options.template?.cta_text as string) ?? '',
       outputPath: options.outputPath,
       heroLocalPath: options.heroLocalPath,
@@ -378,7 +390,11 @@ export async function processRssArticle(input: {
   return itemId
 }
 
-export async function regenerateNewsItemImage(itemId: string, agencyId?: string): Promise<void> {
+export async function regenerateNewsItemImage(
+  itemId: string,
+  agencyId?: string,
+  options?: { aiInstruction?: string; rewriteCaption?: boolean },
+): Promise<void> {
   const item = db.prepare('SELECT * FROM news_items WHERE id = ?').get(itemId) as Record<string, unknown> | undefined
   if (!item) throw new Error('News item not found')
   if (agencyId && String(item.agency_id) !== agencyId) throw new Error('News item not found')
@@ -412,6 +428,8 @@ export async function regenerateNewsItemImage(itemId: string, agencyId?: string)
     aiRewriteEnabled: !!settings?.ai_rewrite_enabled,
     aiTonePrompt: (template?.ai_tone_prompt as string) ?? null,
     templateFontsJson: (template?.fonts_json as string) ?? null,
+    aiInstruction: options?.aiInstruction?.trim() || null,
+    forceCaptionRewrite: !!options?.rewriteCaption,
   })
 
   let imagePath = String(item.generated_image_path ?? '')

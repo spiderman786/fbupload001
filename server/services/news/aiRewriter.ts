@@ -200,14 +200,18 @@ export async function adaptHeadlineForImageGraphic(input: {
   rssTitle: string
   rssDescription?: string
   aiTonePrompt?: string
+  aiInstruction?: string
   agencyId?: string
   fontsJson?: string | null
 }): Promise<ImageHeadlineResult | null> {
   if (!hasAiConfigured(input.agencyId)) return null
 
   const tone = input.aiTonePrompt?.trim() || 'dramatic, punchy tabloid style for Facebook'
+  const userCommand = input.aiInstruction?.trim()
+    ? `\nUser instruction (follow carefully): ${input.aiInstruction.trim().slice(0, 500)}`
+    : ''
   const buildPrompt = (extra = '') => `Rewrite this news title for a Facebook image graphic overlay.
-Tone: ${tone}
+Tone: ${tone}${userCommand}
 
 Rules for headline:
 - ALL CAPS, single line with a space between every word (required)
@@ -288,13 +292,17 @@ export async function maybeRewriteNewsContent(input: {
   rssTitle: string
   rssDescription: string
   aiTonePrompt?: string
+  aiInstruction?: string
   agencyId?: string
 }): Promise<AiRewriteResult | null> {
   if (!hasAiConfigured(input.agencyId)) return null
 
   const tone = input.aiTonePrompt?.trim() || 'dramatic and engaging for social media'
+  const userCommand = input.aiInstruction?.trim()
+    ? `\nUser instruction (follow carefully): ${input.aiInstruction.trim().slice(0, 500)}`
+    : ''
   const prompt = `Rewrite this RSS article for a Facebook news post.
-Tone: ${tone}
+Tone: ${tone}${userCommand}
 Return JSON only with keys: headline (ALL CAPS, max 80 chars, short for image overlay), post_title (sentence case, engaging), post_description (max 500 chars, no HTML), accent_words (array of 2-3 uppercase words from headline to highlight).
 
 RSS title: ${input.rssTitle.slice(0, 300)}

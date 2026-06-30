@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { Eye, EyeOff, ImagePlus, Newspaper, Pencil, RefreshCw, Rss, Send, SkipForward, Trash2 } from 'lucide-react'
-import { api, type NewsAiConnectionTest, type NewsAiProvider, type NewsImageCrop, type NewsOverview, type NewsTemplateColors, DEFAULT_NEWS_IMAGE_CROP } from '../../api/client'
+import { Eye, EyeOff, ImagePlus, Newspaper, Pencil, RefreshCw, Rss, Send, SkipForward, Sparkles, Trash2 } from 'lucide-react'
+import { api, type NewsAiConnectionTest, type NewsAiProvider, type NewsBrandType, type NewsImageCrop, type NewsItemRow, type NewsOverview, type NewsTemplateColors, DEFAULT_NEWS_IMAGE_CROP } from '../../api/client'
 import { useToast } from '../../context/ToastContext'
 import { getApiError } from '../../lib/apiError'
+import {
+  NEWS_TEMPLATE_EXAMPLES,
+  NEWS_TEMPLATE_LAYOUT_EXAMPLES,
+  NEWS_TEMPLATE_REFERENCE_EXAMPLES,
+  type NewsTemplateExample,
+} from '../../lib/newsTemplateExamples'
 
 const DEFAULT_COLORS: NewsTemplateColors = {
   accent: '#00D4FF',
@@ -11,6 +17,37 @@ const DEFAULT_COLORS: NewsTemplateColors = {
   barBg: '#000000',
   cta: '#AAAAAA',
   insetBorder: '#00D4FF',
+}
+
+const HEADLINE_FONT_PRESETS = [
+  { id: 'compact', label: 'Compact', textSize: 25 },
+  { id: 'default', label: 'Default', textSize: 50 },
+  { id: 'large', label: 'Large', textSize: 70 },
+  { id: 'xl', label: 'Extra large', textSize: 90 },
+] as const
+
+const CTA_FONT_PRESETS = [
+  { id: 'small', label: 'Small', ctaSize: 16 },
+  { id: 'default', label: 'Default', ctaSize: 20 },
+  { id: 'large', label: 'Large', ctaSize: 24 },
+] as const
+
+const PAGE_NAME_FONT_PRESETS = [
+  { id: 'small', label: 'Small', pageNameSize: 12 },
+  { id: 'default', label: 'Default', pageNameSize: 15 },
+  { id: 'large', label: 'Large', pageNameSize: 18 },
+] as const
+
+function headlinePresetIdForTextSize(textSize: number): string {
+  return HEADLINE_FONT_PRESETS.find((p) => p.textSize === textSize)?.id ?? 'custom'
+}
+
+function ctaPresetIdForSize(ctaSize: number): string {
+  return CTA_FONT_PRESETS.find((p) => p.ctaSize === ctaSize)?.id ?? 'custom'
+}
+
+function pageNamePresetIdForSize(pageNameSize: number): string {
+  return PAGE_NAME_FONT_PRESETS.find((p) => p.pageNameSize === pageNameSize)?.id ?? 'custom'
 }
 
 export function NewsFeedPage() {
@@ -44,16 +81,25 @@ export function NewsFeedPage() {
   const [pollingFeedId, setPollingFeedId] = useState<string | null>(null)
   const [deletingFeedId, setDeletingFeedId] = useState<string | null>(null)
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null)
+  const [aiRegenerateCommand, setAiRegenerateCommand] = useState('')
+  const [rewriteCaptionOnRegenerate, setRewriteCaptionOnRegenerate] = useState(false)
 
   const [templateName, setTemplateName] = useState('Default News')
   const [layoutPreset, setLayoutPreset] = useState('popcorn')
+  const [brandType, setBrandType] = useState<NewsBrandType>('page_picture')
   const [accentColor, setAccentColor] = useState(DEFAULT_COLORS.accent)
   const [barBg, setBarBg] = useState(DEFAULT_COLORS.barBg)
   const [ctaText, setCtaText] = useState('READ MORE INFO IN THE COMMENT')
   const [defaultHashtagsStr, setDefaultHashtagsStr] = useState('#News')
   const [aiTonePrompt, setAiTonePrompt] = useState('')
   const [editTemplateId, setEditTemplateId] = useState('')
+  const [exampleTemplateId, setExampleTemplateId] = useState('')
   const [textSize, setTextSize] = useState(50)
+  const [headlineFontPreset, setHeadlineFontPreset] = useState('default')
+  const [ctaSize, setCtaSize] = useState(20)
+  const [ctaFontPreset, setCtaFontPreset] = useState('default')
+  const [pageNameSize, setPageNameSize] = useState(15)
+  const [pageNameFontPreset, setPageNameFontPreset] = useState('default')
   const [previewPageId, setPreviewPageId] = useState('')
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewing, setPreviewing] = useState(false)
@@ -76,7 +122,7 @@ export function NewsFeedPage() {
   const [bulkApplying, setBulkApplying] = useState(false)
 
   const templateColors = { ...DEFAULT_COLORS, accent: accentColor, barBg, insetBorder: accentColor }
-  const templateFonts = { textSize }
+  const templateFonts = { textSize, ctaSize, pageNameSize }
 
   function parseHashtags(raw: string): string[] {
     return raw
@@ -101,17 +147,44 @@ export function NewsFeedPage() {
     setPageTemplateId(p.templateId ?? '')
   }
 
+  function applyTemplateExample(example: NewsTemplateExample) {
+    setEditTemplateId('')
+    setExampleTemplateId(example.id)
+    setTemplateName(example.templateName)
+    setLayoutPreset(example.layoutPreset)
+    setBrandType(example.brandType)
+    setAccentColor(example.accentColor)
+    setBarBg(example.barBg)
+    setCtaText(example.ctaText)
+    setTextSize(example.textSize)
+    setHeadlineFontPreset(headlinePresetIdForTextSize(example.textSize))
+    setCtaSize(example.ctaSize)
+    setCtaFontPreset(ctaPresetIdForSize(example.ctaSize))
+    setPageNameSize(example.pageNameSize)
+    setPageNameFontPreset(pageNamePresetIdForSize(example.pageNameSize))
+  }
+
   function loadTemplateForEdit(templateId: string, templates: NewsOverview['templates']) {
     const t = templates.find((x) => x.id === templateId)
     if (!t) return
+    setExampleTemplateId('')
     setTemplateName(t.name)
     setLayoutPreset(t.layoutPreset)
+    setBrandType(t.brandType === 'page_name' || t.brandType === 'logo' || t.brandType === 'none' ? t.brandType : 'page_picture')
     setAccentColor(t.colors.accent)
     setBarBg(t.colors.barBg)
     setCtaText(t.ctaText || 'READ MORE INFO IN THE COMMENT')
     setDefaultHashtagsStr(t.defaultHashtags.join(' '))
     setAiTonePrompt(t.aiTonePrompt)
-    setTextSize(t.fonts.textSize ?? 50)
+    const loadedTextSize = t.fonts.textSize ?? 50
+    const loadedCtaSize = t.fonts.ctaSize ?? 20
+    const loadedPageNameSize = t.fonts.pageNameSize ?? 15
+    setTextSize(loadedTextSize)
+    setHeadlineFontPreset(headlinePresetIdForTextSize(loadedTextSize))
+    setCtaSize(loadedCtaSize)
+    setCtaFontPreset(ctaPresetIdForSize(loadedCtaSize))
+    setPageNameSize(loadedPageNameSize)
+    setPageNameFontPreset(pageNamePresetIdForSize(loadedPageNameSize))
   }
 
   const [feedName, setFeedName] = useState('')
@@ -258,12 +331,16 @@ export function NewsFeedPage() {
   async function handlePreviewTemplate() {
     setPreviewing(true)
     try {
+      const example = NEWS_TEMPLATE_EXAMPLES.find((x) => x.id === exampleTemplateId)
       const blob = await api.news.previewTemplate({
         colors: templateColors,
         fonts: templateFonts,
-        brandType: 'page_name',
+        brandType,
+        layoutPreset,
         ctaText,
         pageId: previewPageId || undefined,
+        headline: example?.previewHeadline,
+        accentWords: example?.previewAccentWords,
       })
       setPreviewUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev)
@@ -283,7 +360,7 @@ export function NewsFeedPage() {
       layoutPreset,
       colors: templateColors,
       fonts: templateFonts,
-      brandType: 'page_name' as const,
+      brandType,
       ctaText,
       defaultHashtags: parseHashtags(defaultHashtagsStr),
       aiTonePrompt,
@@ -459,13 +536,33 @@ export function NewsFeedPage() {
     }
   }
 
-  async function handleRegenerateImage(itemId: string) {
+  function applyItemToEditForm(item: NewsItemRow) {
+    setEditHeadline(item.headline ?? '')
+    setEditPostTitle(item.postTitle ?? '')
+    setEditPostDescription(item.postDescription ?? '')
+    setEditAccentWords(item.accentWords?.join(', ') ?? '')
+    setEditHeroUrl(item.heroImageUrl?.startsWith('http') ? item.heroImageUrl : '')
+    setEditInsetUrl(item.insetImageUrl?.startsWith('http') ? item.insetImageUrl : '')
+    setEditImageCrop(item.imageCrop ?? { ...DEFAULT_NEWS_IMAGE_CROP })
+  }
+
+  async function handleRegenerateImage(
+    itemId: string,
+    options?: { aiInstruction?: string; rewriteCaption?: boolean },
+  ) {
     setRegeneratingId(itemId)
     try {
-      await api.news.regenerateItemImage(itemId)
+      const res = await api.news.regenerateItemImage(itemId, options)
       setPreviewCacheBust((prev) => ({ ...prev, [itemId]: Date.now() }))
-      toast.success('Image regenerated with AI headline')
-      await load()
+      if (viewItemId === itemId) applyItemToEditForm(res.item)
+      setData((prev) =>
+        prev ? { ...prev, items: prev.items.map((i) => (i.id === itemId ? res.item : i)) } : prev,
+      )
+      toast.success(
+        options?.aiInstruction?.trim()
+          ? 'Regenerated with your AI command'
+          : 'Image regenerated with AI headline',
+      )
     } catch (err) {
       toast.error(getApiError(err, 'Regenerate failed'))
     } finally {
@@ -717,6 +814,36 @@ export function NewsFeedPage() {
           <div className="grid gap-6 lg:grid-cols-2">
             <form onSubmit={handleCreateTemplate} className="marketing-card space-y-4">
               <h2 className="font-semibold">Template editor</h2>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Start from example</label>
+                <select
+                  value={exampleTemplateId}
+                  onChange={(e) => {
+                    const id = e.target.value
+                    setExampleTemplateId(id)
+                    const example = NEWS_TEMPLATE_EXAMPLES.find((x) => x.id === id)
+                    if (example) applyTemplateExample(example)
+                  }}
+                  className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                >
+                  <option value="">Choose a reference layout…</option>
+                  <optgroup label="Layout presets">
+                    {NEWS_TEMPLATE_LAYOUT_EXAMPLES.map((ex) => (
+                      <option key={ex.id} value={ex.id}>{ex.name}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="BBC / drama references (your examples)">
+                    {NEWS_TEMPLATE_REFERENCE_EXAMPLES.map((ex) => (
+                      <option key={ex.id} value={ex.id}>{ex.name}</option>
+                    ))}
+                  </optgroup>
+                </select>
+                {exampleTemplateId && (
+                  <p className="text-xs text-muted-foreground">
+                    {NEWS_TEMPLATE_EXAMPLES.find((x) => x.id === exampleTemplateId)?.description}
+                  </p>
+                )}
+              </div>
               {data.templates.length > 0 && (
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Edit existing template</label>
@@ -743,9 +870,10 @@ export function NewsFeedPage() {
               <div className="space-y-2">
                 <label className="text-sm font-medium">Layout preset</label>
                 <select value={layoutPreset} onChange={(e) => setLayoutPreset(e.target.value)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm">
-                  <option value="popcorn">Popcorn (hero + inset + text bar)</option>
-                  <option value="minimal">Minimal (same engine, popcorn layout)</option>
-                  <option value="tech_pulse">Tech Pulse (same engine, popcorn layout)</option>
+                  <option value="popcorn">Popcorn + inset (Ludwig / BBC style)</option>
+                  <option value="popcorn_hero">Popcorn hero only (Shakespeare style)</option>
+                  <option value="minimal">Minimal (legacy)</option>
+                  <option value="tech_pulse">Tech Pulse (legacy)</option>
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -758,26 +886,105 @@ export function NewsFeedPage() {
                   <input type="color" value={barBg} onChange={(e) => setBarBg(e.target.value)} className="h-10 w-full cursor-pointer rounded-md border border-border" />
                 </div>
               </div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-3">
-                  <label className="text-sm font-medium">Headline text size</label>
-                  <span className="text-sm tabular-nums text-muted-foreground">{textSize}</span>
+              <div className="space-y-3 rounded-lg border border-border p-3">
+                <p className="text-sm font-medium">Default font sizing</p>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Headline on image</label>
+                  <select
+                    value={headlineFontPreset}
+                    onChange={(e) => {
+                      const id = e.target.value
+                      setHeadlineFontPreset(id)
+                      const preset = HEADLINE_FONT_PRESETS.find((p) => p.id === id)
+                      if (preset) setTextSize(preset.textSize)
+                    }}
+                    className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                  >
+                    {HEADLINE_FONT_PRESETS.map((p) => (
+                      <option key={p.id} value={p.id}>{p.label}</option>
+                    ))}
+                    <option value="custom">Custom</option>
+                  </select>
+                  {headlineFontPreset === 'custom' && (
+                    <>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-xs text-muted-foreground">Fine-tune</span>
+                        <span className="text-sm tabular-nums text-muted-foreground">{textSize}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={1}
+                        max={100}
+                        value={textSize}
+                        onChange={(e) => setTextSize(Number(e.target.value))}
+                        className="w-full accent-primary"
+                      />
+                    </>
+                  )}
+                  <p className="text-xs text-muted-foreground">Default is Medium. Use Compact for long headlines, Large for short punchy ones.</p>
                 </div>
-                <input
-                  type="range"
-                  min={1}
-                  max={100}
-                  value={textSize}
-                  onChange={(e) => setTextSize(Number(e.target.value))}
-                  className="w-full accent-primary"
-                />
-                <p className="text-xs text-muted-foreground">1 = smallest · 100 = largest</p>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">CTA footer text</label>
+                  <select
+                    value={ctaFontPreset}
+                    onChange={(e) => {
+                      const id = e.target.value
+                      setCtaFontPreset(id)
+                      const preset = CTA_FONT_PRESETS.find((p) => p.id === id)
+                      if (preset) setCtaSize(preset.ctaSize)
+                    }}
+                    className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                  >
+                    {CTA_FONT_PRESETS.map((p) => (
+                      <option key={p.id} value={p.id}>{p.label}</option>
+                    ))}
+                    <option value="custom">Custom</option>
+                  </select>
+                  {ctaFontPreset === 'custom' && (
+                    <input
+                      type="number"
+                      min={12}
+                      max={32}
+                      value={ctaSize}
+                      onChange={(e) => setCtaSize(Number(e.target.value))}
+                      className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                    />
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Page name label</label>
+                  <select
+                    value={pageNameFontPreset}
+                    onChange={(e) => {
+                      const id = e.target.value
+                      setPageNameFontPreset(id)
+                      const preset = PAGE_NAME_FONT_PRESETS.find((p) => p.id === id)
+                      if (preset) setPageNameSize(preset.pageNameSize)
+                    }}
+                    className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                  >
+                    {PAGE_NAME_FONT_PRESETS.map((p) => (
+                      <option key={p.id} value={p.id}>{p.label}</option>
+                    ))}
+                    <option value="custom">Custom</option>
+                  </select>
+                  {pageNameFontPreset === 'custom' && (
+                    <input
+                      type="number"
+                      min={10}
+                      max={24}
+                      value={pageNameSize}
+                      onChange={(e) => setPageNameSize(Number(e.target.value))}
+                      className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                    />
+                  )}
+                </div>
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium">Page name on image</label>
+                <label className="text-sm font-medium">Preview page (profile picture + name)</label>
                 {data.pages.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
-                    <Link to="/facebook/accounts" className="text-primary hover:underline">Connect a Facebook page</Link> to show its name on each graphic.
+                    <Link to="/facebook/accounts" className="text-primary hover:underline">Connect a Facebook page</Link> to fetch its profile picture for each graphic.
                   </p>
                 ) : (
                   <>
@@ -790,9 +997,23 @@ export function NewsFeedPage() {
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
                     </select>
-                    <p className="text-xs text-muted-foreground">Each published graphic uses the assigned page&apos;s Facebook name (not a logo).</p>
+                    <p className="text-xs text-muted-foreground">
+                      Popcorn layout: article inset on the left, Facebook profile photo in the center badge, page name above it. Each assigned page uses its own picture when published.
+                    </p>
                   </>
                 )}
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Center badge style</label>
+                <select
+                  value={brandType}
+                  onChange={(e) => setBrandType(e.target.value as NewsBrandType)}
+                  className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                >
+                  <option value="page_picture">Facebook profile picture (recommended)</option>
+                  <option value="page_name">Page name text only</option>
+                  <option value="none">No center badge</option>
+                </select>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">CTA text on image</label>
@@ -1364,6 +1585,59 @@ export function NewsFeedPage() {
                     />
                   </div>
 
+                  <div className="rounded-lg border border-dashed border-primary/30 bg-primary/5 p-3 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-primary" />
+                      <p className="text-sm font-medium">AI regenerate (test command)</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Tell the AI how to rewrite the on-image headline. Use this to experiment before publishing.
+                    </p>
+                    <textarea
+                      value={aiRegenerateCommand}
+                      onChange={(e) => setAiRegenerateCommand(e.target.value)}
+                      rows={3}
+                      placeholder={'Examples:\n• Make it shorter — max 4 words, keep DWTS\n• Scandal tone, highlight ONLYFANS\n• Fix spacing, focus on the star name'}
+                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                    />
+                    <label className="flex items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={rewriteCaptionOnRegenerate}
+                        onChange={(e) => setRewriteCaptionOnRegenerate(e.target.checked)}
+                      />
+                      Also rewrite caption text with the same command
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={regeneratingId === viewItemId || !data?.aiSettings?.aiAvailable}
+                        onClick={() =>
+                          void handleRegenerateImage(viewItemId, {
+                            aiInstruction: aiRegenerateCommand.trim() || undefined,
+                            rewriteCaption: rewriteCaptionOnRegenerate,
+                          })
+                        }
+                        className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                      >
+                        <Sparkles className={`h-4 w-4 ${regeneratingId === viewItemId ? 'animate-pulse' : ''}`} />
+                        {regeneratingId === viewItemId ? 'Regenerating…' : 'Regenerate with AI command'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={regeneratingId === viewItemId || !data?.aiSettings?.aiAvailable}
+                        onClick={() => void handleRegenerateImage(viewItemId)}
+                        className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                      >
+                        <RefreshCw className={`h-4 w-4 ${regeneratingId === viewItemId ? 'animate-spin' : ''}`} />
+                        Default AI regenerate
+                      </button>
+                    </div>
+                    {!data?.aiSettings?.aiAvailable && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400">Configure a Gemini or OpenAI key above to use AI regenerate.</p>
+                    )}
+                  </div>
+
                   <div className="flex flex-wrap gap-2 pt-2">
                     <button
                       type="submit"
@@ -1372,15 +1646,6 @@ export function NewsFeedPage() {
                     >
                       <Pencil className={`h-4 w-4 ${savingEdit ? 'animate-pulse' : ''}`} />
                       {savingEdit ? 'Saving…' : 'Save & update image'}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={regeneratingId === viewItemId}
-                      onClick={() => void handleRegenerateImage(viewItemId)}
-                      className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-semibold disabled:opacity-50"
-                    >
-                      <RefreshCw className={`h-4 w-4 ${regeneratingId === viewItemId ? 'animate-spin' : ''}`} />
-                      Re-run AI
                     </button>
                   </div>
                 </form>

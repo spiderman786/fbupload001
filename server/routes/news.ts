@@ -16,6 +16,7 @@ import { fetchRssFeed } from '../services/news/rssFetcher.js'
 import { DEFAULT_COLORS, parseBrandType, parseJsonArray, resolveFonts, type NewsFonts } from '../services/news/types.js'
 import { isMockMetaPageId } from '../services/facebook.js'
 import { assertPublishableFacebookPage } from '../services/pageTokens.js'
+import { resolvePageProfilePictureBuffer } from '../services/pagePicture.js'
 
 import { routeParam } from '../utils/routeParam.js'
 const newsLogosDir = path.join(process.cwd(), 'data', 'news-logos')
@@ -196,14 +197,20 @@ newsRouter.get('/overview', (req: AgencyRequest, res) => {
 })
 
 newsRouter.post('/templates/preview', async (req: AgencyRequest, res) => {
-  const { colors, fonts, ctaText, headline, pageId, pageName } = req.body ?? {}
+  const { colors, fonts, ctaText, headline, accentWords, pageId, pageName, brandType, layoutPreset } = req.body ?? {}
   try {
     let resolvedPageName = pageName?.trim() || null
-    if (!resolvedPageName && pageId) {
+    let pagePictureBuf: Buffer | null = null
+    const resolvedBrandType = parseBrandType(brandType)
+
+    if (pageId) {
       const page = db
         .prepare('SELECT name FROM facebook_pages WHERE id = ? AND agency_id = ?')
         .get(pageId, req.agency!.id) as { name: string } | undefined
-      resolvedPageName = page?.name ?? null
+      resolvedPageName = resolvedPageName || page?.name || null
+      if (resolvedBrandType === 'page_picture') {
+        pagePictureBuf = await resolvePageProfilePictureBuffer(String(pageId))
+      }
     }
 
     const png = await composeTemplatePreview({
@@ -211,9 +218,12 @@ newsRouter.post('/templates/preview', async (req: AgencyRequest, res) => {
       fontsJson: fonts ? JSON.stringify(resolveFonts(fonts)) : null,
       ctaText: ctaText ?? '',
       headline: headline?.trim() || undefined,
+      accentWords: Array.isArray(accentWords) ? accentWords.map(String) : undefined,
       logoPath: null,
-      brandType: 'page_name',
+      brandType: resolvedBrandType,
       pageName: resolvedPageName,
+      pagePictureBuf,
+      layoutPreset: layoutPreset ?? 'popcorn',
     })
     res.type('png').send(png)
   } catch (err) {
@@ -738,7 +748,11 @@ newsRouter.post('/items/:id/regenerate-image', async (req: AgencyRequest, res) =
     return
   }
   try {
-    await regenerateNewsItemImage(routeParam(req.params.id), req.agency!.id)
+    const { aiInstruction, rewriteCaption } = req.body ?? {}
+    await regenerateNewsItemImage(routeParam(req.params.id), req.agency!.id, {
+      aiInstruction: typeof aiInstruction === 'string' ? aiInstruction : undefined,
+      rewriteCaption: !!rewriteCaption,
+    })
     const updated = db
       .prepare('SELECT * FROM news_items WHERE id = ?')
       .get(routeParam(req.params.id)) as Record<string, unknown>

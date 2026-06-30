@@ -453,6 +453,12 @@ function migrateOps() {
   if (!pageCols.some((c) => c.name === 'consecutive_failures')) {
     db.exec(`ALTER TABLE facebook_pages ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0`)
   }
+  if (!pageCols.some((c) => c.name === 'profile_picture_url')) {
+    db.exec(`ALTER TABLE facebook_pages ADD COLUMN profile_picture_url TEXT`)
+  }
+  if (!pageCols.some((c) => c.name === 'profile_picture_synced_at')) {
+    db.exec(`ALTER TABLE facebook_pages ADD COLUMN profile_picture_synced_at TEXT`)
+  }
 
   const sourceCols = db.prepare('PRAGMA table_info(source_accounts)').all() as { name: string }[]
   if (!sourceCols.some((c) => c.name === 'consecutive_failures')) {
@@ -587,6 +593,7 @@ function migrateNews() {
   if (!templateCols.some((c) => c.name === 'brand_type')) {
     db.exec(`ALTER TABLE news_templates ADD COLUMN brand_type TEXT NOT NULL DEFAULT 'page_name'`)
   }
+  db.prepare(`UPDATE news_templates SET brand_type = 'page_picture' WHERE brand_type = 'page_name'`).run()
 
   const newsItemCols = db.prepare('PRAGMA table_info(news_items)').all() as { name: string }[]
   if (!newsItemCols.some((c) => c.name === 'image_crop_json')) {

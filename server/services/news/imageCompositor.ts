@@ -12,6 +12,42 @@ const INSET_X = 36
 const BRAND_BADGE_R = 54
 const FONT_STACK = "Impact, 'Arial Black', 'Helvetica Neue', Arial, sans-serif"
 
+function insetOuterSize(size: number): { border: number; outer: number } {
+  const border = Math.max(4, Math.round(size * 0.035))
+  return { border, outer: size + border * 2 }
+}
+
+function popcornInsetTop(barTop: number): number {
+  const { outer } = insetOuterSize(INSET_SIZE)
+  return barTop - Math.round(outer * 0.52)
+}
+
+function normalizeLayoutPreset(layoutPreset: string): string {
+  if (layoutPreset === 'minimal' || layoutPreset === 'tech_pulse') return 'popcorn'
+  return layoutPreset
+}
+
+function isPopcornLayout(layoutPreset: string): boolean {
+  const normalized = normalizeLayoutPreset(layoutPreset)
+  return normalized === 'popcorn' || normalized === 'popcorn_hero'
+}
+
+function showInsetForLayout(layoutPreset: string): boolean {
+  return normalizeLayoutPreset(layoutPreset) !== 'popcorn_hero'
+}
+
+function buildHeroFadeOverlay(barTop: number): Buffer {
+  return Buffer.from(`<svg width="${CANVAS_W}" height="${barTop}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="heroFade" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="50%" stop-color="#000000" stop-opacity="0"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="0.5"/>
+      </linearGradient>
+    </defs>
+    <rect x="0" y="0" width="${CANVAS_W}" height="${barTop}" fill="url(#heroFade)"/>
+  </svg>`)
+}
+
 function escapeXml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
@@ -239,6 +275,30 @@ function buildBrandBadgeSvg(pageName: string, colors: NewsColors, fonts: NewsFon
   `
 }
 
+function buildPagePictureBrandSvg(pageName: string, colors: NewsColors, fonts: NewsFonts, barTop: number): string {
+  const label = pageName.trim()
+  if (!label) return buildBrandArcsSvg(colors, barTop)
+
+  const cx = CANVAS_W / 2
+  const labelY = barTop - BRAND_BADGE_R - 14
+  const fs = Math.max(11, (fonts.pageNameSize ?? 15) - 1)
+
+  return `
+    ${buildBrandArcsSvg(colors, barTop)}
+    <text x="${cx}" y="${labelY}" text-anchor="middle" font-family="${FONT_STACK}" font-size="${fs}" font-weight="900" fill="${colors.text}">${escapeXml(label.slice(0, 28).toUpperCase())}</text>
+  `
+}
+
+function buildBrandArcsSvg(colors: NewsColors, barTop: number): string {
+  const cx = CANVAS_W / 2
+  const cy = barTop
+  const r = BRAND_BADGE_R + 10
+  return `
+    <path d="M ${cx - r} ${cy - 6} A ${r} ${r} 0 0 1 ${cx + r} ${cy - 6}" fill="none" stroke="${colors.accent}" stroke-width="3"/>
+    <path d="M ${cx - r} ${cy + 6} A ${r} ${r} 0 0 0 ${cx + r} ${cy + 6}" fill="none" stroke="${colors.accent}" stroke-width="3"/>
+  `
+}
+
 function buildHeadlineLineSvg(
   line: string,
   y: number,
@@ -322,6 +382,28 @@ async function fitImageWithCrop(
     .toBuffer()
 }
 
+async function circleProfilePicture(input: Buffer, diameter: number, borderColor: string, bgColor: string): Promise<Buffer> {
+  const { border, outer } = insetOuterSize(diameter)
+  const inner = await sharp(input)
+    .resize(diameter, diameter, { fit: 'cover', position: 'centre', kernel: sharp.kernel.lanczos3 })
+    .sharpen({ sigma: 0.4, m1: 0.6, m2: 0.2 })
+    .png()
+    .toBuffer()
+
+  const mask = Buffer.from(
+    `<svg width="${diameter}" height="${diameter}"><circle cx="${diameter / 2}" cy="${diameter / 2}" r="${diameter / 2}" fill="white"/></svg>`,
+  )
+  const rounded = await sharp(inner).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer()
+
+  const ring = Buffer.from(
+    `<svg width="${outer}" height="${outer}"><circle cx="${outer / 2}" cy="${outer / 2}" r="${diameter / 2 + border}" fill="${borderColor}"/><circle cx="${outer / 2}" cy="${outer / 2}" r="${diameter / 2 + border - 1}" fill="none" stroke="${bgColor}" stroke-width="2"/></svg>`,
+  )
+
+  return sharp(ring)
+    .composite([{ input: rounded, top: border, left: border }])
+    .png()
+    .toBuffer()
+}
 async function circleInset(input: Buffer, size: number, borderColor: string, crop?: NewsImageCrop): Promise<Buffer> {
   const insetCrop = crop
     ? await fitImageWithCrop(
@@ -338,16 +420,13 @@ async function circleInset(input: Buffer, size: number, borderColor: string, cro
         .png()
         .toBuffer()
 
-  const inner = insetCrop
-
   const mask = Buffer.from(
     `<svg width="${size}" height="${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="white"/></svg>`,
   )
 
-  const rounded = await sharp(inner).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer()
+  const rounded = await sharp(insetCrop).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer()
 
-  const border = Math.max(4, Math.round(size * 0.035))
-  const outer = size + border * 2
+  const { border, outer } = insetOuterSize(size)
   const ring = Buffer.from(
     `<svg width="${outer}" height="${outer}"><circle cx="${outer / 2}" cy="${outer / 2}" r="${size / 2 + border}" fill="${borderColor}"/></svg>`,
   )
@@ -391,12 +470,15 @@ async function renderNewsCanvas(options: {
   brandType?: NewsBrandType
   pageName?: string | null
   logoPath?: string | null
+  pagePictureBuf?: Buffer | null
+  layoutPreset?: string
   ctaText?: string
   imageCrop?: NewsImageCrop | null
 }): Promise<Buffer> {
   const colors = parseColors(options.colorsJson)
   const fonts = parseFonts(options.fontsJson)
-  const brandType = options.brandType ?? 'page_name'
+  const brandType = options.brandType ?? 'page_picture'
+  const layoutPreset = normalizeLayoutPreset(options.layoutPreset ?? 'popcorn')
   const crop = options.imageCrop ?? parseImageCrop(null)
 
   const heroLayer = await fitImageWithCrop(
@@ -409,14 +491,22 @@ async function renderNewsCanvas(options: {
   )
 
   const insetLayer = await circleInset(options.insetBuf, INSET_SIZE, colors.insetBorder, crop)
-  const insetY = HERO_H - INSET_SIZE - 48
-
   const barTop = HERO_H
-  const dividerLine = `<line x1="0" y1="${barTop}" x2="${CANVAS_W}" y2="${barTop}" stroke="${colors.text}" stroke-width="3"/>`
+  const usePopcornLayout = isPopcornLayout(layoutPreset)
+  const showInset = showInsetForLayout(layoutPreset)
+  const insetY = usePopcornLayout ? popcornInsetTop(barTop) : HERO_H - INSET_SIZE - 48
+
   const brandSvg =
-    brandType === 'page_name' ? buildBrandBadgeSvg(options.pageName ?? '', colors, fonts, barTop) : ''
+    brandType === 'page_name'
+      ? buildBrandBadgeSvg(options.pageName ?? '', colors, fonts, barTop)
+      : brandType === 'page_picture'
+        ? buildPagePictureBrandSvg(options.pageName ?? '', colors, fonts, barTop)
+        : ''
   const headlineSvg = buildHeadlineSvg(options.headline, options.accentWords, colors, fonts, barTop)
   const cta = options.ctaText?.trim() ?? ''
+  const dividerLine = usePopcornLayout
+    ? `<line x1="0" y1="${barTop}" x2="${CANVAS_W}" y2="${barTop}" stroke="${colors.text}" stroke-width="2"/>`
+    : ''
 
   const overlaySvg = Buffer.from(`<svg width="${CANVAS_W}" height="${CANVAS_H}" xmlns="http://www.w3.org/2000/svg">
     <rect x="0" y="${barTop}" width="${CANVAS_W}" height="${CANVAS_H - barTop}" fill="${colors.barBg}"/>
@@ -426,11 +516,28 @@ async function renderNewsCanvas(options: {
     ${cta ? `<text x="${CANVAS_W / 2}" y="${CANVAS_H - 36}" text-anchor="middle" font-family="${FONT_STACK}" font-size="${fonts.ctaSize}" font-weight="700" fill="${colors.cta}">${escapeXml(cta.toUpperCase())}</text>` : ''}
   </svg>`)
 
-  const composites: OverlayOptions[] = [
-    { input: heroLayer, top: 0, left: 0 },
-    { input: insetLayer, top: insetY, left: INSET_X },
-    { input: overlaySvg, top: 0, left: 0 },
-  ]
+  const heroFade = usePopcornLayout ? buildHeroFadeOverlay(barTop) : null
+
+  const composites: OverlayOptions[] = [{ input: heroLayer, top: 0, left: 0 }]
+  if (heroFade) composites.push({ input: heroFade, top: 0, left: 0 })
+  if (showInset) composites.push({ input: insetLayer, top: insetY, left: INSET_X })
+  composites.push({ input: overlaySvg, top: 0, left: 0 })
+
+  if (brandType === 'page_picture' && options.pagePictureBuf) {
+    const badgeDiameter = BRAND_BADGE_R * 2
+    const profileBadge = await circleProfilePicture(
+      options.pagePictureBuf,
+      badgeDiameter,
+      colors.accent,
+      colors.barBg,
+    )
+    const { outer } = insetOuterSize(badgeDiameter)
+    composites.push({
+      input: profileBadge,
+      top: barTop - Math.round(outer / 2),
+      left: Math.floor(CANVAS_W / 2 - outer / 2),
+    })
+  }
 
   if (brandType === 'logo' && options.logoPath && fs.existsSync(options.logoPath)) {
     const logoSize = BRAND_BADGE_R * 2
@@ -466,6 +573,8 @@ export async function composeTemplatePreview(options: {
   brandType?: NewsBrandType
   pageName?: string | null
   logoPath?: string | null
+  pagePictureBuf?: Buffer | null
+  layoutPreset?: string
   ctaText?: string
 }): Promise<Buffer> {
   const headline = (options.headline?.trim() || TEMPLATE_PREVIEW_HEADLINE).toUpperCase()
@@ -484,6 +593,8 @@ export async function composeTemplatePreview(options: {
     brandType: parseBrandType(options.brandType),
     pageName: options.pageName ?? 'POPCORN FEED',
     logoPath: options.logoPath,
+    pagePictureBuf: options.pagePictureBuf ?? null,
+    layoutPreset: options.layoutPreset ?? 'popcorn',
     ctaText: options.ctaText ?? '',
   })
 }
@@ -498,6 +609,8 @@ export async function composeNewsImage(options: {
   brandType?: NewsBrandType
   pageName?: string | null
   logoPath?: string | null
+  pagePictureBuf?: Buffer | null
+  layoutPreset?: string
   ctaText?: string
   outputPath: string
   heroLocalPath?: string
@@ -529,9 +642,11 @@ export async function composeNewsImage(options: {
     accentWords: options.accentWords,
     colorsJson: options.colorsJson,
     fontsJson: options.fontsJson,
-    brandType: options.brandType,
+    brandType: parseBrandType(options.brandType),
     pageName: options.pageName,
     logoPath: options.logoPath,
+    pagePictureBuf: options.pagePictureBuf ?? null,
+    layoutPreset: options.layoutPreset ?? 'popcorn',
     ctaText: options.ctaText,
     imageCrop: options.imageCrop,
   })
