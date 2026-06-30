@@ -157,14 +157,20 @@ export function upgradeImageUrl(url: string): string {
   return upgraded.replace(/-\d+x\d+(\.(jpe?g|png|webp))/i, '$1')
 }
 
-async function imagePixelArea(url: string): Promise<number> {
+async function imageMeta(url: string): Promise<{ url: string; area: number; squareness: number; key: string }> {
+  const key = imageUrlKey(url)
   const buf = await downloadImageBuffer(upgradeImageUrl(url))
-  if (!buf) return 0
+  if (!buf) return { url, area: 0, squareness: 0, key }
   try {
     const meta = await sharp(buf).metadata()
-    return (meta.width ?? 0) * (meta.height ?? 0)
+    const w = meta.width ?? 0
+    const h = meta.height ?? 0
+    const area = w * h
+    const ratio = h > 0 ? w / h : 1
+    const squareness = 1 - Math.min(1, Math.abs(1 - ratio))
+    return { url, area, squareness, key }
   } catch {
-    return 0
+    return { url, area: 0, squareness: 0, key }
   }
 }
 
@@ -176,9 +182,7 @@ export async function selectBestHeroAndInset(
   if (unique.length === 0) return { hero: null, inset: null }
   if (unique.length === 1) return { hero: unique[0]!, inset: unique[0]! }
 
-  const ranked = await Promise.all(
-    unique.slice(0, 8).map(async (url) => ({ url, area: await imagePixelArea(url), key: imageUrlKey(url) })),
-  )
+  const ranked = await Promise.all(unique.slice(0, 8).map((url) => imageMeta(url)))
   ranked.sort((a, b) => b.area - a.area)
 
   const hero =
@@ -186,7 +190,10 @@ export async function selectBestHeroAndInset(
     ranked.find((r) => r.url !== ranked[0]?.url)?.url ??
     ranked[0]?.url ??
     unique[0]!
-  const inset = ranked.find((r) => r.url !== hero)?.url ?? ranked[1]?.url ?? hero
+
+  const insetCandidates = ranked.filter((r) => r.url !== hero)
+  insetCandidates.sort((a, b) => b.squareness - a.squareness || b.area - a.area)
+  const inset = insetCandidates[0]?.url ?? ranked[1]?.url ?? hero
   return { hero, inset }
 }
 

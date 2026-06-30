@@ -19,7 +19,7 @@ function insetOuterSize(size: number): { border: number; outer: number } {
 
 function popcornInsetTop(barTop: number): number {
   const { outer } = insetOuterSize(INSET_SIZE)
-  return barTop - Math.round(outer * 0.52)
+  return barTop - Math.round(outer / 2)
 }
 
 function normalizeLayoutPreset(layoutPreset: string): string {
@@ -537,8 +537,8 @@ async function renderNewsCanvas(options: {
 
   const composites: OverlayOptions[] = [{ input: heroLayer, top: 0, left: 0 }]
   if (heroFade) composites.push({ input: heroFade, top: 0, left: 0 })
-  if (showInset) composites.push({ input: insetLayer, top: insetY, left: INSET_X })
   composites.push({ input: overlaySvg, top: 0, left: 0 })
+  if (showInset) composites.push({ input: insetLayer, top: insetY, left: INSET_X })
 
   if (brandType === 'page_picture' && options.pagePictureBuf) {
     const badgeDiameter = BRAND_BADGE_R * 2
@@ -645,7 +645,13 @@ export async function composeNewsImage(options: {
   if (options.insetLocalPath) {
     insetBuf = await fs.promises.readFile(options.insetLocalPath)
   } else if (options.insetUrl === options.heroUrl) {
-    insetBuf = await sharp(heroBuf).extract({ left: 80, top: 80, width: 400, height: 400 }).toBuffer()
+    const meta = await sharp(heroBuf).metadata()
+    const iw = meta.width ?? 800
+    const ih = meta.height ?? 600
+    const size = Math.min(iw, ih, Math.max(200, Math.round(Math.min(iw, ih) * 0.72)))
+    const left = Math.max(0, Math.round((iw - size) / 2))
+    const top = Math.max(0, Math.round(ih * 0.06))
+    insetBuf = await sharp(heroBuf).extract({ left, top, width: size, height: size }).toBuffer()
   } else {
     const downloaded = await downloadImageBuffer(upgradeImageUrl(options.insetUrl))
     insetBuf = downloaded ?? heroBuf
