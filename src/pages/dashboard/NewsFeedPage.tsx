@@ -1277,6 +1277,9 @@ export function NewsFeedPage() {
 
           <div className="marketing-card">
             <h2 className="mb-3 font-semibold">Queue</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Thumbnails use saved PNGs. After template layout changes, click <strong>Regenerate</strong> on each ready item to refresh the graphic.
+            </p>
             {mockFeedAssigned && (
               <p className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
                 Your RSS feed is assigned to a demo page (AI Baby Magic / Adam Sullivan / Adin Ross). Meta rejects those with

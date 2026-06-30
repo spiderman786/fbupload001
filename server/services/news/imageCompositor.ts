@@ -7,8 +7,8 @@ import { parseBrandType, parseColors, parseFonts, parseImageCrop, type NewsBrand
 const CANVAS_W = 1080
 const CANVAS_H = 1350
 const HERO_H = 880
-const INSET_SIZE = 200
-const INSET_X = 32
+const INSET_SIZE = 220
+const INSET_X = 28
 const BRAND_BADGE_R = 54
 const FONT_STACK = "Impact, 'Arial Black', 'Helvetica Neue', Arial, sans-serif"
 
@@ -19,8 +19,8 @@ function insetOuterSize(size: number): { border: number; outer: number } {
 
 function popcornInsetTop(barTop: number): number {
   const { outer } = insetOuterSize(INSET_SIZE)
-  // Sit mostly above the divider (~22% of the circle overlaps the text bar).
-  return barTop - Math.round(outer * 0.78)
+  // Entire circle sits above the divider with a small gap.
+  return barTop - outer - 12
 }
 
 function normalizeLayoutPreset(layoutPreset: string): string {
