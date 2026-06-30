@@ -628,7 +628,7 @@ export const api = {
       request<SessionResponse>('/agencies/invites/accept', { method: 'POST', body: JSON.stringify({ token }) }),
   },
   ops: {
-    me: () => request<{ platformAdmin: boolean }>('/ops/me'),
+    me: () => request<{ platformAdmin: boolean; signedInAs?: string | null; strictMode?: boolean }>('/ops/me'),
     overview: () => request<OpsOverview>('/ops/overview'),
     agencies: () => request<{ agencies: OpsAgency[] }>('/ops/agencies'),
     agency: (id: string) =>

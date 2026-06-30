@@ -98,6 +98,8 @@ export function OpsGate({ children }: { children: React.ReactNode }) {
   const { user, loading, platformAdmin } = useAuth()
   const [checked, setChecked] = React.useState(false)
   const [allowed, setAllowed] = React.useState(false)
+  const [signedInAs, setSignedInAs] = React.useState<string | null>(null)
+  const [strictMode, setStrictMode] = React.useState(true)
 
   React.useEffect(() => {
     if (!user) {
@@ -105,15 +107,18 @@ export function OpsGate({ children }: { children: React.ReactNode }) {
       setChecked(true)
       return
     }
-    if (platformAdmin) {
-      setAllowed(true)
-      setChecked(true)
-      return
-    }
     api.ops
       .me()
-      .then((r) => setAllowed(r.platformAdmin))
-      .catch(() => setAllowed(false))
+      .then((r) => {
+        setAllowed(r.platformAdmin)
+        setSignedInAs(r.signedInAs ?? user.email)
+        setStrictMode(r.strictMode ?? true)
+      })
+      .catch(() => {
+        setAllowed(platformAdmin)
+        setSignedInAs(user.email)
+        setStrictMode(true)
+      })
       .finally(() => setChecked(true))
   }, [user, platformAdmin])
 
@@ -132,11 +137,19 @@ export function OpsGate({ children }: { children: React.ReactNode }) {
           <Shield className="mx-auto h-10 w-10 text-amber-400" />
           <h1 className="mt-4 text-lg font-semibold">Platform Ops access denied</h1>
           <p className="mt-2 text-sm text-slate-400">
-            Platform Ops is not available to agency admins or staff. Set{' '}
-            <code className="rounded bg-slate-800 px-1 py-0.5 text-xs">PLATFORM_ADMIN_EMAILS</code> on Railway to your
-            Gmail, or use an account with the agency <strong>owner</strong> role.
+            Your dashboard login works, but <strong>/ops</strong> is separate. In production, only emails listed in{' '}
+            <code className="rounded bg-slate-800 px-1 py-0.5 text-xs">PLATFORM_ADMIN_EMAILS</code> on Railway can
+            open Ops. Being an agency owner is not enough unless that exact Gmail is on the allowlist.
           </p>
-          <p className="mt-3 text-xs text-slate-500">Signed in as {user.email}</p>
+          <p className="mt-3 text-xs text-slate-500">
+            Signed in as <strong className="text-slate-300">{signedInAs ?? user.email}</strong>
+            {strictMode ? ' · allowlist is configured' : ' · allowlist is empty (Ops disabled in production)'}
+          </p>
+          <ul className="mt-4 space-y-2 text-left text-xs text-slate-400">
+            <li>1. Railway → Variables → set <code className="text-slate-300">PLATFORM_ADMIN_EMAILS</code> to this exact email</li>
+            <li>2. Do not use placeholder <code className="text-slate-300">admin@fbuploadplus.com</code> or <code className="text-slate-300">you@gmail.com</code></li>
+            <li>3. Redeploy, sign out, sign in again, then open <code className="text-slate-300">/ops</code></li>
+          </ul>
           <Link to="/dashboard" className="mt-5 inline-block rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500">
             Back to agency dashboard
           </Link>

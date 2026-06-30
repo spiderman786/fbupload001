@@ -22,7 +22,7 @@ import { initProxyPool, getProxyPoolStats } from './services/proxyPool.js'
 import { proxyPoolRouter } from './routes/proxyPool.js'
 import { opsRouter } from './routes/ops.js'
 import { newsRouter } from './routes/news.js'
-import { seedPlatformAdmin, logPlatformAdminMode } from './services/platformAdmin.js'
+import { seedPlatformAdmin, logPlatformAdminMode, isPlatformAdminStrictMode } from './services/platformAdmin.js'
 import { getSmtpConfigStatus, testSmtpConnection } from './services/email.js'
 import { isPublicSignupEnabled } from './utils/signup.js'
 
@@ -67,6 +67,7 @@ app.get('/api/health', (_req, res) => {
     timestamp: new Date().toISOString(),
     r2: isR2Enabled(),
     publicSignupEnabled: isPublicSignupEnabled(),
+    opsAllowlistConfigured: isPlatformAdminStrictMode(),
   })
 })
 

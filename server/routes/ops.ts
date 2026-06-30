@@ -5,7 +5,7 @@ import path from 'path'
 import { db } from '../db.js'
 import { authMiddleware, requireVerified } from '../middleware/auth.js'
 import { requirePlatformAdmin, type PlatformAdminRequest } from '../middleware/platformAdmin.js'
-import { isPlatformAdmin } from '../services/platformAdmin.js'
+import { isPlatformAdmin, isPlatformAdminStrictMode } from '../services/platformAdmin.js'
 import { getJobLogs } from '../services/jobLog.js'
 import { writeOpsAudit, listOpsAudit } from '../services/opsAudit.js'
 import { listRecentAlerts, runOpsAlertChecks } from '../services/opsAlerts.js'
@@ -26,7 +26,12 @@ export const opsRouter = Router()
 const guard = [authMiddleware, requireVerified, requirePlatformAdmin] as const
 
 opsRouter.get('/me', authMiddleware, requireVerified, (req: PlatformAdminRequest, res) => {
-  res.json({ platformAdmin: Boolean(req.user && isPlatformAdmin(req.user.id, req.user.email)) })
+  const allowed = Boolean(req.user && isPlatformAdmin(req.user.id, req.user.email))
+  res.json({
+    platformAdmin: allowed,
+    signedInAs: req.user?.email ?? null,
+    strictMode: isPlatformAdminStrictMode(),
+  })
 })
 
 opsRouter.get('/overview', ...guard, (_req, res) => {
