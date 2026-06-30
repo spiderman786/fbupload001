@@ -453,6 +453,7 @@ export const api = {
     skipItem: (id: string) => request<{ message: string }>(`/news/items/${id}/skip`, { method: 'POST' }),
     regenerateItemImage: (id: string) =>
       request<{ message: string; item: NewsItemRow }>(`/news/items/${id}/regenerate-image`, { method: 'POST' }),
+    deleteItem: (id: string) => request<{ message: string }>(`/news/items/${id}`, { method: 'DELETE' }),
     updateItem: (
       id: string,
       body: {
@@ -464,6 +465,7 @@ export const api = {
         insetImageUrl?: string
         heroImageDataUrl?: string
         insetImageDataUrl?: string
+        imageCrop?: NewsImageCrop
       },
     ) =>
       request<{ message: string; item: NewsItemRow }>(`/news/items/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
@@ -1154,6 +1156,24 @@ export type NewsFeedRow = {
   createdAt: string
 }
 
+export type NewsImageCrop = {
+  heroFocusX: number
+  heroFocusY: number
+  heroZoom: number
+  insetFocusX: number
+  insetFocusY: number
+  insetZoom: number
+}
+
+export const DEFAULT_NEWS_IMAGE_CROP: NewsImageCrop = {
+  heroFocusX: 50,
+  heroFocusY: 50,
+  heroZoom: 1,
+  insetFocusX: 50,
+  insetFocusY: 50,
+  insetZoom: 1,
+}
+
 export type NewsItemRow = {
   id: string
   feedId: string | null
@@ -1167,6 +1187,7 @@ export type NewsItemRow = {
   hashtags: string[]
   heroImageUrl: string | null
   insetImageUrl: string | null
+  imageCrop: NewsImageCrop
   generatedImagePath: string | null
   fbPostId: string | null
   status: string

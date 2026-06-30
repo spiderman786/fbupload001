@@ -588,6 +588,11 @@ function migrateNews() {
     db.exec(`ALTER TABLE news_templates ADD COLUMN brand_type TEXT NOT NULL DEFAULT 'page_name'`)
   }
 
+  const newsItemCols = db.prepare('PRAGMA table_info(news_items)').all() as { name: string }[]
+  if (!newsItemCols.some((c) => c.name === 'image_crop_json')) {
+    db.exec(`ALTER TABLE news_items ADD COLUMN image_crop_json TEXT`)
+  }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS agency_ai_settings (
       agency_id TEXT PRIMARY KEY REFERENCES agencies(id) ON DELETE CASCADE,

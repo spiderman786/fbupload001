@@ -10,7 +10,8 @@ import { composeTemplatePreview } from '../services/news/imageCompositor.js'
 import { getAgencyAiSettingsPublic, saveAgencyAiSettings, type AiProvider } from '../services/news/aiSettings.js'
 import { getCompositorQueueStats } from '../services/news/compositorQueue.js'
 import { testNewsAiConnection } from '../services/news/aiRewriter.js'
-import { pollFeedsForAgency, pollFeed, publishNewsItem, regenerateNewsItemImage, updateNewsItemContent } from '../services/news/newsPipeline.js'
+import { pollFeedsForAgency, pollFeed, publishNewsItem, regenerateNewsItemImage, updateNewsItemContent, deleteNewsItem } from '../services/news/newsPipeline.js'
+import { parseImageCrop } from '../services/news/types.js'
 import { fetchRssFeed } from '../services/news/rssFetcher.js'
 import { DEFAULT_COLORS, parseBrandType, parseJsonArray, resolveFonts, type NewsFonts } from '../services/news/types.js'
 import { isMockMetaPageId } from '../services/facebook.js'
@@ -78,6 +79,7 @@ function mapItem(row: Record<string, unknown>) {
     heroImageUrl: row.hero_image_url ?? null,
     insetImageUrl: row.inset_image_url ?? null,
     accentWords: parseJsonArray(row.accent_words_json as string),
+    imageCrop: parseImageCrop(row.image_crop_json as string | null),
     generatedImagePath: row.generated_image_path ?? null,
     fbPostId: row.fb_post_id ?? null,
     status: row.status,
@@ -694,6 +696,7 @@ newsRouter.patch('/items/:id', async (req: AgencyRequest, res) => {
     insetImageUrl,
     heroImageDataUrl,
     insetImageDataUrl,
+    imageCrop,
   } = req.body ?? {}
 
   try {
@@ -706,6 +709,7 @@ newsRouter.patch('/items/:id', async (req: AgencyRequest, res) => {
       insetImageUrl,
       heroImageDataUrl,
       insetImageDataUrl,
+      imageCrop: imageCrop && typeof imageCrop === 'object' ? imageCrop : undefined,
     })
     const updated = db
       .prepare('SELECT * FROM news_items WHERE id = ?')
@@ -713,6 +717,15 @@ newsRouter.patch('/items/:id', async (req: AgencyRequest, res) => {
     res.json({ message: 'Item updated and image regenerated', item: mapItem(updated) })
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Update failed' })
+  }
+})
+
+newsRouter.delete('/items/:id', (req: AgencyRequest, res) => {
+  try {
+    deleteNewsItem(routeParam(req.params.id), req.agency!.id)
+    res.json({ message: 'Queue item deleted' })
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Delete failed' })
   }
 })
 

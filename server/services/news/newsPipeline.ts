@@ -8,9 +8,9 @@ import { isOAuthTokenError, refreshPageAccessToken, resolvePageAccessToken, asse
 import { adaptHeadlineForImageGraphic, maybeRewriteNewsContent } from './aiRewriter.js'
 import { runCompositorJob } from './compositorQueue.js'
 import { formatNewsContent, mergeHashtags, headlineToPostTitle, pickAccentWords } from './contentFormatter.js'
-import { composeNewsImage, precheckHeadlineForTemplate, fitHeadlineToTemplate, normalizeHeadlineText } from './imageCompositor.js'
+import { composeNewsImage, fitHeadlineToTemplate, normalizeHeadlineText, ensureSpacedHeadline, repairHeadlineSpacing } from './imageCompositor.js'
 import { fetchRssFeed, scrapeArticleImages, selectBestHeroAndInset } from './rssFetcher.js'
-import { normalizeArticleUrl, parseJsonArray } from './types.js'
+import { normalizeArticleUrl, parseJsonArray, parseImageCrop, type NewsImageCrop } from './types.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const newsImagesDir = path.join(__dirname, '..', '..', '..', 'data', 'news-images')
@@ -47,12 +47,19 @@ async function buildNewsContent(input: {
   if (imageHeadline) {
     content = { ...content, headline: imageHeadline.headline, accent_words: imageHeadline.accent_words }
     if (!input.aiRewriteEnabled) {
-      content.post_title = headlineToPostTitle(imageHeadline.headline)
+      content.post_title = input.rssTitle.trim()
     }
   } else {
-    const fallback = precheckHeadlineForTemplate(content.headline, input.templateFontsJson)
-    content.headline = fallback.normalizedHeadline
+    content.headline = fitHeadlineToTemplate(
+      repairHeadlineSpacing(content.headline, input.rssTitle),
+      input.templateFontsJson,
+    )
   }
+
+  content.headline = fitHeadlineToTemplate(
+    ensureSpacedHeadline(content.headline, input.rssTitle),
+    input.templateFontsJson,
+  )
 
   if (input.aiRewriteEnabled) {
     const rewritten = await maybeRewriteNewsContent({
@@ -86,6 +93,8 @@ async function composeItemImage(options: {
   outputPath: string
   heroLocalPath?: string
   insetLocalPath?: string
+  rssTitle?: string
+  imageCrop?: NewsImageCrop | null
 }) {
   const pageRow = db
     .prepare('SELECT name FROM facebook_pages WHERE id = ?')
@@ -106,8 +115,54 @@ async function composeItemImage(options: {
       outputPath: options.outputPath,
       heroLocalPath: options.heroLocalPath,
       insetLocalPath: options.insetLocalPath,
+      rssTitle: options.rssTitle,
+      imageCrop: options.imageCrop,
     }),
   )
+}
+
+function heroImageKey(url: string): string {
+  return url.split('?')[0]!.toLowerCase()
+}
+
+function getRecentHeroKeysForFeed(feedId: string, limit = 30): Set<string> {
+  const rows = db
+    .prepare(`
+      SELECT hero_image_url FROM news_items
+      WHERE feed_id = ? AND hero_image_url IS NOT NULL
+      ORDER BY created_at DESC
+      LIMIT ?
+    `)
+    .all(feedId, limit) as { hero_image_url: string }[]
+  return new Set(rows.map((r) => heroImageKey(String(r.hero_image_url))))
+}
+
+async function resolveArticleImages(input: {
+  articleUrl: string
+  feedId: string
+  rssImageUrl: string | null
+  excludeItemId?: string
+}): Promise<{ hero: string; inset: string } | null> {
+  const scraped = await scrapeArticleImages(input.articleUrl)
+  const avoid = getRecentHeroKeysForFeed(input.feedId)
+  if (input.excludeItemId) {
+    const self = db
+      .prepare('SELECT hero_image_url FROM news_items WHERE id = ?')
+      .get(input.excludeItemId) as { hero_image_url: string | null } | undefined
+    if (self?.hero_image_url) avoid.delete(heroImageKey(self.hero_image_url))
+  }
+
+  if (scraped.length > 0) {
+    const picked = await selectBestHeroAndInset(scraped, avoid)
+    if (picked.hero) return { hero: picked.hero, inset: picked.inset ?? picked.hero }
+  }
+
+  if (input.rssImageUrl) {
+    const picked = await selectBestHeroAndInset([input.rssImageUrl], avoid)
+    if (picked.hero) return { hero: picked.hero, inset: picked.inset ?? picked.hero }
+  }
+
+  return null
 }
 
 function saveUploadedNewsImage(agencyId: string, itemId: string, dataUrl: string, suffix: string): string {
@@ -135,6 +190,7 @@ export async function updateNewsItemContent(
     insetImageUrl?: string
     heroImageDataUrl?: string
     insetImageDataUrl?: string
+    imageCrop?: NewsImageCrop
   },
 ): Promise<void> {
   const item = db.prepare('SELECT * FROM news_items WHERE id = ?').get(itemId) as Record<string, unknown> | undefined
@@ -149,7 +205,10 @@ export async function updateNewsItemContent(
     : undefined
   const fontsJson = (template?.fonts_json as string) ?? null
 
-  let headline = normalizeHeadlineText(String(input.headline ?? item.headline ?? item.rss_title ?? '')).toUpperCase()
+  let headline = ensureSpacedHeadline(
+    normalizeHeadlineText(String(input.headline ?? item.headline ?? item.rss_title ?? '')).toUpperCase(),
+    String(item.rss_title ?? ''),
+  )
   if (!headline.trim()) throw new Error('Headline on image is required')
   headline = fitHeadlineToTemplate(headline, fontsJson)
 
@@ -190,6 +249,8 @@ export async function updateNewsItemContent(
   }
   fs.mkdirSync(path.dirname(imagePath), { recursive: true })
 
+  const imageCrop = input.imageCrop ?? parseImageCrop(item.image_crop_json as string | null)
+
   await composeItemImage({
     agencyId,
     pageId,
@@ -201,10 +262,13 @@ export async function updateNewsItemContent(
     outputPath: imagePath,
     heroLocalPath,
     insetLocalPath,
+    rssTitle: String(item.rss_title ?? ''),
+    imageCrop,
   })
 
   const storedHero = input.heroImageUrl?.trim() || hero
   const storedInset = input.insetImageUrl?.trim() || inset
+  const cropJson = JSON.stringify(imageCrop)
 
   db.prepare(`
     UPDATE news_items SET
@@ -215,6 +279,7 @@ export async function updateNewsItemContent(
       hero_image_url = ?,
       inset_image_url = ?,
       generated_image_path = ?,
+      image_crop_json = ?,
       error_message = NULL
     WHERE id = ?
   `).run(
@@ -225,6 +290,7 @@ export async function updateNewsItemContent(
     storedHero,
     storedInset,
     imagePath,
+    cropJson,
     itemId,
   )
 }
@@ -246,13 +312,16 @@ export async function processRssArticle(input: {
     ? (db.prepare('SELECT * FROM news_templates WHERE id = ?').get(input.templateId) as Record<string, unknown> | undefined)
     : undefined
 
-  const scraped = await scrapeArticleImages(articleUrl)
-  const imageList = [...scraped, input.article.imageUrl].filter(Boolean) as string[]
-  const { hero, inset } = await selectBestHeroAndInset(imageList)
-  if (!hero) {
+  const scraped = await resolveArticleImages({
+    articleUrl,
+    feedId: input.feedId,
+    rssImageUrl: input.article.imageUrl,
+  })
+  if (!scraped) {
     console.warn(`[news] No images for ${articleUrl}`)
     return null
   }
+  const { hero, inset } = scraped
 
   const hashtags = mergeHashtags(input.defaultHashtagsJson ?? (template?.default_hashtags_json as string), [])
   const content = await buildNewsContent({
@@ -277,6 +346,7 @@ export async function processRssArticle(input: {
     headline: content.headline,
     accentWords: content.accent_words,
     outputPath: imagePath,
+    rssTitle: input.article.title,
   })
 
   db.prepare(`
@@ -324,8 +394,14 @@ export async function regenerateNewsItemImage(itemId: string, agencyId?: string)
     | Record<string, unknown>
     | undefined
 
-  const hero = String(item.hero_image_url ?? '')
-  const inset = String(item.inset_image_url ?? hero)
+  const resolvedImages = await resolveArticleImages({
+    articleUrl: String(item.article_url ?? ''),
+    feedId: String(item.feed_id ?? ''),
+    rssImageUrl: (item.hero_image_url as string | null) ?? null,
+    excludeItemId: itemId,
+  })
+  const hero = resolvedImages?.hero ?? String(item.hero_image_url ?? '')
+  const inset = resolvedImages?.inset ?? String(item.inset_image_url ?? hero)
   if (!hero) throw new Error('Hero image URL missing')
 
   const content = await buildNewsContent({
@@ -344,6 +420,8 @@ export async function regenerateNewsItemImage(itemId: string, agencyId?: string)
   }
   fs.mkdirSync(path.dirname(imagePath), { recursive: true })
 
+  const imageCrop = parseImageCrop(item.image_crop_json as string | null)
+
   await composeItemImage({
     agencyId: String(item.agency_id),
     pageId,
@@ -353,6 +431,8 @@ export async function regenerateNewsItemImage(itemId: string, agencyId?: string)
     headline: content.headline,
     accentWords: content.accent_words,
     outputPath: imagePath,
+    rssTitle: String(item.rss_title ?? ''),
+    imageCrop,
   })
 
   db.prepare(`
@@ -361,6 +441,8 @@ export async function regenerateNewsItemImage(itemId: string, agencyId?: string)
       accent_words_json = ?,
       post_title = ?,
       post_description = ?,
+      hero_image_url = ?,
+      inset_image_url = ?,
       generated_image_path = ?,
       error_message = NULL
     WHERE id = ?
@@ -369,6 +451,8 @@ export async function regenerateNewsItemImage(itemId: string, agencyId?: string)
     JSON.stringify(content.accent_words),
     content.post_title,
     content.post_description,
+    hero,
+    inset,
     imagePath,
     itemId,
   )
@@ -524,4 +608,23 @@ export async function pollAllFeeds(): Promise<{ feeds: number; created: number }
     }
   }
   return { feeds: feeds.length, created }
+}
+
+export function deleteNewsItem(itemId: string, agencyId: string): void {
+  const item = db
+    .prepare('SELECT generated_image_path, status FROM news_items WHERE id = ? AND agency_id = ?')
+    .get(itemId, agencyId) as { generated_image_path: string | null; status: string } | undefined
+  if (!item) throw new Error('News item not found')
+  if (item.status === 'posted') throw new Error('Published items cannot be deleted')
+
+  const imagePath = item.generated_image_path
+  if (imagePath && fs.existsSync(imagePath)) {
+    try {
+      fs.unlinkSync(imagePath)
+    } catch {
+      /* ignore missing file */
+    }
+  }
+
+  db.prepare('DELETE FROM news_items WHERE id = ? AND agency_id = ?').run(itemId, agencyId)
 }

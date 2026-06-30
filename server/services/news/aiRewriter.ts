@@ -273,6 +273,9 @@ RSS description: ${(input.rssDescription ?? '').slice(0, 400)}`
     precheckHeadlineForTemplate(headline, input.fontsJson)
   }
 
+  headline = ensureSpacedHeadline(headline, input.rssTitle)
+  headline = fitHeadlineToTemplate(headline, input.fontsJson)
+
   const accent_words =
     Array.isArray(parsed.accent_words) && parsed.accent_words.length
       ? parsed.accent_words.map((w) => String(w).toUpperCase()).slice(0, 4)

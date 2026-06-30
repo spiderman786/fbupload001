@@ -16,7 +16,19 @@ export type RssArticle = {
   imageUrl: string | null
 }
 
-const SKIP_IMAGE_RE = /logo|icon|avatar|sprite|pixel|1x1|badge|emoji|gravatar/i
+const SKIP_IMAGE_RE = /logo|icon|avatar|sprite|pixel|1x1|badge|emoji|gravatar|placeholder|default-featured|site-logo|favicon/i
+
+function imageUrlKey(url: string): string {
+  return url.split('?')[0]!.toLowerCase()
+}
+
+function extractMetaImage(html: string, articleUrl: string, property: string): string | null {
+  const re1 = new RegExp(`<meta[^>]+property=["']${property}["'][^>]+content=["']([^"']+)["']`, 'i')
+  const re2 = new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']${property}["']`, 'i')
+  const re3 = new RegExp(`<meta[^>]+name=["']${property}["'][^>]+content=["']([^"']+)["']`, 'i')
+  const match = html.match(re1) ?? html.match(re2) ?? html.match(re3)
+  return match?.[1] ? resolveUrl(articleUrl, match[1]) : null
+}
 
 function pickImage(item: Parser.Item): string | null {
   const enclosure = item.enclosure
@@ -62,7 +74,11 @@ export async function scrapeArticleImages(articleUrl: string): Promise<string[]>
   try {
     assertSafeExternalUrl(articleUrl)
     const res = await fetch(articleUrl, {
-      headers: { 'User-Agent': 'FBUploadPro-NewsBot/1.0' },
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; FBUploadPro-NewsBot/1.0; +https://fbuploadplus.com)',
+        Accept: 'text/html,application/xhtml+xml',
+        Referer: new URL(articleUrl).origin,
+      },
       signal: AbortSignal.timeout(15000),
     })
     if (!res.ok) return []
@@ -70,9 +86,28 @@ export async function scrapeArticleImages(articleUrl: string): Promise<string[]>
     const html = await res.text()
     const found: string[] = []
 
-    const ogMatch = html.match(/<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/i)
-      ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/i)
-    if (ogMatch?.[1]) found.push(resolveUrl(articleUrl, ogMatch[1]))
+    for (const prop of ['og:image:secure_url', 'og:image', 'twitter:image', 'twitter:image:src']) {
+      const url = extractMetaImage(html, articleUrl, prop)
+      if (url && !SKIP_IMAGE_RE.test(url) && !found.includes(url)) found.push(url)
+    }
+
+    const jsonLdRegex = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+    let jsonLd: RegExpExecArray | null
+    while ((jsonLd = jsonLdRegex.exec(html)) !== null) {
+      try {
+        const data = JSON.parse(jsonLd[1]!) as { image?: string | { url?: string } | Array<string | { url?: string }> }
+        const images = Array.isArray(data.image) ? data.image : data.image ? [data.image] : []
+        for (const img of images) {
+          const src = typeof img === 'string' ? img : img?.url
+          if (src && !SKIP_IMAGE_RE.test(src)) {
+            const resolved = resolveUrl(articleUrl, src)
+            if (!found.includes(resolved)) found.push(resolved)
+          }
+        }
+      } catch {
+        /* ignore malformed JSON-LD */
+      }
+    }
 
     const imgRegex = /<img[^>]+src=["']([^"']+)["']/gi
     let m: RegExpExecArray | null
@@ -133,16 +168,24 @@ async function imagePixelArea(url: string): Promise<number> {
   }
 }
 
-export async function selectBestHeroAndInset(imageUrls: string[]): Promise<{ hero: string | null; inset: string | null }> {
+export async function selectBestHeroAndInset(
+  imageUrls: string[],
+  avoidUrls: Set<string> = new Set(),
+): Promise<{ hero: string | null; inset: string | null }> {
   const unique = dedupeImages(imageUrls.filter(Boolean).map(upgradeImageUrl))
   if (unique.length === 0) return { hero: null, inset: null }
   if (unique.length === 1) return { hero: unique[0]!, inset: unique[0]! }
 
   const ranked = await Promise.all(
-    unique.slice(0, 5).map(async (url) => ({ url, area: await imagePixelArea(url) })),
+    unique.slice(0, 8).map(async (url) => ({ url, area: await imagePixelArea(url), key: imageUrlKey(url) })),
   )
   ranked.sort((a, b) => b.area - a.area)
-  const hero = ranked[0]?.url ?? unique[0]!
+
+  const hero =
+    ranked.find((r) => !avoidUrls.has(r.key))?.url ??
+    ranked.find((r) => r.url !== ranked[0]?.url)?.url ??
+    ranked[0]?.url ??
+    unique[0]!
   const inset = ranked.find((r) => r.url !== hero)?.url ?? ranked[1]?.url ?? hero
   return { hero, inset }
 }

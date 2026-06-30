@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { Eye, EyeOff, ImagePlus, Newspaper, Pencil, RefreshCw, Rss, Send, SkipForward } from 'lucide-react'
-import { api, type NewsAiConnectionTest, type NewsAiProvider, type NewsOverview, type NewsTemplateColors } from '../../api/client'
+import { Eye, EyeOff, ImagePlus, Newspaper, Pencil, RefreshCw, Rss, Send, SkipForward, Trash2 } from 'lucide-react'
+import { api, type NewsAiConnectionTest, type NewsAiProvider, type NewsImageCrop, type NewsOverview, type NewsTemplateColors, DEFAULT_NEWS_IMAGE_CROP } from '../../api/client'
 import { useToast } from '../../context/ToastContext'
 import { getApiError } from '../../lib/apiError'
 
@@ -40,6 +40,10 @@ export function NewsFeedPage() {
   const [insetUploadDataUrl, setInsetUploadDataUrl] = useState<string | null>(null)
   const [heroUploadName, setHeroUploadName] = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
+  const [editImageCrop, setEditImageCrop] = useState<NewsImageCrop>({ ...DEFAULT_NEWS_IMAGE_CROP })
+  const [pollingFeedId, setPollingFeedId] = useState<string | null>(null)
+  const [deletingFeedId, setDeletingFeedId] = useState<string | null>(null)
+  const [deletingItemId, setDeletingItemId] = useState<string | null>(null)
 
   const [templateName, setTemplateName] = useState('Default News')
   const [layoutPreset, setLayoutPreset] = useState('popcorn')
@@ -174,6 +178,7 @@ export function NewsFeedPage() {
     setHeroUploadDataUrl(null)
     setInsetUploadDataUrl(null)
     setHeroUploadName('')
+    setEditImageCrop(item.imageCrop ?? { ...DEFAULT_NEWS_IMAGE_CROP })
   }, [viewItemId, data])
 
   useEffect(() => {
@@ -230,6 +235,7 @@ export function NewsFeedPage() {
         insetImageUrl: editInsetUrl.trim() || undefined,
         heroImageDataUrl: heroUploadDataUrl ?? undefined,
         insetImageDataUrl: insetUploadDataUrl ?? undefined,
+        imageCrop: editImageCrop,
       })
       setPreviewCacheBust((prev) => ({ ...prev, [viewItemId]: Date.now() }))
       setData((prev) =>
@@ -467,6 +473,52 @@ export function NewsFeedPage() {
     }
   }
 
+  async function handleDeleteItem(itemId: string) {
+    if (!confirm('Delete this queue item permanently?')) return
+    setDeletingItemId(itemId)
+    try {
+      await api.news.deleteItem(itemId)
+      if (viewItemId === itemId) setViewItemId(null)
+      toast.success('Item deleted')
+      await load()
+    } catch (err) {
+      toast.error(getApiError(err, 'Delete failed'))
+    } finally {
+      setDeletingItemId(null)
+    }
+  }
+
+  async function handlePollFeed(feedId: string) {
+    setPollingFeedId(feedId)
+    try {
+      const res = await api.news.pollFeed(feedId)
+      toast.success(res.message)
+      await load()
+    } catch (err) {
+      toast.error(getApiError(err, 'Poll failed'))
+    } finally {
+      setPollingFeedId(null)
+    }
+  }
+
+  async function handleDeleteFeed(feedId: string, feedName: string) {
+    if (!confirm(`Delete RSS feed "${feedName}"? Existing queue items stay but no new polls will run for this feed.`)) return
+    setDeletingFeedId(feedId)
+    try {
+      await api.news.deleteFeed(feedId)
+      toast.success('Feed deleted')
+      await load()
+    } catch (err) {
+      toast.error(getApiError(err, 'Delete feed failed'))
+    } finally {
+      setDeletingFeedId(null)
+    }
+  }
+
+  function updateCrop(patch: Partial<NewsImageCrop>) {
+    setEditImageCrop((prev) => ({ ...prev, ...patch }))
+  }
+
   async function handleSkip(itemId: string) {
     try {
       await api.news.skipItem(itemId)
@@ -491,6 +543,10 @@ export function NewsFeedPage() {
   const mockFeedAssigned = data?.feeds.some((f) => f.isMockPage) ?? false
   const viewingItem = viewItemId ? data?.items.find((i) => i.id === viewItemId) : undefined
   const canEditViewingItem = viewingItem?.status === 'ready'
+  const heroCropPreviewSrc =
+    heroUploadDataUrl ||
+    (editHeroUrl.startsWith('http') ? editHeroUrl : '') ||
+    (viewingItem?.heroImageUrl?.startsWith('http') ? viewingItem.heroImageUrl : '')
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -967,7 +1023,29 @@ export function NewsFeedPage() {
                         </div>
                       )}
                     </div>
-                    <span className="text-xs text-muted-foreground">{f.lastPolledAt ? `Polled ${f.lastPolledAt}` : 'Not polled yet'}</span>
+                    <div className="flex shrink-0 flex-col items-end gap-2">
+                      <span className="text-xs text-muted-foreground">{f.lastPolledAt ? `Polled ${f.lastPolledAt}` : 'Not polled yet'}</span>
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          disabled={pollingFeedId === f.id}
+                          onClick={() => void handlePollFeed(f.id)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-xs disabled:opacity-50"
+                        >
+                          <RefreshCw className={`h-3 w-3 ${pollingFeedId === f.id ? 'animate-spin' : ''}`} />
+                          Poll
+                        </button>
+                        <button
+                          type="button"
+                          disabled={deletingFeedId === f.id}
+                          onClick={() => void handleDeleteFeed(f.id, f.name)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-destructive/40 px-2 py-1 text-xs text-destructive disabled:opacity-50"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          Delete
+                        </button>
+                      </div>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -1053,6 +1131,15 @@ export function NewsFeedPage() {
                             <button type="button" onClick={() => handleSkip(item.id)} className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs">
                               <SkipForward className="h-3.5 w-3.5" />
                               Skip
+                            </button>
+                            <button
+                              type="button"
+                              disabled={deletingItemId === item.id}
+                              onClick={() => void handleDeleteItem(item.id)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-destructive/40 px-3 py-1.5 text-xs text-destructive disabled:opacity-50"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Delete
                             </button>
                           </>
                         )}
@@ -1201,6 +1288,63 @@ export function NewsFeedPage() {
                     >
                       <ImagePlus className="h-4 w-4" />
                       Choose image file
+                    </button>
+                  </div>
+
+                  <div className="rounded-lg border border-border p-3 space-y-3">
+                    <p className="text-sm font-medium">Crop & fit to template</p>
+                    <p className="text-xs text-muted-foreground">
+                      Adjust how the hero fills the 1080×880 top area and the circular inset. Save to apply to the graphic.
+                    </p>
+                    {heroCropPreviewSrc ? (
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Hero crop preview</p>
+                        <div className="relative aspect-[1080/880] w-full overflow-hidden rounded-md border border-border bg-black">
+                          <img
+                            src={heroCropPreviewSrc}
+                            alt=""
+                            className="h-full w-full object-cover transition-transform"
+                            style={{
+                              objectPosition: `${editImageCrop.heroFocusX}% ${editImageCrop.heroFocusY}%`,
+                              transform: `scale(${editImageCrop.heroZoom})`,
+                              transformOrigin: `${editImageCrop.heroFocusX}% ${editImageCrop.heroFocusY}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="space-y-1 text-xs">
+                        <span className="font-medium">Hero horizontal {editImageCrop.heroFocusX}%</span>
+                        <input type="range" min={0} max={100} value={editImageCrop.heroFocusX} onChange={(e) => updateCrop({ heroFocusX: Number(e.target.value) })} className="w-full accent-primary" />
+                      </label>
+                      <label className="space-y-1 text-xs">
+                        <span className="font-medium">Hero vertical {editImageCrop.heroFocusY}%</span>
+                        <input type="range" min={0} max={100} value={editImageCrop.heroFocusY} onChange={(e) => updateCrop({ heroFocusY: Number(e.target.value) })} className="w-full accent-primary" />
+                      </label>
+                      <label className="space-y-1 text-xs sm:col-span-2">
+                        <span className="font-medium">Hero zoom {editImageCrop.heroZoom.toFixed(1)}×</span>
+                        <input type="range" min={1} max={3} step={0.1} value={editImageCrop.heroZoom} onChange={(e) => updateCrop({ heroZoom: Number(e.target.value) })} className="w-full accent-primary" />
+                      </label>
+                      <label className="space-y-1 text-xs">
+                        <span className="font-medium">Inset horizontal {editImageCrop.insetFocusX}%</span>
+                        <input type="range" min={0} max={100} value={editImageCrop.insetFocusX} onChange={(e) => updateCrop({ insetFocusX: Number(e.target.value) })} className="w-full accent-primary" />
+                      </label>
+                      <label className="space-y-1 text-xs">
+                        <span className="font-medium">Inset vertical {editImageCrop.insetFocusY}%</span>
+                        <input type="range" min={0} max={100} value={editImageCrop.insetFocusY} onChange={(e) => updateCrop({ insetFocusY: Number(e.target.value) })} className="w-full accent-primary" />
+                      </label>
+                      <label className="space-y-1 text-xs sm:col-span-2">
+                        <span className="font-medium">Inset zoom {editImageCrop.insetZoom.toFixed(1)}×</span>
+                        <input type="range" min={1} max={3} step={0.1} value={editImageCrop.insetZoom} onChange={(e) => updateCrop({ insetZoom: Number(e.target.value) })} className="w-full accent-primary" />
+                      </label>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setEditImageCrop({ ...DEFAULT_NEWS_IMAGE_CROP })}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      Reset crop to defaults
                     </button>
                   </div>
 

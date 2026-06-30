@@ -134,6 +134,53 @@ export function parseBrandType(raw: string | null | undefined): NewsBrandType {
   return 'page_name'
 }
 
+export type NewsImageCrop = {
+  heroFocusX: number
+  heroFocusY: number
+  heroZoom: number
+  insetFocusX: number
+  insetFocusY: number
+  insetZoom: number
+}
+
+export const DEFAULT_NEWS_IMAGE_CROP: NewsImageCrop = {
+  heroFocusX: 50,
+  heroFocusY: 50,
+  heroZoom: 1,
+  insetFocusX: 50,
+  insetFocusY: 50,
+  insetZoom: 1,
+}
+
+function clampPercent(value: number, fallback = 50): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(100, Math.max(0, n))
+}
+
+function clampZoom(value: number, fallback = 1): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(3, Math.max(1, n))
+}
+
+export function parseImageCrop(raw: string | null | undefined): NewsImageCrop {
+  if (!raw) return { ...DEFAULT_NEWS_IMAGE_CROP }
+  try {
+    const parsed = JSON.parse(raw) as Partial<NewsImageCrop>
+    return {
+      heroFocusX: clampPercent(parsed.heroFocusX ?? 50),
+      heroFocusY: clampPercent(parsed.heroFocusY ?? 50),
+      heroZoom: clampZoom(parsed.heroZoom ?? 1),
+      insetFocusX: clampPercent(parsed.insetFocusX ?? 50),
+      insetFocusY: clampPercent(parsed.insetFocusY ?? 50),
+      insetZoom: clampZoom(parsed.insetZoom ?? 1),
+    }
+  } catch {
+    return { ...DEFAULT_NEWS_IMAGE_CROP }
+  }
+}
+
 export function normalizeArticleUrl(url: string): string {
   try {
     const u = new URL(url.trim())

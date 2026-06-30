@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import sharp, { type OverlayOptions } from 'sharp'
 import { downloadImageBuffer, upgradeImageUrl } from './rssFetcher.js'
-import { parseBrandType, parseColors, parseFonts, type NewsBrandType, type NewsColors, type NewsFonts } from './types.js'
+import { parseBrandType, parseColors, parseFonts, parseImageCrop, type NewsBrandType, type NewsColors, type NewsFonts, type NewsImageCrop } from './types.js'
 
 const CANVAS_W = 1080
 const CANVAS_H = 1350
@@ -92,16 +92,75 @@ function fitHeadlineLines(headline: string, baseFontSize: number): { lines: stri
   }
 
   const { lines } = wrapHeadlineBalanced(trimmed, 26, MAX_HEADLINE_LINES)
-  return { lines, fontSize: 26 }
+  return { lines: lines.slice(0, MAX_HEADLINE_LINES), fontSize: 26 }
 }
 
 export function normalizeHeadlineText(headline: string): string {
   return headline.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
+/** Split glued tokens like "DWTSSTARS" using words from the original RSS title. */
+export function repairHeadlineSpacing(headline: string, referenceTitle: string): string {
+  const refWords = normalizeHeadlineText(referenceTitle)
+    .toUpperCase()
+    .split(/\s+/)
+    .map((w) => w.replace(/[^A-Z0-9']/g, ''))
+    .filter((w) => w.length >= 2)
+
+  if (!refWords.length) return normalizeHeadlineText(headline).toUpperCase()
+
+  const sortedRef = [...new Set(refWords)].sort((a, b) => b.length - a.length)
+  const tokens = normalizeHeadlineText(headline).toUpperCase().split(/\s+/).filter(Boolean)
+  const fixed: string[] = []
+
+  for (const token of tokens) {
+    const clean = token.replace(/[^A-Z0-9']/g, '')
+    if (!clean) continue
+    if (refWords.includes(clean)) {
+      fixed.push(clean)
+      continue
+    }
+    fixed.push(...decomposeHeadlineToken(clean, sortedRef))
+  }
+
+  return fixed.join(' ').replace(/\s+/g, ' ').trim()
+}
+
+function decomposeHeadlineToken(token: string, refWords: string[]): string[] {
+  if (refWords.includes(token)) return [token]
+
+  const parts: string[] = []
+  let pos = 0
+  while (pos < token.length) {
+    let matched: string | null = null
+    for (const word of refWords) {
+      if (word.length >= 2 && token.startsWith(word, pos)) {
+        matched = word
+        break
+      }
+    }
+    if (matched) {
+      parts.push(matched)
+      pos += matched.length
+      continue
+    }
+    let end = pos + 1
+    while (end < token.length && !refWords.some((w) => w.length >= 2 && token.startsWith(w, end))) {
+      end++
+    }
+    parts.push(token.slice(pos, end))
+    pos = end
+  }
+
+  return parts.filter(Boolean)
+}
+
 /** Repair AI headlines that lost spaces between words. */
 export function ensureSpacedHeadline(headline: string, fallbackTitle?: string): string {
-  const text = normalizeHeadlineText(headline).toUpperCase()
+  let text = normalizeHeadlineText(headline).toUpperCase()
+  if (fallbackTitle) {
+    text = repairHeadlineSpacing(text, fallbackTitle)
+  }
   if (/\s/.test(text)) return text
 
   if (fallbackTitle) {
@@ -224,24 +283,62 @@ function buildHeadlineSvg(
 ): string {
   const cleanHeadline = normalizeHeadlineText(headline).toUpperCase()
   const { lines, fontSize } = fitHeadlineLines(cleanHeadline, fonts.headlineSize)
-  const lineHeight = Math.round(fontSize * 1.18)
+  const lineHeight = Math.round(fontSize * 1.34)
   const textBlockHeight = lines.length * lineHeight
   const textAreaHeight = CANVAS_H - barTop
-  const brandClearance = BRAND_BADGE_R + 36
+  const brandClearance = BRAND_BADGE_R + 40
   const startY =
-    barTop + brandClearance + fontSize + Math.max(24, (textAreaHeight - brandClearance - textBlockHeight) / 2)
+    barTop + brandClearance + fontSize + Math.max(28, (textAreaHeight - brandClearance - textBlockHeight) / 2)
 
   return lines
+    .slice(0, MAX_HEADLINE_LINES)
     .map((line, lineIdx) => buildHeadlineLineSvg(line, startY + lineIdx * lineHeight, accentWords, colors, fontSize))
     .join('\n')
 }
 
-async function circleInset(input: Buffer, size: number, borderColor: string): Promise<Buffer> {
-  const inner = await sharp(input)
-    .resize(size, size, { fit: 'cover', position: 'centre', kernel: sharp.kernel.lanczos3 })
+async function fitImageWithCrop(
+  buf: Buffer,
+  targetW: number,
+  targetH: number,
+  focusX: number,
+  focusY: number,
+  zoom: number,
+): Promise<Buffer> {
+  const meta = await sharp(buf).metadata()
+  const iw = meta.width ?? targetW
+  const ih = meta.height ?? targetH
+  const scale = Math.max(targetW / iw, targetH / ih) * Math.max(1, Math.min(3, zoom))
+  const sw = Math.max(targetW, Math.round(iw * scale))
+  const sh = Math.max(targetH, Math.round(ih * scale))
+
+  const resized = await sharp(buf).resize(sw, sh, { fit: 'fill' }).png().toBuffer()
+  const left = Math.max(0, Math.min(sw - targetW, Math.round((focusX / 100) * (sw - targetW))))
+  const top = Math.max(0, Math.min(sh - targetH, Math.round((focusY / 100) * (sh - targetH))))
+
+  return sharp(resized)
+    .extract({ left, top, width: targetW, height: targetH })
     .sharpen({ sigma: 0.6, m1: 0.8, m2: 0.3 })
     .png()
     .toBuffer()
+}
+
+async function circleInset(input: Buffer, size: number, borderColor: string, crop?: NewsImageCrop): Promise<Buffer> {
+  const insetCrop = crop
+    ? await fitImageWithCrop(
+        input,
+        size,
+        size,
+        crop.insetFocusX,
+        crop.insetFocusY,
+        crop.insetZoom,
+      )
+    : await sharp(input)
+        .resize(size, size, { fit: 'cover', position: 'centre', kernel: sharp.kernel.lanczos3 })
+        .sharpen({ sigma: 0.6, m1: 0.8, m2: 0.3 })
+        .png()
+        .toBuffer()
+
+  const inner = insetCrop
 
   const mask = Buffer.from(
     `<svg width="${size}" height="${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="white"/></svg>`,
@@ -295,18 +392,23 @@ async function renderNewsCanvas(options: {
   pageName?: string | null
   logoPath?: string | null
   ctaText?: string
+  imageCrop?: NewsImageCrop | null
 }): Promise<Buffer> {
   const colors = parseColors(options.colorsJson)
   const fonts = parseFonts(options.fontsJson)
   const brandType = options.brandType ?? 'page_name'
+  const crop = options.imageCrop ?? parseImageCrop(null)
 
-  const heroLayer = await sharp(options.heroBuf)
-    .resize(CANVAS_W, HERO_H, { fit: 'cover', position: 'centre', kernel: sharp.kernel.lanczos3 })
-    .sharpen({ sigma: 0.8, m1: 1.0, m2: 0.4 })
-    .png()
-    .toBuffer()
+  const heroLayer = await fitImageWithCrop(
+    options.heroBuf,
+    CANVAS_W,
+    HERO_H,
+    crop.heroFocusX,
+    crop.heroFocusY,
+    crop.heroZoom,
+  )
 
-  const insetLayer = await circleInset(options.insetBuf, INSET_SIZE, colors.insetBorder)
+  const insetLayer = await circleInset(options.insetBuf, INSET_SIZE, colors.insetBorder, crop)
   const insetY = HERO_H - INSET_SIZE - 48
 
   const barTop = HERO_H
@@ -400,6 +502,8 @@ export async function composeNewsImage(options: {
   outputPath: string
   heroLocalPath?: string
   insetLocalPath?: string
+  rssTitle?: string
+  imageCrop?: NewsImageCrop | null
 }): Promise<string> {
   const heroBuf = options.heroLocalPath
     ? await fs.promises.readFile(options.heroLocalPath)
@@ -421,7 +525,7 @@ export async function composeNewsImage(options: {
   const png = await renderNewsCanvas({
     heroBuf,
     insetBuf,
-    headline: ensureSpacedHeadline(options.headline),
+    headline: ensureSpacedHeadline(options.headline, options.rssTitle),
     accentWords: options.accentWords,
     colorsJson: options.colorsJson,
     fontsJson: options.fontsJson,
@@ -429,6 +533,7 @@ export async function composeNewsImage(options: {
     pageName: options.pageName,
     logoPath: options.logoPath,
     ctaText: options.ctaText,
+    imageCrop: options.imageCrop,
   })
 
   await fs.promises.writeFile(options.outputPath, png)
