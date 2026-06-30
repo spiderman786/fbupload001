@@ -7,8 +7,8 @@ import { parseBrandType, parseColors, parseFonts, parseImageCrop, type NewsBrand
 const CANVAS_W = 1080
 const CANVAS_H = 1350
 const HERO_H = 880
-const INSET_SIZE = 168
-const INSET_X = 36
+const INSET_SIZE = 200
+const INSET_X = 32
 const BRAND_BADGE_R = 54
 const FONT_STACK = "Impact, 'Arial Black', 'Helvetica Neue', Arial, sans-serif"
 
@@ -19,7 +19,8 @@ function insetOuterSize(size: number): { border: number; outer: number } {
 
 function popcornInsetTop(barTop: number): number {
   const { outer } = insetOuterSize(INSET_SIZE)
-  return barTop - Math.round(outer / 2)
+  // Sit mostly above the divider (~22% of the circle overlaps the text bar).
+  return barTop - Math.round(outer * 0.78)
 }
 
 function normalizeLayoutPreset(layoutPreset: string): string {
@@ -511,7 +512,7 @@ async function renderNewsCanvas(options: {
   const barTop = HERO_H
   const usePopcornLayout = isPopcornLayout(layoutPreset)
   const showInset = showInsetForLayout(layoutPreset)
-  const insetY = usePopcornLayout ? popcornInsetTop(barTop) : HERO_H - INSET_SIZE - 48
+  const insetY = usePopcornLayout ? popcornInsetTop(barTop) : HERO_H - insetOuterSize(INSET_SIZE).outer - 36
 
   const brandSvg =
     brandType === 'page_name'
