@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import sharp, { type OverlayOptions } from 'sharp'
-import { downloadImageBuffer, upgradeImageUrl } from './rssFetcher.js'
+import { downloadImageBuffer, upgradeImageUrl, hasDistinctInsetImage } from './rssFetcher.js'
 import { parseBrandType, parseColors, parseFonts, parseImageCrop, type NewsBrandType, type NewsColors, type NewsFonts, type NewsImageCrop } from './types.js'
 
 const CANVAS_W = 1080
@@ -479,7 +479,7 @@ function buildHeroFadeOverlay(barTop: number, opacity = 0.5): Buffer {
 
 async function renderNewsCanvas(options: {
   heroBuf: Buffer
-  insetBuf: Buffer
+  insetBuf?: Buffer | null
   headline: string
   accentWords: string[]
   colorsJson: string | null
@@ -508,10 +508,12 @@ async function renderNewsCanvas(options: {
     crop.heroZoom,
   )
 
-  const insetLayer = await circleInset(options.insetBuf, INSET_SIZE, colors.insetBorder, crop)
+  const insetLayer = options.insetBuf
+    ? await circleInset(options.insetBuf, INSET_SIZE, colors.insetBorder, crop)
+    : null
   const barTop = HERO_H
   const usePopcornLayout = isPopcornLayout(layoutPreset)
-  const showInset = showInsetForLayout(layoutPreset)
+  const showInset = showInsetForLayout(layoutPreset) && !!insetLayer
   const insetY = usePopcornLayout ? popcornInsetTop(barTop) : HERO_H - insetOuterSize(INSET_SIZE).outer - 36
 
   const brandSvg =
@@ -539,7 +541,7 @@ async function renderNewsCanvas(options: {
   const composites: OverlayOptions[] = [{ input: heroLayer, top: 0, left: 0 }]
   if (heroFade) composites.push({ input: heroFade, top: 0, left: 0 })
   composites.push({ input: overlaySvg, top: 0, left: 0 })
-  if (showInset) composites.push({ input: insetLayer, top: insetY, left: INSET_X })
+  if (showInset && insetLayer) composites.push({ input: insetLayer, top: insetY, left: INSET_X })
 
   if (brandType === 'page_picture' && options.pagePictureBuf) {
     const badgeDiameter = BRAND_BADGE_R * 2
@@ -620,7 +622,7 @@ export async function composeTemplatePreview(options: {
 
 export async function composeNewsImage(options: {
   heroUrl: string
-  insetUrl: string
+  insetUrl?: string | null
   headline: string
   accentWords: string[]
   colorsJson: string | null
@@ -642,20 +644,17 @@ export async function composeNewsImage(options: {
     : await downloadImageBuffer(upgradeImageUrl(options.heroUrl))
   if (!heroBuf) throw new Error('Could not download hero image')
 
-  let insetBuf: Buffer
-  if (options.insetLocalPath) {
-    insetBuf = await fs.promises.readFile(options.insetLocalPath)
-  } else if (options.insetUrl === options.heroUrl) {
-    const meta = await sharp(heroBuf).metadata()
-    const iw = meta.width ?? 800
-    const ih = meta.height ?? 600
-    const size = Math.min(iw, ih, Math.max(200, Math.round(Math.min(iw, ih) * 0.72)))
-    const left = Math.max(0, Math.round((iw - size) / 2))
-    const top = Math.max(0, Math.round(ih * 0.06))
-    insetBuf = await sharp(heroBuf).extract({ left, top, width: size, height: size }).toBuffer()
-  } else {
-    const downloaded = await downloadImageBuffer(upgradeImageUrl(options.insetUrl))
-    insetBuf = downloaded ?? heroBuf
+  const useDistinctInset =
+    !!options.insetLocalPath ||
+    hasDistinctInsetImage(options.heroUrl, options.insetUrl ?? null)
+
+  let insetBuf: Buffer | null = null
+  if (useDistinctInset) {
+    if (options.insetLocalPath) {
+      insetBuf = await fs.promises.readFile(options.insetLocalPath)
+    } else if (options.insetUrl) {
+      insetBuf = await downloadImageBuffer(upgradeImageUrl(options.insetUrl))
+    }
   }
 
   fs.mkdirSync(path.dirname(options.outputPath), { recursive: true })

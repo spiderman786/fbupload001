@@ -9,7 +9,7 @@ import { adaptHeadlineForImageGraphic, maybeRewriteNewsContent } from './aiRewri
 import { runCompositorJob } from './compositorQueue.js'
 import { formatNewsContent, mergeHashtags, headlineToPostTitle, pickAccentWords } from './contentFormatter.js'
 import { composeNewsImage, fitHeadlineToTemplate, normalizeHeadlineText, ensureSpacedHeadline, repairHeadlineSpacing } from './imageCompositor.js'
-import { fetchRssFeed, scrapeArticleImages, selectBestHeroAndInset } from './rssFetcher.js'
+import { fetchRssFeed, scrapeArticleImages, selectBestHeroAndInset, hasDistinctInsetImage } from './rssFetcher.js'
 import { normalizeArticleUrl, parseBrandType, parseJsonArray, parseImageCrop, type NewsImageCrop } from './types.js'
 import { resolvePageProfilePictureBuffer } from '../pagePicture.js'
 
@@ -19,6 +19,17 @@ const newsImagesDir = path.join(__dirname, '..', '..', '..', 'data', 'news-image
 function isDuplicate(pageId: string, articleUrl: string): boolean {
   const row = db
     .prepare('SELECT id FROM posted_articles WHERE page_id = ? AND article_url = ? LIMIT 1')
+    .get(pageId, articleUrl) as { id: string } | undefined
+  return !!row
+}
+
+function isAlreadyQueued(pageId: string, articleUrl: string): boolean {
+  const row = db
+    .prepare(`
+      SELECT id FROM news_items
+      WHERE page_id = ? AND article_url = ? AND status IN ('ready', 'failed')
+      LIMIT 1
+    `)
     .get(pageId, articleUrl) as { id: string } | undefined
   return !!row
 }
@@ -92,7 +103,7 @@ async function composeItemImage(options: {
   pageId: string
   template: Record<string, unknown> | undefined
   heroUrl: string
-  insetUrl: string
+  insetUrl?: string | null
   headline: string
   accentWords: string[]
   outputPath: string
@@ -154,7 +165,7 @@ async function resolveArticleImages(input: {
   feedId: string
   rssImageUrl: string | null
   excludeItemId?: string
-}): Promise<{ hero: string; inset: string } | null> {
+}): Promise<{ hero: string; inset: string | null } | null> {
   const scraped = await scrapeArticleImages(input.articleUrl)
   const avoid = getRecentHeroKeysForFeed(input.feedId)
   if (input.excludeItemId) {
@@ -166,12 +177,17 @@ async function resolveArticleImages(input: {
 
   if (scraped.length > 0) {
     const picked = await selectBestHeroAndInset(scraped, avoid)
-    if (picked.hero) return { hero: picked.hero, inset: picked.inset ?? picked.hero }
+    if (picked.hero) {
+      return {
+        hero: picked.hero,
+        inset: picked.inset && hasDistinctInsetImage(picked.hero, picked.inset) ? picked.inset : null,
+      }
+    }
   }
 
   if (input.rssImageUrl) {
     const picked = await selectBestHeroAndInset([input.rssImageUrl], avoid)
-    if (picked.hero) return { hero: picked.hero, inset: picked.inset ?? picked.hero }
+    if (picked.hero) return { hero: picked.hero, inset: null }
   }
 
   return null
@@ -234,7 +250,10 @@ export async function updateNewsItemContent(
         : pickAccentWords(headline)
 
   let hero = String(input.heroImageUrl ?? item.hero_image_url ?? '').trim()
-  let inset = String(input.insetImageUrl ?? item.inset_image_url ?? hero).trim()
+  let inset: string | null =
+    input.insetImageUrl !== undefined
+      ? input.insetImageUrl?.trim() || null
+      : ((item.inset_image_url as string | null) ?? null)
   let heroLocalPath: string | undefined
   let insetLocalPath: string | undefined
 
@@ -245,15 +264,15 @@ export async function updateNewsItemContent(
   if (input.insetImageDataUrl) {
     insetLocalPath = saveUploadedNewsImage(agencyId, itemId, input.insetImageDataUrl, 'inset')
     inset = insetLocalPath
-  } else if (input.heroImageDataUrl && !input.insetImageDataUrl && !input.insetImageUrl) {
-    insetLocalPath = heroLocalPath
-    inset = hero
+  } else if (input.heroImageDataUrl && !input.insetImageDataUrl && input.insetImageUrl === undefined) {
+    inset = null
   }
 
   if (!hero) throw new Error('Hero image is required — paste a URL or upload a picture')
+  if (inset && !insetLocalPath && !hasDistinctInsetImage(hero, inset)) inset = null
 
   heroLocalPath = heroLocalPath ?? (path.isAbsolute(hero) && fs.existsSync(hero) ? hero : undefined)
-  insetLocalPath = insetLocalPath ?? (path.isAbsolute(inset) && fs.existsSync(inset) ? inset : undefined)
+  insetLocalPath = insetLocalPath ?? (inset && path.isAbsolute(inset) && fs.existsSync(inset) ? inset : undefined)
 
   let imagePath = String(item.generated_image_path ?? '')
   if (!imagePath) {
@@ -279,7 +298,7 @@ export async function updateNewsItemContent(
   })
 
   const storedHero = input.heroImageUrl?.trim() || hero
-  const storedInset = input.insetImageUrl?.trim() || inset
+  const storedInset = inset && hasDistinctInsetImage(storedHero, inset) ? inset : null
   const cropJson = JSON.stringify(imageCrop)
 
   db.prepare(`
@@ -318,7 +337,7 @@ export async function processRssArticle(input: {
   aiTonePrompt?: string | null
 }): Promise<string | null> {
   const articleUrl = normalizeArticleUrl(input.article.link)
-  if (isDuplicate(input.pageId, articleUrl)) return null
+  if (isDuplicate(input.pageId, articleUrl) || isAlreadyQueued(input.pageId, articleUrl)) return null
 
   const template = input.templateId
     ? (db.prepare('SELECT * FROM news_templates WHERE id = ?').get(input.templateId) as Record<string, unknown> | undefined)
@@ -354,7 +373,7 @@ export async function processRssArticle(input: {
     pageId: input.pageId,
     template,
     heroUrl: hero,
-    insetUrl: inset ?? hero,
+    insetUrl: inset,
     headline: content.headline,
     accentWords: content.accent_words,
     outputPath: imagePath,
@@ -417,7 +436,12 @@ export async function regenerateNewsItemImage(
     excludeItemId: itemId,
   })
   const hero = resolvedImages?.hero ?? String(item.hero_image_url ?? '')
-  const inset = resolvedImages?.inset ?? String(item.inset_image_url ?? hero)
+  const fallbackInset = (item.inset_image_url as string | null) ?? null
+  const inset = resolvedImages
+    ? resolvedImages.inset
+    : hasDistinctInsetImage(hero, fallbackInset)
+      ? fallbackInset
+      : null
   if (!hero) throw new Error('Hero image URL missing')
 
   const content = await buildNewsContent({
@@ -491,7 +515,8 @@ export async function refreshNewsItemLayout(itemId: string, agencyId: string): P
 
   const hero = String(item.hero_image_url ?? '')
   if (!hero) throw new Error('Hero image URL missing')
-  const inset = String(item.inset_image_url ?? hero)
+  const rawInset = (item.inset_image_url as string | null) ?? null
+  const inset = hasDistinctInsetImage(hero, rawInset) ? rawInset : null
   const headline = String(item.headline ?? '').trim()
   if (!headline) throw new Error('Headline missing')
 
@@ -502,7 +527,8 @@ export async function refreshNewsItemLayout(itemId: string, agencyId: string): P
   fs.mkdirSync(path.dirname(imagePath), { recursive: true })
 
   const heroLocalPath = path.isAbsolute(hero) && fs.existsSync(hero) ? hero : undefined
-  const insetLocalPath = path.isAbsolute(inset) && fs.existsSync(inset) ? inset : undefined
+  const insetLocalPath =
+    inset && path.isAbsolute(inset) && fs.existsSync(inset) ? inset : undefined
 
   await composeItemImage({
     agencyId,

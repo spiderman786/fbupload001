@@ -19,7 +19,17 @@ export type RssArticle = {
 const SKIP_IMAGE_RE = /logo|icon|avatar|sprite|pixel|1x1|badge|emoji|gravatar|placeholder|default-featured|site-logo|favicon/i
 
 function imageUrlKey(url: string): string {
-  return url.split('?')[0]!.toLowerCase()
+  return upgradeImageUrl(url).split('?')[0]!.toLowerCase()
+}
+
+export function imageUrlsMatch(a: string, b: string): boolean {
+  if (!a.trim() || !b.trim()) return false
+  return imageUrlKey(a) === imageUrlKey(b)
+}
+
+export function hasDistinctInsetImage(heroUrl: string, insetUrl: string | null | undefined): boolean {
+  if (!insetUrl?.trim()) return false
+  return !imageUrlsMatch(heroUrl, insetUrl)
 }
 
 function extractMetaImage(html: string, articleUrl: string, property: string): string | null {
@@ -180,7 +190,7 @@ export async function selectBestHeroAndInset(
 ): Promise<{ hero: string | null; inset: string | null }> {
   const unique = dedupeImages(imageUrls.filter(Boolean).map(upgradeImageUrl))
   if (unique.length === 0) return { hero: null, inset: null }
-  if (unique.length === 1) return { hero: unique[0]!, inset: unique[0]! }
+  if (unique.length === 1) return { hero: unique[0]!, inset: null }
 
   const ranked = await Promise.all(unique.slice(0, 8).map((url) => imageMeta(url)))
   ranked.sort((a, b) => b.area - a.area)
@@ -191,17 +201,19 @@ export async function selectBestHeroAndInset(
     ranked[0]?.url ??
     unique[0]!
 
-  const insetCandidates = ranked.filter((r) => r.url !== hero)
+  const insetCandidates = ranked.filter((r) => r.url !== hero && !imageUrlsMatch(r.url, hero))
   insetCandidates.sort((a, b) => b.squareness - a.squareness || b.area - a.area)
-  const inset = insetCandidates[0]?.url ?? ranked[1]?.url ?? hero
+  const inset = insetCandidates[0]?.url ?? null
   return { hero, inset }
 }
 
 export function selectHeroAndInset(imageUrls: string[]): { hero: string | null; inset: string | null } {
-  const unique = dedupeImages(imageUrls.filter(Boolean))
+  const unique = dedupeImages(imageUrls.filter(Boolean).map(upgradeImageUrl))
   if (unique.length === 0) return { hero: null, inset: null }
-  if (unique.length === 1) return { hero: unique[0]!, inset: unique[0]! }
-  return { hero: unique[0]!, inset: unique[1]! }
+  if (unique.length === 1) return { hero: unique[0]!, inset: null }
+  const hero = unique[0]!
+  const inset = unique.find((url) => !imageUrlsMatch(url, hero)) ?? null
+  return { hero, inset }
 }
 
 export async function downloadImageBuffer(url: string): Promise<Buffer | null> {
