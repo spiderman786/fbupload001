@@ -5,6 +5,7 @@ import { db } from '../db.js'
 import { downloadReelFromUrl, stripVideoMetadata, cleanupJobFiles, fetchReelMetadata, downloadThumbnail, extractVideoThumbnail } from './downloader.js'
 import { getPageAccessToken, publishReelVideo } from './publisher.js'
 import { isFacebookConfiguredForAgency } from './byoc.js'
+import { isMockMetaPageId } from './facebook.js'
 import { discoverNextReel } from './reelDiscovery.js'
 import { recordPostedReel, isReelAlreadyPosted } from './dedup.js'
 import { canPagePostToday, refreshPagePostedToday } from './pageQuota.js'
@@ -244,6 +245,60 @@ async function publishCleanedFile(
     throw new Error('Publish already in progress for this job')
   }
 
+  const account = page.facebook_account_id
+    ? (db.prepare('SELECT access_token FROM facebook_accounts WHERE id = ?').get(page.facebook_account_id) as
+        | { access_token: string }
+        | undefined)
+    : undefined
+
+  const pageToken =
+    (page.page_access_token as string | null) ??
+    (account ? await getPageAccessToken(page.meta_page_id as string, account.access_token) : null)
+
+  const metaPageId = String(page.meta_page_id ?? '')
+  const fbConfigured = isFacebookConfiguredForAgency(agencyId)
+
+  if (fbConfigured) {
+    if (isMockMetaPageId(metaPageId)) {
+      throw new Error('Demo pages cannot publish reels — connect a real Facebook page under Facebook → Accounts')
+    }
+    if (!pageToken) {
+      throw new Error('Page token not available — reconnect Facebook under Facebook → Accounts')
+    }
+  } else if (process.env.NODE_ENV === 'production') {
+    throw new Error('Facebook BYOC is not configured — complete setup under Settings → Facebook BYOC')
+  } else if (!pageToken) {
+    const postId = `mock_reel_${Date.now()}`
+    appendJobLog(jobId, 'publish', 'Dev mock publish (no FB token, no token charge)', 'warn')
+    db.prepare(`
+      UPDATE reel_jobs
+      SET status = 'published', meta_post_id = ?, tokens_charged = 0, completed_at = datetime('now')
+      WHERE id = ? AND meta_post_id IS NULL
+    `).run(postId, jobId)
+    db.prepare(`
+      UPDATE facebook_pages SET reels_posted_today = reels_posted_today + 1, last_published_at = datetime('now')
+      WHERE id = ?
+    `).run(pageId)
+    recordPostedReel({
+      agencyId,
+      pageId,
+      sourceAccountId: sourceId,
+      sourceReelId: discovered.reelId,
+      sourceUrl: downloadSourceUrl,
+      metaPostId: postId,
+      jobId,
+    })
+    refreshPagePostedToday(pageId)
+    markPageHealthCompleted(pageId)
+    appendJobLog(jobId, 'complete', 'Dev mock job finished (no token charge)')
+    resetPageFailureStreak(pageId)
+    resetSourceFailureStreak(sourceId)
+    await deleteQueueR2Media(loadJob(jobId))
+    cleanupJobFiles(agencyId, jobId)
+    void triggerPrefillRefill()
+    return
+  }
+
   const debited = db.transaction(() => {
     const result = db
       .prepare('UPDATE agencies SET token_balance = token_balance - ? WHERE id = ? AND token_balance >= ?')
@@ -255,34 +310,16 @@ async function publishCleanedFile(
 
   appendJobLog(jobId, 'publish', 'Uploading to Facebook')
 
-  const account = page.facebook_account_id
-    ? (db.prepare('SELECT access_token FROM facebook_accounts WHERE id = ?').get(page.facebook_account_id) as
-        | { access_token: string }
-        | undefined)
-    : undefined
-
-  const pageToken =
-    (page.page_access_token as string | null) ??
-    (account ? await getPageAccessToken(page.meta_page_id as string, account.access_token) : null)
-
-  const mockMode = !isFacebookConfiguredForAgency(agencyId) && !pageToken
   let postId: string
-
   try {
-    if (mockMode || !pageToken) {
-      await new Promise((r) => setTimeout(r, 400))
-      postId = `mock_reel_${Date.now()}`
-      appendJobLog(jobId, 'publish', 'Mock publish (no FB token)', 'warn')
-    } else {
-      const result = await publishReelVideo(
-        page.meta_page_id as string,
-        pageToken,
-        cleanedPath,
-        (loadJob(jobId).caption as string | null) || `Reel from ${source.username}`,
-      )
-      postId = result.postId
-      appendJobLog(jobId, 'publish', `Published ${postId}`)
-    }
+    const result = await publishReelVideo(
+      page.meta_page_id as string,
+      pageToken!,
+      cleanedPath,
+      (loadJob(jobId).caption as string | null) || `Reel from ${source.username}`,
+    )
+    postId = result.postId
+    appendJobLog(jobId, 'publish', `Published ${postId}`)
   } catch (err) {
     db.prepare('UPDATE agencies SET token_balance = token_balance + ? WHERE id = ?').run(tokenCost, agencyId)
     throw err

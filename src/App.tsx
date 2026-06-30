@@ -29,9 +29,9 @@ import { ProxyPoolPage } from './pages/dashboard/ProxyPoolPage'
 import { TokensPage } from './pages/dashboard/TokensPage'
 import { AcceptInvitePage } from './pages/AcceptInvitePage'
 import { TeamPage } from './pages/dashboard/TeamPage'
-import { AiPostsPage } from './pages/dashboard/AiPostsPage'
+import { ComingSoonPage } from './components/ComingSoonPage'
+import { Bot, CreditCard } from 'lucide-react'
 import { NewsFeedPage } from './pages/dashboard/NewsFeedPage'
-import { PayoutPage } from './pages/dashboard/PayoutPage'
 import { YoutubeToolsPage, InstagramToolsPage, YoutubeByocPage, InstagramByocPage } from './pages/dashboard/PlatformPages'
 import { OpsLayout, OpsGate } from './pages/ops/OpsLayout'
 import { OpsOverviewPage } from './pages/ops/OpsOverviewPage'
@@ -83,12 +83,48 @@ function App() {
             <Route path="/agency/facebook/direct-post" element={<DirectPostPage />} />
             <Route path="/facebook/inapp-schedule" element={<InAppSchedulePage />} />
             <Route path="/agency/facebook/inapp-schedule" element={<InAppSchedulePage />} />
-            <Route path="/facebook/ai-posts" element={<AiPostsPage />} />
-            <Route path="/agency/facebook/ai-posts" element={<AiPostsPage />} />
+            <Route
+              path="/facebook/ai-posts"
+              element={
+                <ComingSoonPage
+                  title="AI Text/Image Posts"
+                  description="Generate and publish AI-assisted posts to Facebook pages."
+                  icon={Bot}
+                />
+              }
+            />
+            <Route
+              path="/agency/facebook/ai-posts"
+              element={
+                <ComingSoonPage
+                  title="AI Text/Image Posts"
+                  description="Generate and publish AI-assisted posts to Facebook pages."
+                  icon={Bot}
+                />
+              }
+            />
             <Route path="/facebook/news-feed" element={<OwnerRoute><NewsFeedPage /></OwnerRoute>} />
             <Route path="/agency/facebook/news-feed" element={<OwnerRoute><NewsFeedPage /></OwnerRoute>} />
-            <Route path="/facebook/payout" element={<PayoutPage />} />
-            <Route path="/agency/facebook/payout" element={<PayoutPage />} />
+            <Route
+              path="/facebook/payout"
+              element={
+                <ComingSoonPage
+                  title="Payout Transfer"
+                  description="Transfer monetization payouts from connected Facebook pages."
+                  icon={CreditCard}
+                />
+              }
+            />
+            <Route
+              path="/agency/facebook/payout"
+              element={
+                <ComingSoonPage
+                  title="Payout Transfer"
+                  description="Transfer monetization payouts from connected Facebook pages."
+                  icon={CreditCard}
+                />
+              }
+            />
 
             {/* YouTube platform */}
             <Route path="/youtube/accounts" element={<YoutubeToolsPage />} />

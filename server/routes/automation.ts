@@ -1,5 +1,4 @@
 import { Router } from 'express'
-import { v4 as uuid } from 'uuid'
 import { db } from '../db.js'
 import { authMiddleware, requireVerified } from '../middleware/auth.js'
 import { agencyMiddleware, requireRole } from '../middleware/agency.js'
@@ -200,34 +199,15 @@ automationRouter.post('/bulk-delete', requireRole('owner', 'admin'), async (req:
   }
 })
 
-automationRouter.post('/ai-post', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
-  const { pageId, prompt, postType } = req.body ?? {}
-  if (!pageId || !prompt) {
-    res.status(400).json({ error: 'pageId and prompt are required' })
-    return
-  }
-
-  const id = uuid()
-  db.prepare(`
-    INSERT INTO reel_jobs (id, user_id, agency_id, target_page_id, status, job_type, error_message)
-    VALUES (?, ?, ?, ?, 'failed', 'direct', ?)
-  `).run(id, req.user!.id, req.agency!.id, pageId, `AI ${postType ?? 'text'} post: ${prompt.slice(0, 200)} — requires AI integration`)
-
-  res.status(501).json({
-    message: 'AI post generation requires OpenAI/API key configuration',
-    jobId: id,
+automationRouter.post('/ai-post', requireRole('owner', 'admin'), (_req: AgencyRequest, res) => {
+  res.status(503).json({
+    error: 'AI Text/Image Posts is coming soon.',
   })
 })
 
-automationRouter.post('/payout', requireRole('owner', 'admin'), (req: AgencyRequest, res) => {
-  const { pageId, amount, recipientId } = req.body ?? {}
-  if (!pageId || !amount) {
-    res.status(400).json({ error: 'pageId and amount are required' })
-    return
-  }
-  res.status(501).json({
-    message: 'Payout transfer requires Meta Monetization API access',
-    request: { pageId, amount, recipientId },
+automationRouter.post('/payout', requireRole('owner', 'admin'), (_req: AgencyRequest, res) => {
+  res.status(503).json({
+    error: 'Payout Transfer is coming soon.',
   })
 })
 

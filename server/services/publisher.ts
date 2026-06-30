@@ -28,7 +28,9 @@ export async function publishReelVideo(
 
   const stat = fs.statSync(videoPath)
   if (stat.size < 100) {
-    // Mock/minimal file — simulate publish
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Video file is empty or invalid — download may have failed')
+    }
     await new Promise((r) => setTimeout(r, 300))
     return { postId: `mock_reel_${Date.now()}` }
   }
@@ -147,6 +149,9 @@ export async function publishPhotoPost(
 
   const stat = fs.statSync(imagePath)
   if (stat.size < 100) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Image file is empty or invalid')
+    }
     await new Promise((r) => setTimeout(r, 300))
     return { postId: `mock_photo_${Date.now()}` }
   }
