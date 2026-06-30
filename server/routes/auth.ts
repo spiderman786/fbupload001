@@ -25,8 +25,22 @@ import {
 } from '../utils/agency.js'
 import { isPublicSignupEnabled } from '../utils/signup.js'
 import { cookieDomain } from '../utils/appUrls.js'
+import { rateLimitByIp, rateLimitByIpAndBodyField } from '../utils/rateLimit.js'
+import {
+  assertVerificationAttemptsAllowed,
+  clearVerificationAttempts,
+  recordVerificationFailure,
+  VerificationLockedError,
+} from '../utils/verifyAttempts.js'
 
 export const authRouter = Router()
+
+const loginLimiter = rateLimitByIp(15 * 60 * 1000, 15)
+const signupLimiter = rateLimitByIp(60 * 60 * 1000, 8)
+const verifyLimiter = rateLimitByIpAndBodyField('email', 15 * 60 * 1000, 20)
+const resendLimiter = rateLimitByIpAndBodyField('email', 60 * 60 * 1000, 5)
+const forgotLimiter = rateLimitByIpAndBodyField('email', 60 * 60 * 1000, 8)
+const resetLimiter = rateLimitByIpAndBodyField('email', 15 * 60 * 1000, 15)
 
 authRouter.get('/signup-status', (_req, res) => {
   res.json({ enabled: isPublicSignupEnabled() })
@@ -68,7 +82,7 @@ authRouter.get('/session', authMiddleware, (req: AuthRequest, res) => {
   res.json(buildSessionPayload(req.user!.id, agencyId))
 })
 
-authRouter.post('/signup', async (req, res) => {
+authRouter.post('/signup', signupLimiter, async (req, res) => {
   if (!isPublicSignupEnabled()) {
     res.status(403).json({
       error: 'Public signup is closed. Ask an existing agency owner for a team invite, or contact support.',
@@ -137,14 +151,25 @@ authRouter.post('/signup', async (req, res) => {
   })
 })
 
-authRouter.post('/verify', (req, res) => {
+authRouter.post('/verify', verifyLimiter, (req, res) => {
   const { email, code } = req.body ?? {}
   if (!email || !code) {
     res.status(400).json({ error: 'Email and code are required' })
     return
   }
 
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase()) as
+  const normalizedEmail = email.toLowerCase()
+  try {
+    assertVerificationAttemptsAllowed(normalizedEmail)
+  } catch (err) {
+    if (err instanceof VerificationLockedError) {
+      res.status(429).json({ error: err.message })
+      return
+    }
+    throw err
+  }
+
+  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail) as
     | import('../db.js').UserRow
     | undefined
 
@@ -156,7 +181,8 @@ authRouter.post('/verify', (req, res) => {
     res.json({ message: 'Email already verified' })
     return
   }
-  if (user.verification_code !== code) {
+  if (user.verification_code !== String(code).trim()) {
+    recordVerificationFailure(normalizedEmail)
     res.status(400).json({ error: 'Invalid verification code' })
     return
   }
@@ -165,6 +191,7 @@ authRouter.post('/verify', (req, res) => {
     return
   }
 
+  clearVerificationAttempts(normalizedEmail)
   db.prepare(`
     UPDATE users SET email_verified = 1, verification_code = NULL, verification_expires = NULL
     WHERE id = ?
@@ -185,7 +212,7 @@ authRouter.post('/verify', (req, res) => {
   res.json({ message: 'Email verified successfully', ...buildSessionPayload(user.id, agency?.id) })
 })
 
-authRouter.post('/send-verification', async (req, res) => {
+authRouter.post('/send-verification', resendLimiter, async (req, res) => {
   const { email } = req.body ?? {}
   if (!email) {
     res.status(400).json({ error: 'Email is required' })
@@ -220,7 +247,7 @@ authRouter.post('/send-verification', async (req, res) => {
   }
 })
 
-authRouter.post('/login', async (req, res) => {
+authRouter.post('/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body ?? {}
   if (!email || !password) {
     res.status(400).json({ error: 'Email and password are required' })
@@ -285,7 +312,7 @@ authRouter.patch('/me', authMiddleware, requireVerified, async (req: AuthRequest
   res.json({ user: sanitizeUser(updated) })
 })
 
-authRouter.post('/forgot-password', async (req, res) => {
+authRouter.post('/forgot-password', forgotLimiter, async (req, res) => {
   const { email } = req.body ?? {}
   if (!email) {
     res.status(400).json({ error: 'Email is required' })
@@ -317,7 +344,7 @@ authRouter.post('/forgot-password', async (req, res) => {
   res.json({ message: 'If an account exists, a reset code has been sent to your email.' })
 })
 
-authRouter.post('/reset-password', async (req, res) => {
+authRouter.post('/reset-password', resetLimiter, async (req, res) => {
   const { email, code, password } = req.body ?? {}
   if (!email || !code || !password) {
     res.status(400).json({ error: 'Email, code, and new password are required' })

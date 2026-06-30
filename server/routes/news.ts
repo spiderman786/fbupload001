@@ -17,6 +17,7 @@ import { DEFAULT_COLORS, parseBrandType, parseJsonArray, resolveFonts, type News
 import { isMockMetaPageId } from '../services/facebook.js'
 import { assertPublishableFacebookPage } from '../services/pageTokens.js'
 import { resolvePageProfilePictureBuffer } from '../services/pagePicture.js'
+import { assertSafeExternalUrl } from '../utils/safeUrl.js'
 
 import { routeParam } from '../utils/routeParam.js'
 const newsLogosDir = path.join(process.cwd(), 'data', 'news-logos')
@@ -495,8 +496,9 @@ newsRouter.post('/feeds', (req: AgencyRequest, res) => {
 
   try {
     assertPublishableFacebookPage(String(pageId), req.agency!.id)
+    assertSafeExternalUrl(String(url).trim())
   } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : 'Invalid page' })
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Invalid page or feed URL' })
     return
   }
 
@@ -741,8 +743,12 @@ newsRouter.delete('/items/:id', (req: AgencyRequest, res) => {
 
 newsRouter.post('/items/refresh-layouts', async (req: AgencyRequest, res) => {
   try {
-    const count = await refreshAllReadyItemLayouts(req.agency!.id)
-    res.json({ message: `Refreshed ${count} graphic(s) with the latest template layout`, count })
+    const result = await refreshAllReadyItemLayouts(req.agency!.id)
+    const message =
+      result.failed.length === 0
+        ? `Refreshed ${result.refreshed} graphic(s) with the latest template layout`
+        : `Refreshed ${result.refreshed} graphic(s); ${result.failed.length} could not be refreshed`
+    res.json({ message, count: result.refreshed, failed: result.failed })
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Refresh failed' })
   }
@@ -789,7 +795,7 @@ newsRouter.post('/items/:id/publish', async (req: AgencyRequest, res) => {
 
 newsRouter.post('/items/:id/skip', (req: AgencyRequest, res) => {
   const result = db
-    .prepare(`UPDATE news_items SET status = 'skipped' WHERE id = ? AND agency_id = ? AND status = 'ready'`)
+    .prepare(`UPDATE news_items SET status = 'skipped', error_message = NULL WHERE id = ? AND agency_id = ? AND status IN ('ready', 'failed')`)
     .run(routeParam(req.params.id), req.agency!.id)
   if (result.changes === 0) {
     res.status(404).json({ error: 'Item not found or not skippable' })

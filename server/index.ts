@@ -108,7 +108,13 @@ app.use((err: unknown, _req: express.Request, res: express.Response, next: expre
     return
   }
   console.error('[server] unhandled error:', err)
-  res.status(500).json({ error: err instanceof Error ? err.message : 'Internal server error' })
+  const message =
+    process.env.NODE_ENV === 'production'
+      ? 'Internal server error'
+      : err instanceof Error
+        ? err.message
+        : 'Internal server error'
+  res.status(500).json({ error: message })
 })
 
 app.listen(PORT, '0.0.0.0', () => {

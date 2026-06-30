@@ -1,3 +1,5 @@
+import crypto from 'crypto'
+
 export const TOKEN_COST_PKR = 0.5
 
 export const PLATFORM_TOKEN_RATES: Record<string, number> = {
@@ -12,7 +14,7 @@ export function tokensForPlatform(platform: string): number {
 }
 
 export function generateVerificationCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000))
+  return String(crypto.randomInt(100000, 1000000))
 }
 
 export function isGmail(email: string): boolean {

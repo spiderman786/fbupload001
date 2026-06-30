@@ -206,19 +206,6 @@ export const api = {
           body: JSON.stringify({ amount, note }),
         },
       ),
-    credit: (amount: number, note?: string) =>
-      request<{ balance: number; message: string }>('/tokens/credit', {
-        method: 'POST',
-        body: JSON.stringify({ amount, note }),
-      }),
-    creditMember: (body: { amount: number; memberEmail: string; note?: string }) =>
-      request<{ balance: number; message: string; member: { id: string; email: string; fullName: string } }>(
-        '/tokens/credit-member',
-        {
-          method: 'POST',
-          body: JSON.stringify(body),
-        },
-      ),
   },
   facebook: {
     status: () => request<{ configured: boolean; mockMode: boolean }>('/facebook/status'),
@@ -462,7 +449,10 @@ export const api = {
         body: JSON.stringify(body ?? {}),
       }),
     refreshAllLayouts: () =>
-      request<{ message: string; count: number }>('/news/items/refresh-layouts', { method: 'POST' }),
+      request<{ message: string; count: number; failed?: { id: string; error: string }[] }>(
+        '/news/items/refresh-layouts',
+        { method: 'POST' },
+      ),
     deleteItem: (id: string) => request<{ message: string }>(`/news/items/${id}`, { method: 'DELETE' }),
     updateItem: (
       id: string,

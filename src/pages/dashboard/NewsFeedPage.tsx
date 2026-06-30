@@ -580,7 +580,7 @@ export function NewsFeedPage() {
       setPreviewCacheBust((prev) => {
         const next = { ...prev }
         for (const item of data?.items ?? []) {
-          if (item.status === 'ready') next[item.id] = bust
+          if (item.status === 'ready' || item.status === 'failed') next[item.id] = bust
         }
         return next
       })
@@ -662,7 +662,7 @@ export function NewsFeedPage() {
   const publishablePages = data?.pages.filter((p) => !p.isMockPage) ?? []
   const mockFeedAssigned = data?.feeds.some((f) => f.isMockPage) ?? false
   const viewingItem = viewItemId ? data?.items.find((i) => i.id === viewItemId) : undefined
-  const canEditViewingItem = viewingItem?.status === 'ready'
+  const canEditViewingItem = viewingItem?.status === 'ready' || viewingItem?.status === 'failed'
   const heroCropPreviewSrc =
     heroUploadDataUrl ||
     (editHeroUrl.startsWith('http') ? editHeroUrl : '') ||
@@ -1331,9 +1331,12 @@ export function NewsFeedPage() {
               <p className="text-sm text-muted-foreground">No items yet. Add a feed and poll.</p>
             ) : (
               <ul className="space-y-4">
-                {data.items.map((item) => (
+                {data.items.map((item) => {
+                  const hasPreview = item.status === 'ready' || item.status === 'posted' || item.status === 'failed'
+                  const canAct = item.status === 'ready' || item.status === 'failed'
+                  return (
                   <li key={item.id} className="flex flex-col gap-3 rounded-lg border border-border p-3 sm:flex-row">
-                    {item.status === 'ready' || item.status === 'posted' ? (
+                    {hasPreview ? (
                       <button
                         type="button"
                         onClick={() => setViewItemId(item.id)}
@@ -1346,7 +1349,7 @@ export function NewsFeedPage() {
                           className="h-full w-full object-contain transition group-hover:opacity-80"
                         />
                         <span className="absolute inset-x-0 bottom-0 bg-black/60 py-1 text-center text-[10px] font-semibold text-white">
-                          {item.status === 'ready' ? 'Edit' : 'View'}
+                          {item.status === 'posted' ? 'View' : item.status === 'failed' ? 'Review' : 'Edit'}
                         </span>
                       </button>
                     ) : null}
@@ -1361,21 +1364,21 @@ export function NewsFeedPage() {
                       )}
                       <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{item.postDescription}</p>
                       <p className="mt-2 text-xs">
-                        <span className="rounded bg-muted px-2 py-0.5">{item.status}</span>
+                        <span className={`rounded px-2 py-0.5 ${item.status === 'failed' ? 'bg-destructive/10 text-destructive' : 'bg-muted'}`}>{item.status}</span>
                         {item.errorMessage && <span className="ml-2 text-destructive">{item.errorMessage}</span>}
                       </p>
                     </div>
-                    {(item.status === 'ready' || item.status === 'posted') && (
+                    {(canAct || item.status === 'posted') && (
                       <div className="flex shrink-0 flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={() => setViewItemId(item.id)}
                           className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs"
                         >
-                          {item.status === 'ready' ? <Pencil className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                          {item.status === 'ready' ? 'Edit' : 'View image'}
+                          {item.status === 'posted' ? <Eye className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
+                          {item.status === 'posted' ? 'View image' : item.status === 'failed' ? 'Review' : 'Edit'}
                         </button>
-                        {item.status === 'ready' && (
+                        {canAct && (
                           <>
                             <button
                               type="button"
@@ -1388,7 +1391,7 @@ export function NewsFeedPage() {
                             </button>
                             <button type="button" onClick={() => handlePublish(item.id)} className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground">
                               <Send className="h-3.5 w-3.5" />
-                              Publish
+                              {item.status === 'failed' ? 'Retry publish' : 'Publish'}
                             </button>
                             <button type="button" onClick={() => handleSkip(item.id)} className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs">
                               <SkipForward className="h-3.5 w-3.5" />
@@ -1408,7 +1411,8 @@ export function NewsFeedPage() {
                       </div>
                     )}
                   </li>
-                ))}
+                  )
+                })}
               </ul>
             )}
           </div>

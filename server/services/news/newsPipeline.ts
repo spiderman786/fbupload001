@@ -27,7 +27,7 @@ function isAlreadyQueued(pageId: string, articleUrl: string): boolean {
   const row = db
     .prepare(`
       SELECT id FROM news_items
-      WHERE page_id = ? AND article_url = ? AND status IN ('ready', 'failed')
+      WHERE page_id = ? AND article_url = ? AND status = 'ready'
       LIMIT 1
     `)
     .get(pageId, articleUrl) as { id: string } | undefined
@@ -224,7 +224,7 @@ export async function updateNewsItemContent(
   const item = db.prepare('SELECT * FROM news_items WHERE id = ?').get(itemId) as Record<string, unknown> | undefined
   if (!item) throw new Error('News item not found')
   if (String(item.agency_id) !== agencyId) throw new Error('News item not found')
-  if (item.status !== 'ready') throw new Error('Can only edit ready items')
+  if (item.status !== 'ready' && item.status !== 'failed') throw new Error('Can only edit ready or failed items')
 
   const pageId = String(item.page_id)
   const templateId = item.template_id as string | null
@@ -311,6 +311,7 @@ export async function updateNewsItemContent(
       inset_image_url = ?,
       generated_image_path = ?,
       image_crop_json = ?,
+      status = 'ready',
       error_message = NULL
     WHERE id = ?
   `).run(
@@ -417,7 +418,7 @@ export async function regenerateNewsItemImage(
   const item = db.prepare('SELECT * FROM news_items WHERE id = ?').get(itemId) as Record<string, unknown> | undefined
   if (!item) throw new Error('News item not found')
   if (agencyId && String(item.agency_id) !== agencyId) throw new Error('News item not found')
-  if (item.status !== 'ready') throw new Error('Can only regenerate ready items')
+  if (item.status !== 'ready' && item.status !== 'failed') throw new Error('Can only regenerate ready or failed items')
 
   const pageId = String(item.page_id)
   const templateId = item.template_id as string | null
@@ -486,6 +487,7 @@ export async function regenerateNewsItemImage(
       hero_image_url = ?,
       inset_image_url = ?,
       generated_image_path = ?,
+      status = 'ready',
       error_message = NULL
     WHERE id = ?
   `).run(
@@ -505,7 +507,7 @@ export async function refreshNewsItemLayout(itemId: string, agencyId: string): P
   const item = db.prepare('SELECT * FROM news_items WHERE id = ?').get(itemId) as Record<string, unknown> | undefined
   if (!item) throw new Error('News item not found')
   if (String(item.agency_id) !== agencyId) throw new Error('News item not found')
-  if (item.status !== 'ready') throw new Error('Can only refresh ready items')
+  if (item.status !== 'ready' && item.status !== 'failed') throw new Error('Can only refresh ready or failed items')
 
   const pageId = String(item.page_id)
   const templateId = item.template_id as string | null
@@ -545,17 +547,30 @@ export async function refreshNewsItemLayout(itemId: string, agencyId: string): P
     insetLocalPath,
   })
 
-  db.prepare('UPDATE news_items SET generated_image_path = ?, error_message = NULL WHERE id = ?').run(imagePath, itemId)
+  db.prepare(`UPDATE news_items SET generated_image_path = ?, status = 'ready', error_message = NULL WHERE id = ?`).run(
+    imagePath,
+    itemId,
+  )
 }
 
-export async function refreshAllReadyItemLayouts(agencyId: string): Promise<number> {
+export async function refreshAllReadyItemLayouts(agencyId: string): Promise<{
+  refreshed: number
+  failed: { id: string; error: string }[]
+}> {
   const items = db
-    .prepare('SELECT id FROM news_items WHERE agency_id = ? AND status = ? ORDER BY created_at DESC')
-    .all(agencyId, 'ready') as { id: string }[]
+    .prepare(`SELECT id FROM news_items WHERE agency_id = ? AND status IN ('ready', 'failed') ORDER BY created_at DESC`)
+    .all(agencyId) as { id: string }[]
+  let refreshed = 0
+  const failed: { id: string; error: string }[] = []
   for (const { id } of items) {
-    await refreshNewsItemLayout(id, agencyId)
+    try {
+      await refreshNewsItemLayout(id, agencyId)
+      refreshed += 1
+    } catch (err) {
+      failed.push({ id, error: err instanceof Error ? err.message : 'Refresh failed' })
+    }
   }
-  return items.length
+  return { refreshed, failed }
 }
 
 async function publishPhotoWithTokenRetry(
@@ -591,7 +606,11 @@ async function publishPhotoWithTokenRetry(
 export async function publishNewsItem(itemId: string): Promise<{ postId: string }> {
   const item = db.prepare('SELECT * FROM news_items WHERE id = ?').get(itemId) as Record<string, unknown> | undefined
   if (!item) throw new Error('News item not found')
-  if (item.status === 'posted') throw new Error('Already posted')
+  if (item.status === 'posted') {
+    const existingPostId = String(item.fb_post_id ?? '').trim()
+    if (existingPostId) return { postId: existingPostId }
+    throw new Error('Already posted')
+  }
 
   const pageId = String(item.page_id)
   const agencyId = String(item.agency_id)
@@ -615,23 +634,26 @@ export async function publishNewsItem(itemId: string): Promise<{ postId: string 
 
   const { postId, token } = await publishPhotoWithTokenRetry(pageId, agencyId, imagePath, caption)
 
-  let commentId: string | null = null
-  if (settings?.comment_link_enabled) {
-    const comment = `📖 ${String(item.post_title ?? 'Read more')}:\n${String(item.article_url)}`
-    const result = await postComment(postId, token, comment)
-    commentId = result.commentId
-  }
-
   db.prepare(`
-    UPDATE news_items SET status = 'posted', fb_post_id = ?, fb_comment_id = ?, posted_at = datetime('now'), error_message = NULL
+    UPDATE news_items SET status = 'posted', fb_post_id = ?, posted_at = datetime('now'), error_message = NULL
     WHERE id = ?
-  `).run(postId, commentId, itemId)
+  `).run(postId, itemId)
 
   db.prepare(`
     INSERT INTO posted_articles (id, agency_id, page_id, article_url, news_item_id, fb_post_id)
     VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(page_id, article_url) DO UPDATE SET fb_post_id = excluded.fb_post_id, posted_at = datetime('now')
   `).run(uuid(), item.agency_id, pageId, item.article_url, itemId, postId)
+
+  if (settings?.comment_link_enabled) {
+    const comment = `📖 ${String(item.post_title ?? 'Read more')}:\n${String(item.article_url)}`
+    try {
+      const result = await postComment(postId, token, comment)
+      db.prepare('UPDATE news_items SET fb_comment_id = ? WHERE id = ?').run(result.commentId, itemId)
+    } catch (err) {
+      console.warn(`[news] Comment failed after publish for item ${itemId}:`, err)
+    }
+  }
 
   return { postId }
 }

@@ -6,18 +6,14 @@ import { useToast } from '../../context/ToastContext'
 import { getApiError } from '../../lib/apiError'
 
 export function AddTokensPage() {
-  const { user, refreshUser } = useAuth()
+  const { user } = useAuth()
   const { isOwner, canRequestTokens } = useAgencyRole()
   const toast = useToast()
   const [amount, setAmount] = useState(100)
-  const [memberAmount, setMemberAmount] = useState(100)
   const [note, setNote] = useState('')
-  const [memberEmail, setMemberEmail] = useState('')
   const [ownerEmail, setOwnerEmail] = useState<string | null>(null)
   const [whatsappUrl, setWhatsappUrl] = useState('')
   const [loading, setLoading] = useState(false)
-  const [devLoading, setDevLoading] = useState(false)
-  const [memberLoading, setMemberLoading] = useState(false)
   const [message, setMessage] = useState('')
 
   const totalPkr = amount * 0.5
@@ -57,48 +53,14 @@ export function AddTokensPage() {
     }
   }
 
-  async function handleDevCredit() {
-    setDevLoading(true)
-    try {
-      const res = await api.tokens.credit(amount, 'Dev credit')
-      setMessage(`Credited ${amount} tokens. New balance: ${res.balance}`)
-      await refreshUser()
-      toast.success(`Credited ${amount} tokens`)
-    } catch (err) {
-      const msg = getApiError(err, 'Credit failed')
-      setMessage(msg)
-      toast.error(msg)
-    } finally {
-      setDevLoading(false)
-    }
-  }
-
-  async function handleCreditMember(e: FormEvent) {
-    e.preventDefault()
-    setMemberLoading(true)
-    try {
-      const res = await api.tokens.creditMember({ amount: memberAmount, memberEmail, note })
-      setMessage(`${res.message}. New agency balance: ${res.balance}`)
-      setMemberEmail('')
-      await refreshUser()
-      toast.success(res.message)
-    } catch (err) {
-      const msg = getApiError(err, 'Credit failed')
-      setMessage(msg)
-      toast.error(msg)
-    } finally {
-      setMemberLoading(false)
-    }
-  }
-
   return (
     <div className="mx-auto max-w-lg space-y-6">
       <div>
         <h1 className="font-display text-2xl font-bold">Add Tokens</h1>
         <p className="text-sm text-muted-foreground">
           {isOwner
-            ? 'Top up your agency via WhatsApp or credit tokens directly.'
-            : 'Request a token purchase — only the agency owner can credit tokens after payment.'}
+            ? 'Request a token top-up via WhatsApp. Tokens are credited manually after payment is confirmed.'
+            : 'Request a token purchase — the agency owner or platform support credits tokens after payment.'}
           {' '}
           Current balance: <strong>{user?.tokenBalance ?? 0}</strong> tokens.
         </p>
@@ -108,8 +70,8 @@ export function AddTokensPage() {
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <p className="font-medium">Admin access</p>
           <p className="mt-1 text-amber-800">
-            You can request tokens via WhatsApp{ownerEmail ? ` (agency owner: ${ownerEmail})` : ''}. Direct crediting is
-            owner-only.
+            You can request tokens via WhatsApp{ownerEmail ? ` (agency owner: ${ownerEmail})` : ''}. Support credits
+            tokens after payment is verified.
           </p>
         </div>
       )}
@@ -163,50 +125,6 @@ export function AddTokensPage() {
       )}
 
       {message && <p className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm">{message}</p>}
-
-      {isOwner && (
-        <>
-          <div className="rounded-lg border border-dashed border-border p-4">
-            <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Dev mode</p>
-            <p className="mb-3 text-sm text-muted-foreground">Instantly credit tokens without WhatsApp (for testing).</p>
-            <button
-              onClick={handleDevCredit}
-              disabled={devLoading}
-              className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
-            >
-              {devLoading ? 'Crediting...' : `Credit ${amount} tokens`}
-            </button>
-          </div>
-
-          <form onSubmit={handleCreditMember} className="rounded-lg border border-border p-4 space-y-3">
-            <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Owner</p>
-            <p className="text-sm text-muted-foreground">Credit tokens directly to an agency member by email.</p>
-            <input
-              type="number"
-              min={1}
-              value={memberAmount}
-              onChange={(e) => setMemberAmount(Math.max(1, Number(e.target.value)))}
-              placeholder="Tokens"
-              className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
-            />
-            <input
-              type="email"
-              required
-              value={memberEmail}
-              onChange={(e) => setMemberEmail(e.target.value)}
-              placeholder="member@gmail.com"
-              className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
-            />
-            <button
-              type="submit"
-              disabled={memberLoading}
-              className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
-            >
-              {memberLoading ? 'Crediting member...' : `Credit ${memberAmount} tokens to member`}
-            </button>
-          </form>
-        </>
-      )}
     </div>
   )
 }

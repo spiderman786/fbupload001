@@ -1,8 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import {
-  Bot,
   CalendarClock,
-  CreditCard,
   Download,
   Globe,
   LayoutDashboard,
@@ -51,9 +49,10 @@ export const DASHBOARD_NAV: NavSection[] = [
       { to: '/facebook/direct-post', label: 'Direct Post', icon: Send },
       { to: '/facebook/direct-schedule', label: 'Direct Schedule', icon: CalendarClock },
       { to: '/facebook/inapp-schedule', label: 'InApp Schedule', icon: CalendarClock },
-      { to: '/facebook/ai-posts', label: 'AI Text/Image Posts', icon: Bot },
+      // Coming soon — not yet implemented (501 on backend)
+      // { to: '/facebook/ai-posts', label: 'AI Text/Image Posts', icon: Bot },
       { to: '/facebook/news-feed', label: 'RSS News Feed', icon: Newspaper, ownerOnly: true },
-      { to: '/facebook/payout', label: 'Payout Transfer', icon: CreditCard },
+      // { to: '/facebook/payout', label: 'Payout Transfer', icon: CreditCard },
     ],
   },
   {

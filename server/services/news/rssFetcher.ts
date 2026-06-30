@@ -218,6 +218,7 @@ export function selectHeroAndInset(imageUrls: string[]): { hero: string | null; 
 
 export async function downloadImageBuffer(url: string): Promise<Buffer | null> {
   try {
+    assertSafeExternalUrl(url)
     const res = await fetch(url, {
       headers: { 'User-Agent': 'FBUploadPro-NewsBot/1.0' },
       signal: AbortSignal.timeout(20000),
