@@ -81,6 +81,7 @@ export function NewsFeedPage() {
   const [pollingFeedId, setPollingFeedId] = useState<string | null>(null)
   const [deletingFeedId, setDeletingFeedId] = useState<string | null>(null)
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null)
+  const [refreshingAllLayouts, setRefreshingAllLayouts] = useState(false)
   const [aiRegenerateCommand, setAiRegenerateCommand] = useState('')
   const [rewriteCaptionOnRegenerate, setRewriteCaptionOnRegenerate] = useState(false)
 
@@ -567,6 +568,28 @@ export function NewsFeedPage() {
       toast.error(getApiError(err, 'Regenerate failed'))
     } finally {
       setRegeneratingId(null)
+    }
+  }
+
+  async function handleRefreshAllLayouts() {
+    if (!confirm('Refresh all ready graphics with the latest template layout? Headlines and photos stay the same.')) return
+    setRefreshingAllLayouts(true)
+    try {
+      const res = await api.news.refreshAllLayouts()
+      const bust = Date.now()
+      setPreviewCacheBust((prev) => {
+        const next = { ...prev }
+        for (const item of data?.items ?? []) {
+          if (item.status === 'ready') next[item.id] = bust
+        }
+        return next
+      })
+      toast.success(res.message)
+      await load()
+    } catch (err) {
+      toast.error(getApiError(err, 'Refresh failed'))
+    } finally {
+      setRefreshingAllLayouts(false)
     }
   }
 
@@ -1276,9 +1299,22 @@ export function NewsFeedPage() {
           )}
 
           <div className="marketing-card">
-            <h2 className="mb-3 font-semibold">Queue</h2>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-semibold">Queue</h2>
+              {data.items.some((i) => i.status === 'ready') && (
+                <button
+                  type="button"
+                  disabled={refreshingAllLayouts}
+                  onClick={() => void handleRefreshAllLayouts()}
+                  className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${refreshingAllLayouts ? 'animate-spin' : ''}`} />
+                  {refreshingAllLayouts ? 'Refreshing…' : 'Refresh all graphics'}
+                </button>
+              )}
+            </div>
             <p className="mb-3 text-xs text-muted-foreground">
-              Thumbnails use saved PNGs. After template layout changes, click <strong>Regenerate</strong> on each ready item to refresh the graphic.
+              Thumbnails are saved PNGs. After template updates, use <strong>Refresh all graphics</strong> (layout only) or <strong>Regenerate</strong> per item (re-runs AI + photos).
             </p>
             {mockFeedAssigned && (
               <p className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
@@ -1301,13 +1337,13 @@ export function NewsFeedPage() {
                       <button
                         type="button"
                         onClick={() => setViewItemId(item.id)}
-                        className="group relative h-40 w-32 shrink-0 overflow-hidden rounded-md bg-muted"
+                        className="group relative aspect-[1080/1350] w-[7.5rem] shrink-0 overflow-hidden rounded-md bg-black"
                         title="View full image"
                       >
                         <img
                           src={itemPreviewSrc(item.id)}
                           alt=""
-                          className="h-full w-full object-cover transition group-hover:opacity-80"
+                          className="h-full w-full object-contain transition group-hover:opacity-80"
                         />
                         <span className="absolute inset-x-0 bottom-0 bg-black/60 py-1 text-center text-[10px] font-semibold text-white">
                           {item.status === 'ready' ? 'Edit' : 'View'}

@@ -10,7 +10,7 @@ import { composeTemplatePreview } from '../services/news/imageCompositor.js'
 import { getAgencyAiSettingsPublic, saveAgencyAiSettings, type AiProvider } from '../services/news/aiSettings.js'
 import { getCompositorQueueStats } from '../services/news/compositorQueue.js'
 import { testNewsAiConnection } from '../services/news/aiRewriter.js'
-import { pollFeedsForAgency, pollFeed, publishNewsItem, regenerateNewsItemImage, updateNewsItemContent, deleteNewsItem } from '../services/news/newsPipeline.js'
+import { pollFeedsForAgency, pollFeed, publishNewsItem, regenerateNewsItemImage, refreshAllReadyItemLayouts, updateNewsItemContent, deleteNewsItem } from '../services/news/newsPipeline.js'
 import { parseImageCrop } from '../services/news/types.js'
 import { fetchRssFeed } from '../services/news/rssFetcher.js'
 import { DEFAULT_COLORS, parseBrandType, parseJsonArray, resolveFonts, type NewsFonts } from '../services/news/types.js'
@@ -736,6 +736,15 @@ newsRouter.delete('/items/:id', (req: AgencyRequest, res) => {
     res.json({ message: 'Queue item deleted' })
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Delete failed' })
+  }
+})
+
+newsRouter.post('/items/refresh-layouts', async (req: AgencyRequest, res) => {
+  try {
+    const count = await refreshAllReadyItemLayouts(req.agency!.id)
+    res.json({ message: `Refreshed ${count} graphic(s) with the latest template layout`, count })
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Refresh failed' })
   }
 })
 

@@ -461,6 +461,8 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(body ?? {}),
       }),
+    refreshAllLayouts: () =>
+      request<{ message: string; count: number }>('/news/items/refresh-layouts', { method: 'POST' }),
     deleteItem: (id: string) => request<{ message: string }>(`/news/items/${id}`, { method: 'DELETE' }),
     updateItem: (
       id: string,

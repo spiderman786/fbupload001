@@ -476,6 +476,62 @@ export async function regenerateNewsItemImage(
   )
 }
 
+/** Re-render PNG with current template layout; keeps headline, photos, and crop. */
+export async function refreshNewsItemLayout(itemId: string, agencyId: string): Promise<void> {
+  const item = db.prepare('SELECT * FROM news_items WHERE id = ?').get(itemId) as Record<string, unknown> | undefined
+  if (!item) throw new Error('News item not found')
+  if (String(item.agency_id) !== agencyId) throw new Error('News item not found')
+  if (item.status !== 'ready') throw new Error('Can only refresh ready items')
+
+  const pageId = String(item.page_id)
+  const templateId = item.template_id as string | null
+  const template = templateId
+    ? (db.prepare('SELECT * FROM news_templates WHERE id = ?').get(templateId) as Record<string, unknown> | undefined)
+    : undefined
+
+  const hero = String(item.hero_image_url ?? '')
+  if (!hero) throw new Error('Hero image URL missing')
+  const inset = String(item.inset_image_url ?? hero)
+  const headline = String(item.headline ?? '').trim()
+  if (!headline) throw new Error('Headline missing')
+
+  let imagePath = String(item.generated_image_path ?? '')
+  if (!imagePath) {
+    imagePath = path.join(newsImagesDir, agencyId, `${itemId}.png`)
+  }
+  fs.mkdirSync(path.dirname(imagePath), { recursive: true })
+
+  const heroLocalPath = path.isAbsolute(hero) && fs.existsSync(hero) ? hero : undefined
+  const insetLocalPath = path.isAbsolute(inset) && fs.existsSync(inset) ? inset : undefined
+
+  await composeItemImage({
+    agencyId,
+    pageId,
+    template,
+    heroUrl: hero,
+    insetUrl: inset,
+    headline,
+    accentWords: parseJsonArray(item.accent_words_json as string),
+    outputPath: imagePath,
+    rssTitle: String(item.rss_title ?? ''),
+    imageCrop: parseImageCrop(item.image_crop_json as string | null),
+    heroLocalPath,
+    insetLocalPath,
+  })
+
+  db.prepare('UPDATE news_items SET generated_image_path = ?, error_message = NULL WHERE id = ?').run(imagePath, itemId)
+}
+
+export async function refreshAllReadyItemLayouts(agencyId: string): Promise<number> {
+  const items = db
+    .prepare('SELECT id FROM news_items WHERE agency_id = ? AND status = ? ORDER BY created_at DESC')
+    .all(agencyId, 'ready') as { id: string }[]
+  for (const { id } of items) {
+    await refreshNewsItemLayout(id, agencyId)
+  }
+  return items.length
+}
+
 async function publishPhotoWithTokenRetry(
   pageId: string,
   agencyId: string,

@@ -19,8 +19,8 @@ function insetOuterSize(size: number): { border: number; outer: number } {
 
 function popcornInsetTop(barTop: number): number {
   const { outer } = insetOuterSize(INSET_SIZE)
-  // Entire circle sits above the divider with a small gap.
-  return barTop - outer - 12
+  // Popcorn style: straddle the divider (~62% on hero, ~38% over text bar).
+  return barTop - Math.round(outer * 0.62)
 }
 
 function normalizeLayoutPreset(layoutPreset: string): string {
