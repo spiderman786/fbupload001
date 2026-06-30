@@ -951,34 +951,36 @@ export function NewsFeedPage() {
                     />
                   )}
                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Page name label</label>
-                  <select
-                    value={pageNameFontPreset}
-                    onChange={(e) => {
-                      const id = e.target.value
-                      setPageNameFontPreset(id)
-                      const preset = PAGE_NAME_FONT_PRESETS.find((p) => p.id === id)
-                      if (preset) setPageNameSize(preset.pageNameSize)
-                    }}
-                    className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
-                  >
-                    {PAGE_NAME_FONT_PRESETS.map((p) => (
-                      <option key={p.id} value={p.id}>{p.label}</option>
-                    ))}
-                    <option value="custom">Custom</option>
-                  </select>
-                  {pageNameFontPreset === 'custom' && (
-                    <input
-                      type="number"
-                      min={10}
-                      max={24}
-                      value={pageNameSize}
-                      onChange={(e) => setPageNameSize(Number(e.target.value))}
+                {brandType === 'page_name' && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Page name label</label>
+                    <select
+                      value={pageNameFontPreset}
+                      onChange={(e) => {
+                        const id = e.target.value
+                        setPageNameFontPreset(id)
+                        const preset = PAGE_NAME_FONT_PRESETS.find((p) => p.id === id)
+                        if (preset) setPageNameSize(preset.pageNameSize)
+                      }}
                       className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
-                    />
-                  )}
-                </div>
+                    >
+                      {PAGE_NAME_FONT_PRESETS.map((p) => (
+                        <option key={p.id} value={p.id}>{p.label}</option>
+                      ))}
+                      <option value="custom">Custom</option>
+                    </select>
+                    {pageNameFontPreset === 'custom' && (
+                      <input
+                        type="number"
+                        min={10}
+                        max={24}
+                        value={pageNameSize}
+                        onChange={(e) => setPageNameSize(Number(e.target.value))}
+                        className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                      />
+                    )}
+                  </div>
+                )}
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Preview page (profile picture + name)</label>
@@ -998,7 +1000,7 @@ export function NewsFeedPage() {
                       ))}
                     </select>
                     <p className="text-xs text-muted-foreground">
-                      Popcorn layout: article inset on the left, Facebook profile photo in the center badge, page name above it. Each assigned page uses its own picture when published.
+                      Popcorn layout: article photo in the left circle, Facebook profile photo in the center badge (auto per page).
                     </p>
                   </>
                 )}
@@ -1512,10 +1514,15 @@ export function NewsFeedPage() {
                     </button>
                   </div>
 
+                  <div className="rounded-lg border border-dashed border-primary/25 bg-primary/5 p-3 text-xs text-muted-foreground space-y-1">
+                    <p><strong className="text-foreground">Left circle</strong> — article inset photo (URL + inset crop sliders below).</p>
+                    <p><strong className="text-foreground">Center circle</strong> — Facebook page profile photo (set automatically from the assigned page).</p>
+                  </div>
+
                   <div className="rounded-lg border border-border p-3 space-y-3">
                     <p className="text-sm font-medium">Crop & fit to template</p>
                     <p className="text-xs text-muted-foreground">
-                      Adjust how the hero fills the 1080×880 top area and the circular inset. Save to apply to the graphic.
+                      Hero = large top photo. Inset sliders = left circle only.
                     </p>
                     {heroCropPreviewSrc ? (
                       <div className="space-y-1">
@@ -1548,15 +1555,15 @@ export function NewsFeedPage() {
                         <input type="range" min={1} max={3} step={0.1} value={editImageCrop.heroZoom} onChange={(e) => updateCrop({ heroZoom: Number(e.target.value) })} className="w-full accent-primary" />
                       </label>
                       <label className="space-y-1 text-xs">
-                        <span className="font-medium">Inset horizontal {editImageCrop.insetFocusX}%</span>
+                        <span className="font-medium">Left circle horizontal {editImageCrop.insetFocusX}%</span>
                         <input type="range" min={0} max={100} value={editImageCrop.insetFocusX} onChange={(e) => updateCrop({ insetFocusX: Number(e.target.value) })} className="w-full accent-primary" />
                       </label>
                       <label className="space-y-1 text-xs">
-                        <span className="font-medium">Inset vertical {editImageCrop.insetFocusY}%</span>
+                        <span className="font-medium">Left circle vertical {editImageCrop.insetFocusY}%</span>
                         <input type="range" min={0} max={100} value={editImageCrop.insetFocusY} onChange={(e) => updateCrop({ insetFocusY: Number(e.target.value) })} className="w-full accent-primary" />
                       </label>
                       <label className="space-y-1 text-xs sm:col-span-2">
-                        <span className="font-medium">Inset zoom {editImageCrop.insetZoom.toFixed(1)}×</span>
+                        <span className="font-medium">Left circle zoom {editImageCrop.insetZoom.toFixed(1)}×</span>
                         <input type="range" min={1} max={3} step={0.1} value={editImageCrop.insetZoom} onChange={(e) => updateCrop({ insetZoom: Number(e.target.value) })} className="w-full accent-primary" />
                       </label>
                     </div>
@@ -1570,7 +1577,7 @@ export function NewsFeedPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">Inset photo URL (optional)</label>
+                    <label className="text-sm font-medium">Left circle photo URL (article inset)</label>
                     <input
                       value={editInsetUrl}
                       onChange={(e) => setEditInsetUrl(e.target.value)}

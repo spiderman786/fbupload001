@@ -263,18 +263,8 @@ function buildBrandBadgeSvg(pageName: string, colors: NewsColors, fonts: NewsFon
   `
 }
 
-function buildPagePictureBrandSvg(pageName: string, colors: NewsColors, fonts: NewsFonts, barTop: number): string {
-  const label = pageName.trim()
-  if (!label) return buildBrandArcsSvg(colors, barTop)
-
-  const cx = CANVAS_W / 2
-  const labelY = barTop - BRAND_BADGE_R - 14
-  const fs = Math.max(11, (fonts.pageNameSize ?? 15) - 1)
-
-  return `
-    ${buildBrandArcsSvg(colors, barTop)}
-    <text x="${cx}" y="${labelY}" text-anchor="middle" font-family="${FONT_STACK}" font-size="${fs}" font-weight="900" fill="${colors.text}">${escapeXml(label.slice(0, 28).toUpperCase())}</text>
-  `
+function buildPagePictureBrandSvg(_pageName: string, colors: NewsColors, _fonts: NewsFonts, barTop: number): string {
+  return buildBrandArcsSvg(colors, barTop)
 }
 
 function buildBrandArcsSvg(colors: NewsColors, barTop: number): string {
