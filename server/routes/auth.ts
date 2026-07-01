@@ -19,11 +19,12 @@ import {
   createAgencyForUser,
   deleteUnverifiedSignup,
   getAgencySubdomainUrl,
+  joinAgencyAsMember,
   resolveAgency,
   setAgencyCookie,
   subdomainFromSignupName,
 } from '../utils/agency.js'
-import { isPublicSignupEnabled } from '../utils/signup.js'
+import { isPublicSignupEnabled, resolvePublicSignupAgency } from '../utils/signup.js'
 import { cookieDomain } from '../utils/appUrls.js'
 import { rateLimitByIp, rateLimitByIpAndBodyField } from '../utils/rateLimit.js'
 import {
@@ -90,7 +91,7 @@ authRouter.post('/signup', signupLimiter, async (req, res) => {
     return
   }
 
-  const { fullName, email, password, phoneCountryCode, phoneNumber, agencyName } = req.body ?? {}
+  const { fullName, email, password, phoneCountryCode, phoneNumber } = req.body ?? {}
 
   if (!fullName || !email || !password || !phoneNumber) {
     res.status(400).json({ error: 'All fields are required' })
@@ -127,13 +128,33 @@ authRouter.post('/signup', signupLimiter, async (req, res) => {
   `).run(id, email.toLowerCase(), fullName, hash, phoneCountryCode ?? '+92', phoneNumber, code, expires)
 
   const whatsapp = `${phoneCountryCode ?? '+92'}${phoneNumber}`.replace(/\s+/g, '')
-  const createdAgency = createAgencyForUser(
-    id,
-    (agencyName?.trim() || `${fullName}'s Agency`),
-    0,
-    subdomainFromSignupName(fullName, email),
-    whatsapp,
-  )
+
+  const hostAgency = resolvePublicSignupAgency()
+  let agencySubdomain: string | null = null
+  let agencyName: string | null = null
+
+  if (hostAgency) {
+    joinAgencyAsMember(id, hostAgency.id, 'admin')
+    agencySubdomain = hostAgency.subdomain
+    agencyName = hostAgency.name
+  } else if (process.env.NODE_ENV !== 'production') {
+    const createdAgency = createAgencyForUser(
+      id,
+      `${fullName}'s Agency`,
+      0,
+      subdomainFromSignupName(fullName, email),
+      whatsapp,
+    )
+    agencySubdomain = createdAgency.subdomain
+    agencyName = `${fullName}'s Agency`
+  } else {
+    db.prepare('DELETE FROM users WHERE id = ?').run(id)
+    res.status(503).json({
+      error:
+        'Signup is not configured. Set PUBLIC_SIGNUP_AGENCY_SUBDOMAIN or PUBLIC_SIGNUP_AGENCY_ID on the server, or PLATFORM_ADMIN_EMAILS for the owner agency.',
+    })
+    return
+  }
 
   try {
     await sendVerificationEmail(email, code)
@@ -146,8 +167,10 @@ authRouter.post('/signup', signupLimiter, async (req, res) => {
   res.status(201).json({
     message: 'Verification code sent to your Gmail',
     userId: id,
-    agencySubdomain: createdAgency.subdomain,
-    agencyUrl: getAgencySubdomainUrl(createdAgency.subdomain),
+    role: hostAgency ? 'admin' : 'owner',
+    agencyName,
+    agencySubdomain,
+    agencyUrl: agencySubdomain ? getAgencySubdomainUrl(agencySubdomain) : null,
   })
 })
 
@@ -198,12 +221,15 @@ authRouter.post('/verify', verifyLimiter, (req, res) => {
   `).run(user.id)
 
   const agency = resolveAgency(user.id)
-  if (agency) {
-    db.prepare('UPDATE agencies SET token_balance = token_balance + 50 WHERE id = ?').run(agency.id)
-    db.prepare(`
-      INSERT INTO token_transactions (id, user_id, agency_id, amount, type, note)
-      VALUES (?, ?, ?, 50, 'signup_bonus', 'Welcome bonus tokens')
-    `).run(uuid(), user.id, agency.id)
+  if (agency?.role === 'owner') {
+    const bonus = Number(process.env.PUBLIC_SIGNUP_BONUS_TOKENS ?? 50)
+    if (Number.isFinite(bonus) && bonus > 0) {
+      db.prepare('UPDATE agencies SET token_balance = token_balance + ? WHERE id = ?').run(bonus, agency.id)
+      db.prepare(`
+        INSERT INTO token_transactions (id, user_id, agency_id, amount, type, note)
+        VALUES (?, ?, ?, ?, 'signup_bonus', 'Welcome bonus tokens')
+      `).run(uuid(), user.id, agency.id, bonus)
+    }
   }
 
   const token = signToken(user.id)

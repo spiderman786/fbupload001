@@ -158,6 +158,25 @@ export function createAgencyForUser(
   return { agencyId, subdomain }
 }
 
+export function joinAgencyAsMember(
+  userId: string,
+  agencyId: string,
+  role: AgencyRole = 'admin',
+): { agencyId: string; subdomain: string | null; name: string } {
+  const agency = db
+    .prepare('SELECT id, name, subdomain FROM agencies WHERE id = ?')
+    .get(agencyId) as { id: string; name: string; subdomain: string | null } | undefined
+  if (!agency) throw new Error('Agency not found')
+
+  db.prepare('INSERT INTO agency_members (id, agency_id, user_id, role) VALUES (?, ?, ?, ?)').run(
+    uuid(),
+    agencyId,
+    userId,
+    role,
+  )
+  return { agencyId: agency.id, subdomain: agency.subdomain, name: agency.name }
+}
+
 /** Remove an unverified signup and any agencies they solely own (e.g. SMTP failure or re-signup). */
 export function deleteUnverifiedSignup(userId: string): void {
   const ownedAgencies = db
@@ -173,6 +192,7 @@ export function deleteUnverifiedSignup(userId: string): void {
       db.prepare('DELETE FROM token_transactions WHERE agency_id = ?').run(id)
       db.prepare('DELETE FROM agencies WHERE id = ?').run(id)
     }
+    db.prepare('DELETE FROM agency_members WHERE user_id = ?').run(userId)
     db.prepare('DELETE FROM users WHERE id = ? AND email_verified = 0').run(userId)
   })()
 }

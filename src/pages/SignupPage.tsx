@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ChevronDown } from 'lucide-react'
 import { AuthLayout } from '../components/AuthLayout'
@@ -12,16 +12,6 @@ const COUNTRY_CODES = [
   { code: '+971', label: 'UAE (+971)' },
 ]
 
-function previewSubdomain(fullName: string): string | null {
-  const slug = fullName
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .replace(/-{2,}/g, '-')
-    .slice(0, 40)
-  return slug || null
-}
-
 export function SignupPage() {
   const navigate = useNavigate()
   const [fullName, setFullName] = useState('')
@@ -29,11 +19,9 @@ export function SignupPage() {
   const [countryCode, setCountryCode] = useState('+92')
   const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
-  const [agencyName, setAgencyName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [signupOpen, setSignupOpen] = useState<boolean | null>(null)
-  const workspacePreview = useMemo(() => previewSubdomain(fullName), [fullName])
 
   useEffect(() => {
     api.auth.signupStatus().then((r) => setSignupOpen(r.enabled)).catch(() => setSignupOpen(false))
@@ -50,10 +38,13 @@ export function SignupPage() {
         password,
         phoneCountryCode: countryCode,
         phoneNumber: phone,
-        agencyName: agencyName.trim() || undefined,
       })
       navigate(`/verify-email?email=${encodeURIComponent(email)}`, {
-        state: { email, agencySubdomain: res.agencySubdomain, agencyUrl: res.agencyUrl ?? undefined },
+        state: {
+          email,
+          agencyName: res.agencyName ?? undefined,
+          agencyUrl: res.agencyUrl ?? undefined,
+        },
       })
     } catch (err) {
       setError((err as { error?: string }).error ?? 'Signup failed')
@@ -68,8 +59,7 @@ export function SignupPage() {
         <div className="mb-6">
           <h2 className="text-xl font-bold tracking-tight">Signup is closed</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            New agencies are created by invite only. If you were invited to a team, use the invite link from your email.
-            Otherwise ask an agency owner to send you a team invite.
+            New accounts are invite-only right now. Ask the agency owner for a team invite link.
           </p>
         </div>
         <Link
@@ -93,20 +83,11 @@ export function SignupPage() {
         <div className="space-y-2">
           <label htmlFor="full-name" className="text-sm font-medium">Full name</label>
           <input id="full-name" type="text" required placeholder="John Doe" value={fullName} onChange={(e) => setFullName(e.target.value)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm shadow-xs outline-none focus:border-primary focus:ring-[3px] focus:ring-primary/20" />
-          {workspacePreview && (
-            <p className="text-xs text-muted-foreground">
-              Your workspace:{' '}
-              <span className="font-medium text-foreground">
-                https://{workspacePreview}.fbuploadplus.com/agency
-              </span>
-            </p>
-          )}
         </div>
 
-        <div className="space-y-2">
-          <label htmlFor="agency-name" className="text-sm font-medium">Agency name</label>
-          <input id="agency-name" type="text" placeholder="My Media Agency" value={agencyName} onChange={(e) => setAgencyName(e.target.value)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm shadow-xs outline-none focus:border-primary focus:ring-[3px] focus:ring-primary/20" />
-          <p className="text-xs text-muted-foreground">Your team workspace — you join as <span className="font-medium text-foreground">Owner</span> with full automation access. Proxy pool and token crediting are owner-only; admins can request tokens via WhatsApp.</p>
+        <div className="rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
+          You join as <span className="font-medium text-foreground">Admin</span> on the FBupload Plus team.
+          The agency owner assigns tokens — request more via WhatsApp when you need them.
         </div>
 
         <div className="space-y-2">
@@ -126,7 +107,7 @@ export function SignupPage() {
             </div>
             <input id="phone" type="tel" required placeholder="3001234567" value={phone} onChange={(e) => setPhone(e.target.value)} className="h-10 min-w-0 flex-1 rounded-md border border-border bg-background px-3 text-sm shadow-xs outline-none focus:border-primary focus:ring-[3px] focus:ring-primary/20" />
           </div>
-          <p className="text-xs text-muted-foreground">Required WhatsApp number you will be requesting tokens from.</p>
+          <p className="text-xs text-muted-foreground">Your WhatsApp number for token requests.</p>
         </div>
 
         <div className="space-y-2">

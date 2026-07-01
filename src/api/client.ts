@@ -41,7 +41,14 @@ export const api = {
   auth: {
     session: () => request<SessionResponse>('/auth/session'),
     signup: (body: SignupBody) =>
-      request<{ message: string; userId: string; agencySubdomain?: string; agencyUrl?: string | null }>('/auth/signup', {
+      request<{
+        message: string
+        userId: string
+        role?: 'owner' | 'admin'
+        agencyName?: string | null
+        agencySubdomain?: string | null
+        agencyUrl?: string | null
+      }>('/auth/signup', {
         method: 'POST',
         body: JSON.stringify(body),
       }),

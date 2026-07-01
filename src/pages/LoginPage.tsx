@@ -102,7 +102,7 @@ export function LoginPage() {
       {signupOpen && (
         <p className="mt-6 border-t border-border pt-6 text-center text-sm text-muted-foreground">
           Don&apos;t have an account?{' '}
-          <Link to="/signup" className="font-semibold text-primary hover:underline">Sign up as agency</Link>
+          <Link to="/signup" className="font-semibold text-primary hover:underline">Create account</Link>
         </p>
       )}
     </AuthLayout>

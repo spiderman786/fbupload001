@@ -9,9 +9,10 @@ export function VerifyEmailPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { setSession } = useAuth()
-  const state = (location.state as { email?: string; agencySubdomain?: string; agencyUrl?: string } | null) ?? null
+  const state = (location.state as { email?: string; agencyName?: string; agencyUrl?: string } | null) ?? null
   const email = state?.email ?? searchParams.get('email') ?? ''
   const agencyUrl = state?.agencyUrl
+  const agencyName = state?.agencyName
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -60,9 +61,15 @@ export function VerifyEmailPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           Enter the 6-digit code sent to <strong>{email}</strong>
         </p>
-        {agencyUrl && (
+        {agencyName && (
           <p className="mt-2 text-xs text-muted-foreground">
-            Your agency workspace: <span className="font-medium text-foreground">{agencyUrl}</span>
+            Joining <span className="font-medium text-foreground">{agencyName}</span> as admin.
+            {agencyUrl ? (
+              <>
+                {' '}
+                Workspace: <span className="font-medium text-foreground">{agencyUrl}</span>
+              </>
+            ) : null}
           </p>
         )}
       </div>
