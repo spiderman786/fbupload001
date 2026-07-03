@@ -16,15 +16,15 @@ import {
   buildSessionPayload,
   assertAgencySubdomainMember,
   clearAgencyCookie,
+  createClientAgencyForSignup,
   createAgencyForUser,
   deleteUnverifiedSignup,
   getAgencySubdomainUrl,
-  joinAgencyAsMember,
   resolveAgency,
   setAgencyCookie,
   subdomainFromSignupName,
 } from '../utils/agency.js'
-import { isPublicSignupEnabled, resolvePublicSignupAgency } from '../utils/signup.js'
+import { isPublicSignupEnabled, resolvePublicSignupAgency, resolvePublicSignupOwner } from '../utils/signup.js'
 import { cookieDomain } from '../utils/appUrls.js'
 import { rateLimitByIp, rateLimitByIpAndBodyField } from '../utils/rateLimit.js'
 import {
@@ -45,9 +45,10 @@ const resetLimiter = rateLimitByIpAndBodyField('email', 15 * 60 * 1000, 15)
 
 authRouter.get('/signup-status', (_req, res) => {
   const agency = resolvePublicSignupAgency()
+  const owner = resolvePublicSignupOwner()
   res.json({
     enabled: isPublicSignupEnabled(),
-    agencyReady: Boolean(agency),
+    agencyReady: Boolean(owner),
     agencyName: agency?.name ?? null,
   })
 })
@@ -132,12 +133,20 @@ authRouter.post('/signup', signupLimiter, async (req, res) => {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, email.toLowerCase(), fullName, hash, phoneCountryCode ?? '+92', phoneNumber, code, expires)
 
-  const hostAgency = resolvePublicSignupAgency()
-  let signupAgency: { subdomain: string | null; name: string | null }
+  const signupOwner = resolvePublicSignupOwner()
+  let signupAgency: { subdomain: string | null; name: string | null; role: 'owner' | 'admin' }
 
-  if (hostAgency) {
-    joinAgencyAsMember(id, hostAgency.id, 'admin')
-    signupAgency = { subdomain: hostAgency.subdomain, name: hostAgency.name }
+  if (signupOwner) {
+    const whatsapp = `${phoneCountryCode ?? '+92'}${phoneNumber}`.replace(/\s+/g, '')
+    const clientAgency = createClientAgencyForSignup({
+      userId: id,
+      name: `${fullName}'s Agency`,
+      preferredSubdomain: subdomainFromSignupName(fullName, email),
+      whatsappNumber: whatsapp,
+      ownerUserId: signupOwner.userId,
+      parentAgencyId: signupOwner.agency.id,
+    })
+    signupAgency = { subdomain: clientAgency.subdomain, name: clientAgency.name, role: 'admin' }
   } else if (process.env.NODE_ENV !== 'production') {
     const whatsapp = `${phoneCountryCode ?? '+92'}${phoneNumber}`.replace(/\s+/g, '')
     const createdAgency = createAgencyForUser(
@@ -147,12 +156,12 @@ authRouter.post('/signup', signupLimiter, async (req, res) => {
       subdomainFromSignupName(fullName, email),
       whatsapp,
     )
-    signupAgency = { subdomain: createdAgency.subdomain, name: `${fullName}'s Agency` }
+    signupAgency = { subdomain: createdAgency.subdomain, name: `${fullName}'s Agency`, role: 'owner' }
   } else {
     db.prepare('DELETE FROM users WHERE id = ?').run(id)
     res.status(503).json({
       error:
-        'Signup is not configured. Set PUBLIC_SIGNUP_AGENCY_SUBDOMAIN or PUBLIC_SIGNUP_AGENCY_ID on the server, or PLATFORM_ADMIN_EMAILS for the owner agency.',
+        'Signup is not configured. Set PUBLIC_SIGNUP_OWNER_EMAIL, PUBLIC_SIGNUP_AGENCY_SUBDOMAIN, or PLATFORM_ADMIN_EMAILS for the master agency.',
     })
     return
   }
@@ -168,7 +177,7 @@ authRouter.post('/signup', signupLimiter, async (req, res) => {
   res.status(201).json({
     message: 'Verification code sent to your Gmail',
     userId: id,
-    role: hostAgency ? 'admin' : 'owner',
+    role: signupAgency.role,
     agencyName: signupAgency.name,
     agencySubdomain: signupAgency.subdomain,
     agencyUrl: signupAgency.subdomain ? getAgencySubdomainUrl(signupAgency.subdomain) : null,

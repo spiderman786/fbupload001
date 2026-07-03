@@ -158,6 +158,40 @@ export function createAgencyForUser(
   return { agencyId, subdomain }
 }
 
+export function createClientAgencyForSignup(input: {
+  userId: string
+  name: string
+  preferredSubdomain: string
+  whatsappNumber?: string | null
+  ownerUserId: string
+  parentAgencyId?: string | null
+}): { agencyId: string; subdomain: string; name: string } {
+  const agencyId = uuid()
+  const subdomain = ensureUniqueSubdomain(input.preferredSubdomain)
+
+  db.prepare(`
+    INSERT INTO agencies (id, name, token_balance, whatsapp_number, subdomain, parent_agency_id)
+    VALUES (?, ?, 0, ?, ?, ?)
+  `).run(agencyId, input.name, input.whatsappNumber ?? null, subdomain, input.parentAgencyId ?? null)
+
+  db.prepare('INSERT INTO agency_members (id, agency_id, user_id, role) VALUES (?, ?, ?, ?)').run(
+    uuid(),
+    agencyId,
+    input.ownerUserId,
+    'owner',
+  )
+  if (input.ownerUserId !== input.userId) {
+    db.prepare('INSERT INTO agency_members (id, agency_id, user_id, role) VALUES (?, ?, ?, ?)').run(
+      uuid(),
+      agencyId,
+      input.userId,
+      'admin',
+    )
+  }
+
+  return { agencyId, subdomain, name: input.name }
+}
+
 export function joinAgencyAsMember(
   userId: string,
   agencyId: string,
@@ -185,9 +219,16 @@ export function deleteUnverifiedSignup(userId: string): void {
       JOIN agency_members m ON m.agency_id = a.id AND m.user_id = ? AND m.role = 'owner'
     `)
     .all(userId) as { id: string }[]
+  const clientAgencies = db
+    .prepare(`
+      SELECT a.id FROM agencies a
+      JOIN agency_members m ON m.agency_id = a.id AND m.user_id = ? AND m.role = 'admin'
+      WHERE a.parent_agency_id IS NOT NULL
+    `)
+    .all(userId) as { id: string }[]
 
   db.transaction(() => {
-    for (const { id } of ownedAgencies) {
+    for (const { id } of [...ownedAgencies, ...clientAgencies]) {
       db.prepare('DELETE FROM agency_members WHERE agency_id = ?').run(id)
       db.prepare('DELETE FROM token_transactions WHERE agency_id = ?').run(id)
       db.prepare('DELETE FROM agencies WHERE id = ?').run(id)

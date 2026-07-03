@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ChevronDown } from 'lucide-react'
 import { AuthLayout } from '../components/AuthLayout'
@@ -12,6 +12,17 @@ const COUNTRY_CODES = [
   { code: '+971', label: 'UAE (+971)' },
 ]
 
+function previewSubdomain(fullName: string, email: string): string | null {
+  const source = fullName.trim() || email.split('@')[0] || ''
+  const slug = source
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-')
+    .slice(0, 40)
+  return slug || null
+}
+
 export function SignupPage() {
   const navigate = useNavigate()
   const [fullName, setFullName] = useState('')
@@ -22,6 +33,7 @@ export function SignupPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [signupOpen, setSignupOpen] = useState<boolean | null>(null)
+  const workspacePreview = useMemo(() => previewSubdomain(fullName, email), [fullName, email])
 
   useEffect(() => {
     api.auth.signupStatus().then((r) => setSignupOpen(r.enabled)).catch(() => setSignupOpen(false))
@@ -83,11 +95,19 @@ export function SignupPage() {
         <div className="space-y-2">
           <label htmlFor="full-name" className="text-sm font-medium">Full name</label>
           <input id="full-name" type="text" required placeholder="John Doe" value={fullName} onChange={(e) => setFullName(e.target.value)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm shadow-xs outline-none focus:border-primary focus:ring-[3px] focus:ring-primary/20" />
+          {workspacePreview && (
+            <p className="text-xs text-muted-foreground">
+              Your workspace:{' '}
+              <span className="font-medium text-foreground">
+                https://{workspacePreview}.fbuploadplus.com/agency
+              </span>
+            </p>
+          )}
         </div>
 
         <div className="rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
-          You join as <span className="font-medium text-foreground">Admin</span> on the FBupload Plus team.
-          The agency owner assigns tokens — request more via WhatsApp when you need them.
+          We create a separate client workspace for you. You join as{' '}
+          <span className="font-medium text-foreground">Admin</span>, and the platform owner assigns tokens after approval.
         </div>
 
         <div className="space-y-2">

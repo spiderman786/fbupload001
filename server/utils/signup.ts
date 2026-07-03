@@ -14,7 +14,13 @@ export type PublicSignupAgency = {
   subdomain: string | null
 }
 
-/** Agency new public signups join as admin. Env override, else platform admin owner's primary agency. */
+export type PublicSignupOwner = {
+  userId: string
+  email: string
+  agency: PublicSignupAgency
+}
+
+/** Master agency used as parent/owner source for public client signups. */
 export function resolvePublicSignupAgency(): PublicSignupAgency | null {
   const byId = process.env.PUBLIC_SIGNUP_AGENCY_ID?.trim()
   if (byId) {
@@ -66,6 +72,25 @@ export function resolvePublicSignupAgency(): PublicSignupAgency | null {
   }
 
   return resolvePublicSignupAgencyFallback()
+}
+
+export function resolvePublicSignupOwner(): PublicSignupOwner | null {
+  const byAgency = resolvePublicSignupAgency()
+  if (!byAgency) return null
+
+  const row = db
+    .prepare(`
+      SELECT u.id as userId, u.email
+      FROM users u
+      JOIN agency_members m ON m.user_id = u.id
+      WHERE m.agency_id = ? AND m.role = 'owner'
+      ORDER BY m.created_at ASC
+      LIMIT 1
+    `)
+    .get(byAgency.id) as { userId: string; email: string } | undefined
+
+  if (!row) return null
+  return { userId: row.userId, email: row.email, agency: byAgency }
 }
 
 function trimEnv(value: string | undefined): string | undefined {
@@ -121,5 +146,5 @@ function resolvePublicSignupAgencyFallback(): PublicSignupAgency | null {
 }
 
 export function isPublicSignupAgencyReady(): boolean {
-  return resolvePublicSignupAgency() !== null
+  return resolvePublicSignupOwner() !== null
 }
