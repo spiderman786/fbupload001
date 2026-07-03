@@ -653,6 +653,11 @@ export const api = {
         method: 'DELETE',
         body: JSON.stringify({ confirmName }),
       }),
+    bulkDeleteAgencies: (agencyIds: string[], confirmText: string) =>
+      request<{ deleted: string[]; failed: { id: string; name?: string; error: string }[] }>('/ops/agencies/bulk', {
+        method: 'DELETE',
+        body: JSON.stringify({ agencyIds, confirmText }),
+      }),
     pauseAllPages: (id: string) =>
       request<{ paused: number }>(`/ops/agencies/${id}/pause-pages`, { method: 'POST' }),
     setParentAgency: (id: string, parentAgencyId: string | null) =>

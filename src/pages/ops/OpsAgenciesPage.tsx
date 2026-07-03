@@ -24,6 +24,9 @@ export function OpsAgenciesPage() {
   const [error, setError] = useState('')
   const [creditId, setCreditId] = useState<string | null>(null)
   const [creditAmount, setCreditAmount] = useState('1000')
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
   const toast = useToast()
 
   const load = useCallback(async () => {
@@ -31,7 +34,9 @@ export function OpsAgenciesPage() {
     setError('')
     try {
       const r = await api.ops.agencies()
-      setAgencies(r.agencies as OpsAgency[])
+      const nextAgencies = r.agencies as OpsAgency[]
+      setAgencies(nextAgencies)
+      setSelectedIds((ids) => ids.filter((id) => nextAgencies.some((a) => a.id === id && a.name !== 'Platform Ops')))
     } catch (err) {
       setError(getApiError(err, 'Failed to load agencies'))
     } finally {
@@ -59,17 +64,105 @@ export function OpsAgenciesPage() {
     }
   }
 
+  function toggleSelected(agencyId: string) {
+    setSelectedIds((ids) => (ids.includes(agencyId) ? ids.filter((id) => id !== agencyId) : [...ids, agencyId]))
+  }
+
+  async function deleteSingleAgency(agency: OpsAgency) {
+    if (agency.name === 'Platform Ops') {
+      toast.error('Platform Ops cannot be deleted')
+      return
+    }
+
+    const confirmName = window.prompt(`Type "${agency.name}" to permanently delete this agency.`)
+    if (confirmName === null) return
+    if (confirmName.trim() !== agency.name) {
+      toast.error('Agency name confirmation did not match')
+      return
+    }
+
+    setDeletingId(agency.id)
+    try {
+      await api.ops.deleteAgency(agency.id, confirmName.trim())
+      toast.success(`Deleted ${agency.name}`)
+      setSelectedIds((ids) => ids.filter((id) => id !== agency.id))
+      await load()
+    } catch (err) {
+      toast.error(getApiError(err, 'Delete failed'))
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  async function deleteSelectedAgencies() {
+    const selected = agencies.filter((a) => selectedIds.includes(a.id) && a.name !== 'Platform Ops')
+    if (!selected.length) {
+      toast.error('Select at least one deletable agency')
+      return
+    }
+
+    const confirmText = window.prompt(
+      `This will permanently delete ${selected.length} agenc${selected.length === 1 ? 'y' : 'ies'}.\nType DELETE SELECTED AGENCIES to confirm.`,
+    )
+    if (confirmText === null) return
+    if (confirmText.trim() !== 'DELETE SELECTED AGENCIES') {
+      toast.error('Bulk delete confirmation did not match')
+      return
+    }
+
+    setBulkDeleting(true)
+    try {
+      const result = await api.ops.bulkDeleteAgencies(selected.map((a) => a.id), confirmText.trim())
+      if (result.deleted.length) {
+        toast.success(`Deleted ${result.deleted.length} agenc${result.deleted.length === 1 ? 'y' : 'ies'}`)
+      }
+      if (result.failed.length) {
+        toast.error(`${result.failed.length} failed to delete. Check child agencies or protected records.`)
+      }
+      setSelectedIds([])
+      await load()
+    } catch (err) {
+      toast.error(getApiError(err, 'Bulk delete failed'))
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
+
   if (loading) return <p className="text-slate-400">Loading agencies…</p>
   if (error) return <p className="text-red-400">{error}</p>
 
+  const selectableAgencies = agencies.filter((a) => a.name !== 'Platform Ops')
+  const allSelected = selectableAgencies.length > 0 && selectableAgencies.every((a) => selectedIds.includes(a.id))
+
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Agencies</h1>
-      <p className="text-sm text-slate-400">Health scores, token credits, reseller hierarchy (v3.1)</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Agencies</h1>
+          <p className="text-sm text-slate-400">Health scores, token credits, reseller hierarchy (v3.1)</p>
+        </div>
+        <button
+          type="button"
+          onClick={deleteSelectedAgencies}
+          disabled={!selectedIds.length || bulkDeleting}
+          className="rounded-lg border border-red-500/50 px-3 py-2 text-sm text-red-300 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {bulkDeleting ? 'Deleting…' : `Delete selected${selectedIds.length ? ` (${selectedIds.length})` : ''}`}
+        </button>
+      </div>
       <div className="overflow-x-auto rounded-xl border border-slate-800">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-slate-800 bg-slate-900 text-slate-400">
             <tr>
+              <th className="px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={(e) => setSelectedIds(e.target.checked ? selectableAgencies.map((a) => a.id) : [])}
+                  aria-label="Select all agencies"
+                  className="h-4 w-4 rounded border-slate-600 bg-slate-950"
+                />
+              </th>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Health</th>
               <th className="px-4 py-3">Owner</th>
@@ -82,6 +175,16 @@ export function OpsAgenciesPage() {
           <tbody>
             {agencies.map((a) => (
               <tr key={a.id} className="border-b border-slate-800/60 hover:bg-slate-900/50">
+                <td className="px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(a.id)}
+                    onChange={() => toggleSelected(a.id)}
+                    disabled={a.name === 'Platform Ops'}
+                    aria-label={`Select ${a.name}`}
+                    className="h-4 w-4 rounded border-slate-600 bg-slate-950 disabled:opacity-30"
+                  />
+                </td>
                 <td className="px-4 py-3">
                   <Link to={`/ops/agencies/${a.id}`} className="font-medium text-emerald-400 hover:underline">
                     {a.name}
@@ -99,8 +202,9 @@ export function OpsAgenciesPage() {
                 <td className="px-4 py-3">{a.page_count ?? 0}</td>
                 <td className="px-4 py-3">{a.token_balance?.toLocaleString() ?? 0}</td>
                 <td className="px-4 py-3">
-                  {creditId === a.id ? (
-                    <div className="flex gap-1">
+                  <div className="flex flex-wrap gap-1">
+                    {creditId === a.id ? (
+                      <>
                       <input
                         type="number"
                         value={creditAmount}
@@ -110,16 +214,25 @@ export function OpsAgenciesPage() {
                       <button type="button" onClick={() => quickCredit(a.id)} className="rounded bg-emerald-600 px-2 py-1 text-xs">
                         Add
                       </button>
-                    </div>
-                  ) : (
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setCreditId(a.id)}
+                        className="rounded border border-slate-600 px-2 py-1 text-xs hover:bg-slate-800"
+                      >
+                        + Tokens
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => setCreditId(a.id)}
-                      className="rounded border border-slate-600 px-2 py-1 text-xs hover:bg-slate-800"
+                      onClick={() => deleteSingleAgency(a)}
+                      disabled={a.name === 'Platform Ops' || deletingId === a.id}
+                      className="rounded border border-red-500/50 px-2 py-1 text-xs text-red-300 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      + Tokens
+                      {deletingId === a.id ? 'Deleting…' : 'Delete'}
                     </button>
-                  )}
+                  </div>
                 </td>
               </tr>
             ))}

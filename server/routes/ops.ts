@@ -201,6 +201,42 @@ opsRouter.post('/agencies/:id/credit-tokens', ...guard, (req: PlatformAdminReque
   res.json({ tokenBalance: agency.token_balance + amount })
 })
 
+opsRouter.delete('/agencies/bulk', ...guard, (req: PlatformAdminRequest, res) => {
+  const agencyIds = req.body?.agencyIds as string[] | undefined
+  const confirmText = String(req.body?.confirmText ?? '').trim()
+  if (!Array.isArray(agencyIds) || !agencyIds.length) {
+    res.status(400).json({ error: 'agencyIds required' })
+    return
+  }
+  if (confirmText !== 'DELETE SELECTED AGENCIES') {
+    res.status(400).json({ error: 'Confirmation text must be DELETE SELECTED AGENCIES' })
+    return
+  }
+
+  const deleted: string[] = []
+  const failed: { id: string; name?: string; error: string }[] = []
+
+  for (const agencyId of agencyIds.slice(0, 50)) {
+    const agency = db.prepare('SELECT id, name FROM agencies WHERE id = ?').get(agencyId) as
+      | { id: string; name: string }
+      | undefined
+    if (!agency) {
+      failed.push({ id: agencyId, error: 'Agency not found' })
+      continue
+    }
+
+    try {
+      deleteAgency(agency.id, agency.name)
+      writeOpsAudit(req.user!.id, 'delete_agency', 'agency', agency.id, { bulk: true, confirmText })
+      deleted.push(agency.id)
+    } catch (err) {
+      failed.push({ id: agency.id, name: agency.name, error: err instanceof Error ? err.message : 'Delete failed' })
+    }
+  }
+
+  res.json({ deleted, failed })
+})
+
 opsRouter.delete('/agencies/:id', ...guard, (req: PlatformAdminRequest, res) => {
   const confirmName = String(req.body?.confirmName ?? '').trim()
   if (!confirmName) {
