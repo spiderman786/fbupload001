@@ -24,7 +24,7 @@ import {
   setAgencyCookie,
   subdomainFromSignupName,
 } from '../utils/agency.js'
-import { isPublicSignupEnabled, isPublicSignupAgencyReady, resolvePublicSignupAgency } from '../utils/signup.js'
+import { isPublicSignupEnabled, resolvePublicSignupAgency } from '../utils/signup.js'
 import { cookieDomain } from '../utils/appUrls.js'
 import { rateLimitByIp, rateLimitByIpAndBodyField } from '../utils/rateLimit.js'
 import {
@@ -47,7 +47,7 @@ authRouter.get('/signup-status', (_req, res) => {
   const agency = resolvePublicSignupAgency()
   res.json({
     enabled: isPublicSignupEnabled(),
-    agencyReady: isPublicSignupAgencyReady(),
+    agencyReady: Boolean(agency),
     agencyName: agency?.name ?? null,
   })
 })
@@ -132,17 +132,14 @@ authRouter.post('/signup', signupLimiter, async (req, res) => {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, email.toLowerCase(), fullName, hash, phoneCountryCode ?? '+92', phoneNumber, code, expires)
 
-  const whatsapp = `${phoneCountryCode ?? '+92'}${phoneNumber}`.replace(/\s+/g, '')
-
   const hostAgency = resolvePublicSignupAgency()
-  let agencySubdomain: string | null = null
-  let agencyName: string | null = null
+  let signupAgency: { subdomain: string | null; name: string | null }
 
   if (hostAgency) {
     joinAgencyAsMember(id, hostAgency.id, 'admin')
-    agencySubdomain = hostAgency.subdomain
-    agencyName = hostAgency.name
+    signupAgency = { subdomain: hostAgency.subdomain, name: hostAgency.name }
   } else if (process.env.NODE_ENV !== 'production') {
+    const whatsapp = `${phoneCountryCode ?? '+92'}${phoneNumber}`.replace(/\s+/g, '')
     const createdAgency = createAgencyForUser(
       id,
       `${fullName}'s Agency`,
@@ -150,8 +147,7 @@ authRouter.post('/signup', signupLimiter, async (req, res) => {
       subdomainFromSignupName(fullName, email),
       whatsapp,
     )
-    agencySubdomain = createdAgency.subdomain
-    agencyName = `${fullName}'s Agency`
+    signupAgency = { subdomain: createdAgency.subdomain, name: `${fullName}'s Agency` }
   } else {
     db.prepare('DELETE FROM users WHERE id = ?').run(id)
     res.status(503).json({
@@ -173,9 +169,9 @@ authRouter.post('/signup', signupLimiter, async (req, res) => {
     message: 'Verification code sent to your Gmail',
     userId: id,
     role: hostAgency ? 'admin' : 'owner',
-    agencyName,
-    agencySubdomain,
-    agencyUrl: agencySubdomain ? getAgencySubdomainUrl(agencySubdomain) : null,
+    agencyName: signupAgency.name,
+    agencySubdomain: signupAgency.subdomain,
+    agencyUrl: signupAgency.subdomain ? getAgencySubdomainUrl(signupAgency.subdomain) : null,
   })
 })
 

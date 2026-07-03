@@ -32,6 +32,22 @@ export function resolvePublicSignupAgency(): PublicSignupAgency | null {
     if (row) return row
   }
 
+  const ownerEmail = trimEnv(process.env.PUBLIC_SIGNUP_OWNER_EMAIL)?.toLowerCase()
+  if (ownerEmail) {
+    const row = db
+      .prepare(`
+        SELECT a.id, a.name, a.subdomain
+        FROM agencies a
+        JOIN agency_members m ON m.agency_id = a.id AND m.role = 'owner'
+        JOIN users u ON u.id = m.user_id
+        WHERE lower(u.email) = ?
+        ORDER BY a.created_at ASC
+        LIMIT 1
+      `)
+      .get(ownerEmail) as PublicSignupAgency | undefined
+    if (row) return row
+  }
+
   const adminEmails = getPlatformAdminEmailsFromEnv()
   if (adminEmails.length) {
     const placeholders = adminEmails.map(() => '?').join(', ')
@@ -46,22 +62,6 @@ export function resolvePublicSignupAgency(): PublicSignupAgency | null {
         LIMIT 1
       `)
       .get(...adminEmails) as PublicSignupAgency | undefined
-    if (row) return row
-  }
-
-  const ownerEmail = trimEnv(process.env.PUBLIC_SIGNUP_OWNER_EMAIL)?.toLowerCase()
-  if (ownerEmail) {
-    const row = db
-      .prepare(`
-        SELECT a.id, a.name, a.subdomain
-        FROM agencies a
-        JOIN agency_members m ON m.agency_id = a.id AND m.role = 'owner'
-        JOIN users u ON u.id = m.user_id
-        WHERE lower(u.email) = ?
-        ORDER BY a.created_at ASC
-        LIMIT 1
-      `)
-      .get(ownerEmail) as PublicSignupAgency | undefined
     if (row) return row
   }
 
@@ -84,20 +84,14 @@ function resolvePublicSignupAgencyFallback(): PublicSignupAgency | null {
       LIMIT 1
     `)
     .get() as PublicSignupAgency | undefined
-  if (branded) {
-    console.warn('[signup] Using branded agency fallback:', branded.id, branded.name)
-    return branded
-  }
+  if (branded) return branded
 
   const { count } = db.prepare('SELECT COUNT(*) as count FROM agencies').get() as { count: number }
   if (count === 1) {
     const sole = db
       .prepare('SELECT id, name, subdomain FROM agencies ORDER BY created_at ASC LIMIT 1')
       .get() as PublicSignupAgency | undefined
-    if (sole) {
-      console.warn('[signup] Using sole agency fallback:', sole.id, sole.name)
-      return sole
-    }
+    if (sole) return sole
   }
 
   const primary = db
@@ -110,10 +104,7 @@ function resolvePublicSignupAgencyFallback(): PublicSignupAgency | null {
       LIMIT 1
     `)
     .get() as PublicSignupAgency | undefined
-  if (primary) {
-    console.warn('[signup] Using subdomain agency fallback:', primary.id, primary.name)
-    return primary
-  }
+  if (primary) return primary
 
   const oldest = db
     .prepare(`
@@ -124,10 +115,7 @@ function resolvePublicSignupAgencyFallback(): PublicSignupAgency | null {
       LIMIT 1
     `)
     .get() as PublicSignupAgency | undefined
-  if (oldest) {
-    console.warn('[signup] Using primary owner agency fallback:', oldest.id, oldest.name)
-    return oldest
-  }
+  if (oldest) return oldest
 
   return null
 }
