@@ -139,7 +139,7 @@ export function OpsGate({ children }: { children: React.ReactNode }) {
           <p className="mt-2 text-sm text-slate-400">
             Your dashboard login works, but <strong>/ops</strong> is separate. In production, only emails listed in{' '}
             <code className="rounded bg-slate-800 px-1 py-0.5 text-xs">PLATFORM_ADMIN_EMAILS</code> on Railway can
-            open Ops. Being an agency owner is not enough unless that exact Gmail is on the allowlist.
+            open Ops. Being an agency owner is not enough unless that exact email is on the allowlist.
           </p>
           <p className="mt-3 text-xs text-slate-500">
             Signed in as <strong className="text-slate-300">{signedInAs ?? user.email}</strong>
@@ -147,7 +147,7 @@ export function OpsGate({ children }: { children: React.ReactNode }) {
           </p>
           <ul className="mt-4 space-y-2 text-left text-xs text-slate-400">
             <li>1. Railway → Variables → set <code className="text-slate-300">PLATFORM_ADMIN_EMAILS</code> to this exact email</li>
-            <li>2. Do not use placeholder <code className="text-slate-300">admin@fbuploadplus.com</code> or <code className="text-slate-300">you@gmail.com</code></li>
+            <li>2. Use your real admin email, for example <code className="text-slate-300">admin@fbuploadplus.com</code></li>
             <li>3. Redeploy, sign out, sign in again, then open <code className="text-slate-300">/ops</code></li>
           </ul>
           <Link to="/dashboard" className="mt-5 inline-block rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500">

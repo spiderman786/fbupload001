@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs'
 import { v4 as uuid } from 'uuid'
 import { db } from '../db.js'
 
-const PLACEHOLDER_ADMIN_EMAILS = new Set(['admin@fbuploadplus.com', 'admin@example.com'])
+const PLACEHOLDER_ADMIN_EMAILS = new Set(['admin@example.com', 'you@gmail.com'])
 
 export function getPlatformAdminEmailsFromEnv(): string[] {
   const emails = (process.env.PLATFORM_ADMIN_EMAILS ?? '')
