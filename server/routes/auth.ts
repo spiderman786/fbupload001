@@ -24,7 +24,7 @@ import {
   setAgencyCookie,
   subdomainFromSignupName,
 } from '../utils/agency.js'
-import { isPublicSignupEnabled, resolvePublicSignupAgency } from '../utils/signup.js'
+import { isPublicSignupEnabled, isPublicSignupAgencyReady, resolvePublicSignupAgency } from '../utils/signup.js'
 import { cookieDomain } from '../utils/appUrls.js'
 import { rateLimitByIp, rateLimitByIpAndBodyField } from '../utils/rateLimit.js'
 import {
@@ -44,7 +44,12 @@ const forgotLimiter = rateLimitByIpAndBodyField('email', 60 * 60 * 1000, 8)
 const resetLimiter = rateLimitByIpAndBodyField('email', 15 * 60 * 1000, 15)
 
 authRouter.get('/signup-status', (_req, res) => {
-  res.json({ enabled: isPublicSignupEnabled() })
+  const agency = resolvePublicSignupAgency()
+  res.json({
+    enabled: isPublicSignupEnabled(),
+    agencyReady: isPublicSignupAgencyReady(),
+    agencyName: agency?.name ?? null,
+  })
 })
 
 function getRequestSubdomainHost(req: { headers: Record<string, unknown> & { host?: string } }): string | null {

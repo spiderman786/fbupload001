@@ -33,20 +33,68 @@ export function resolvePublicSignupAgency(): PublicSignupAgency | null {
   }
 
   const adminEmails = getPlatformAdminEmailsFromEnv()
-  if (!adminEmails.length) return null
+  if (adminEmails.length) {
+    const placeholders = adminEmails.map(() => '?').join(', ')
+    const row = db
+      .prepare(`
+        SELECT a.id, a.name, a.subdomain
+        FROM agencies a
+        JOIN agency_members m ON m.agency_id = a.id AND m.role = 'owner'
+        JOIN users u ON u.id = m.user_id
+        WHERE lower(u.email) IN (${placeholders})
+        ORDER BY a.created_at ASC
+        LIMIT 1
+      `)
+      .get(...adminEmails) as PublicSignupAgency | undefined
+    if (row) return row
+  }
 
-  const placeholders = adminEmails.map(() => '?').join(', ')
-  const row = db
+  return resolvePublicSignupAgencyFallback()
+}
+
+/** Last-resort when env/platform admin lookup is missing on Railway. */
+function resolvePublicSignupAgencyFallback(): PublicSignupAgency | null {
+  const branded = db
+    .prepare(`
+      SELECT id, name, subdomain FROM agencies
+      WHERE lower(name) LIKE '%fbupload%'
+      ORDER BY created_at ASC
+      LIMIT 1
+    `)
+    .get() as PublicSignupAgency | undefined
+  if (branded) {
+    console.warn('[signup] Using branded agency fallback:', branded.id, branded.name)
+    return branded
+  }
+
+  const { count } = db.prepare('SELECT COUNT(*) as count FROM agencies').get() as { count: number }
+  if (count === 1) {
+    const sole = db
+      .prepare('SELECT id, name, subdomain FROM agencies ORDER BY created_at ASC LIMIT 1')
+      .get() as PublicSignupAgency | undefined
+    if (sole) {
+      console.warn('[signup] Using sole agency fallback:', sole.id, sole.name)
+      return sole
+    }
+  }
+
+  const primary = db
     .prepare(`
       SELECT a.id, a.name, a.subdomain
       FROM agencies a
       JOIN agency_members m ON m.agency_id = a.id AND m.role = 'owner'
-      JOIN users u ON u.id = m.user_id
-      WHERE lower(u.email) IN (${placeholders})
       ORDER BY a.created_at ASC
       LIMIT 1
     `)
-    .get(...adminEmails) as PublicSignupAgency | undefined
+    .get() as PublicSignupAgency | undefined
+  if (primary) {
+    console.warn('[signup] Using primary owner agency fallback:', primary.id, primary.name)
+    return primary
+  }
 
-  return row ?? null
+  return null
+}
+
+export function isPublicSignupAgencyReady(): boolean {
+  return resolvePublicSignupAgency() !== null
 }

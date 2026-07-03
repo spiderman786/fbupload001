@@ -24,7 +24,7 @@ import { opsRouter } from './routes/ops.js'
 import { newsRouter } from './routes/news.js'
 import { seedPlatformAdmin, logPlatformAdminMode, isPlatformAdminStrictMode } from './services/platformAdmin.js'
 import { getSmtpConfigStatus, testSmtpConnection } from './services/email.js'
-import { isPublicSignupEnabled } from './utils/signup.js'
+import { isPublicSignupEnabled, isPublicSignupAgencyReady } from './utils/signup.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const dataDir = path.join(__dirname, '..', 'data')
@@ -67,6 +67,7 @@ app.get('/api/health', (_req, res) => {
     timestamp: new Date().toISOString(),
     r2: isR2Enabled(),
     publicSignupEnabled: isPublicSignupEnabled(),
+    publicSignupAgencyReady: isPublicSignupAgencyReady(),
     opsAllowlistConfigured: isPlatformAdminStrictMode(),
   })
 })
