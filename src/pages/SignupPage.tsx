@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { ChevronDown } from 'lucide-react'
 import { AuthLayout } from '../components/AuthLayout'
 import { api } from '../api/client'
+import { buildAgencyWorkspaceUrl } from '../lib/agencyWorkspaceUrl'
 
 const COUNTRY_CODES = [
   { code: '+92', label: 'Pakistan (+92)' },
@@ -34,6 +35,10 @@ export function SignupPage() {
   const [loading, setLoading] = useState(false)
   const [signupOpen, setSignupOpen] = useState<boolean | null>(null)
   const workspacePreview = useMemo(() => previewSubdomain(fullName, email), [fullName, email])
+  const workspacePreviewUrl = useMemo(
+    () => (workspacePreview ? buildAgencyWorkspaceUrl(workspacePreview, '/agency') : null),
+    [workspacePreview],
+  )
 
   useEffect(() => {
     api.auth.signupStatus().then((r) => setSignupOpen(r.enabled)).catch(() => setSignupOpen(false))
@@ -99,7 +104,7 @@ export function SignupPage() {
             <p className="text-xs text-muted-foreground">
               Your workspace:{' '}
               <span className="font-medium text-foreground">
-                https://{workspacePreview}.fbuploadplus.com/agency
+                {workspacePreviewUrl ?? `https://${workspacePreview}.fbuploadplus.com/agency`}
               </span>
             </p>
           )}

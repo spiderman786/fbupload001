@@ -4,6 +4,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { AuthLayout } from '../components/AuthLayout'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../api/client'
+import { buildAgencyWorkspaceUrl } from '../lib/agencyWorkspaceUrl'
 
 export function LoginPage() {
   const { login } = useAuth()
@@ -13,6 +14,10 @@ export function LoginPage() {
     (location.state as { from?: string; redirect?: string; message?: string })?.redirect ??
     (location.state as { from?: string; message?: string })?.from ??
     '/agency'
+  const hasExplicitRedirect = Boolean(
+    (location.state as { from?: string; redirect?: string; message?: string } | null)?.redirect ??
+      (location.state as { from?: string; message?: string } | null)?.from,
+  )
   const successMessage = (location.state as { message?: string })?.message ?? ''
 
   const [email, setEmail] = useState('')
@@ -31,7 +36,21 @@ export function LoginPage() {
     setError('')
     try {
       const session = await login(email, password)
-      navigate(session.platformAdmin ? '/ops' : from)
+      if (session.platformAdmin && !hasExplicitRedirect) {
+        navigate('/ops')
+        return
+      }
+
+      if (!hasExplicitRedirect && !session.platformAdmin) {
+        const workspaceUrl = buildAgencyWorkspaceUrl(session.agency?.subdomain, '/agency')
+        if (workspaceUrl) {
+          if (workspaceUrl.startsWith('/')) navigate(workspaceUrl)
+          else window.location.assign(workspaceUrl)
+          return
+        }
+      }
+
+      navigate(from)
     } catch (err) {
       const data = err as { error?: string; needsVerification?: boolean; email?: string }
       if (data.needsVerification && data.email) {

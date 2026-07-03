@@ -1,12 +1,12 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { AuthLayout } from '../components/AuthLayout'
 import { api } from '../api/client'
 import { useAuth } from '../context/AuthContext'
+import { goToAgencyWorkspace } from '../lib/agencyWorkspaceUrl'
 
 export function VerifyEmailPage() {
   const location = useLocation()
-  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { setSession } = useAuth()
   const state = (location.state as { email?: string; agencyName?: string; agencyUrl?: string } | null) ?? null
@@ -25,7 +25,7 @@ export function VerifyEmailPage() {
     try {
       const session = await api.auth.verify({ email, code })
       setSession(session)
-      navigate('/agency')
+      goToAgencyWorkspace(session.agency?.subdomain, '/agency')
     } catch (err) {
       setError((err as { error?: string }).error ?? 'Verification failed')
     } finally {
