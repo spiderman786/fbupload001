@@ -61,6 +61,10 @@ export function VerifyEmailPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           Enter the 6-digit code sent to <strong>{email}</strong>
         </p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Check your Gmail <strong>Inbox</strong> and <strong>Spam</strong> folders. Sender:{' '}
+          <span className="font-medium text-foreground">mailer@fbuploadplus.com</span>
+        </p>
         {agencyName && (
           <p className="mt-2 text-xs text-muted-foreground">
             Joining <span className="font-medium text-foreground">{agencyName}</span> as admin.

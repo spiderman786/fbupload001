@@ -62,12 +62,15 @@ app.use(express.json())
 app.use(cookieParser())
 
 app.get('/api/health', (_req, res) => {
+  const smtp = getSmtpConfigStatus()
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     r2: isR2Enabled(),
     publicSignupEnabled: isPublicSignupEnabled(),
     publicSignupAgencyReady: isPublicSignupAgencyReady(),
+    smtpConfigured: smtp.configured,
+    smtpIssues: smtp.issues.length ? smtp.issues : undefined,
     opsAllowlistConfigured: isPlatformAdminStrictMode(),
   })
 })

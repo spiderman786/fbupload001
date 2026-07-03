@@ -409,6 +409,8 @@ export async function sendVerificationEmail(email: string, code: string): Promis
   const subject = 'Your FBupload Plus verification code'
   const body = `Your verification code is: ${code}\n\nThis code will expire in 15 minutes.`
   await sendViaSmtp(smtp, email, subject, body)
+  const masked = email.replace(/(^.).+(@.+$)/, '$1***$2')
+  console.log(`[email] Verification sent to ${masked} via ${smtp.host}:${smtp.port}`)
 }
 
 export async function sendPasswordResetEmail(email: string, code: string): Promise<void> {
