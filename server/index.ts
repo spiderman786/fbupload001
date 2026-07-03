@@ -24,6 +24,7 @@ import { opsRouter } from './routes/ops.js'
 import { newsRouter } from './routes/news.js'
 import { seedPlatformAdmin, logPlatformAdminMode, isPlatformAdminStrictMode } from './services/platformAdmin.js'
 import { getSmtpConfigStatus, testSmtpConnection } from './services/email.js'
+import { isGoogleOAuthConfigured } from './services/googleOAuth.js'
 import { isPublicSignupEnabled, isPublicSignupAgencyReady } from './utils/signup.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -69,6 +70,7 @@ app.get('/api/health', (_req, res) => {
     r2: isR2Enabled(),
     publicSignupEnabled: isPublicSignupEnabled(),
     publicSignupAgencyReady: isPublicSignupAgencyReady(),
+    googleOAuthConfigured: isGoogleOAuthConfigured(),
     smtpConfigured: smtp.configured,
     smtpIssues: smtp.issues.length ? smtp.issues : undefined,
     opsAllowlistConfigured: isPlatformAdminStrictMode(),

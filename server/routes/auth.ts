@@ -1,7 +1,8 @@
-import { Router } from 'express'
+import { Router, type Response } from 'express'
+import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
 import { v4 as uuid } from 'uuid'
-import { db } from '../db.js'
+import { db, type UserRow } from '../db.js'
 import {
   authMiddleware,
   COOKIE_OPTIONS,
@@ -12,6 +13,7 @@ import {
 } from '../middleware/auth.js'
 import { generateVerificationCode, isGmail } from '../utils/helpers.js'
 import { sendVerificationEmail, sendPasswordResetEmail, userFacingEmailError } from '../services/email.js'
+import { buildGoogleConsentUrl, fetchGoogleProfile, isGoogleOAuthConfigured, type GoogleProfile } from '../services/googleOAuth.js'
 import {
   buildSessionPayload,
   assertAgencySubdomainMember,
@@ -25,7 +27,7 @@ import {
   subdomainFromSignupName,
 } from '../utils/agency.js'
 import { isPublicSignupEnabled, resolvePublicSignupAgency, resolvePublicSignupOwner } from '../utils/signup.js'
-import { cookieDomain } from '../utils/appUrls.js'
+import { cookieDomain, publicAppBaseUrl } from '../utils/appUrls.js'
 import { rateLimitByIp, rateLimitByIpAndBodyField } from '../utils/rateLimit.js'
 import {
   assertVerificationAttemptsAllowed,
@@ -42,6 +44,7 @@ const verifyLimiter = rateLimitByIpAndBodyField('email', 15 * 60 * 1000, 20)
 const resendLimiter = rateLimitByIpAndBodyField('email', 60 * 60 * 1000, 5)
 const forgotLimiter = rateLimitByIpAndBodyField('email', 60 * 60 * 1000, 8)
 const resetLimiter = rateLimitByIpAndBodyField('email', 15 * 60 * 1000, 15)
+const googleOAuthLimiter = rateLimitByIp(15 * 60 * 1000, 30)
 
 authRouter.get('/signup-status', (_req, res) => {
   const agency = resolvePublicSignupAgency()
@@ -76,6 +79,146 @@ function getRequestSubdomainHost(req: { headers: Record<string, unknown> & { hos
   const sub = parts[0]!
   return ['www', 'app'].includes(sub) ? null : sub
 }
+
+function redirectWithAuthError(res: Response, message: string) {
+  const url = new URL('/login', publicAppBaseUrl())
+  url.searchParams.set('error', message)
+  res.redirect(url.toString())
+}
+
+function createGoogleState(mode: string): string {
+  const state = crypto.randomBytes(24).toString('hex')
+  const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString()
+  db.prepare("DELETE FROM google_oauth_states WHERE datetime(expires_at) < datetime('now')").run()
+  db.prepare('INSERT INTO google_oauth_states (state, mode, expires_at) VALUES (?, ?, ?)').run(state, mode, expires)
+  return state
+}
+
+function consumeGoogleState(state: string): { mode: string } | null {
+  const row = db.prepare('SELECT mode, expires_at FROM google_oauth_states WHERE state = ?').get(state) as
+    | { mode: string; expires_at: string }
+    | undefined
+  db.prepare('DELETE FROM google_oauth_states WHERE state = ?').run(state)
+  if (!row || new Date(row.expires_at) < new Date()) return null
+  return { mode: row.mode }
+}
+
+function googleDisplayName(profile: GoogleProfile): string {
+  return profile.name?.trim() || profile.email.split('@')[0] || 'Google User'
+}
+
+async function findOrCreateGoogleUser(profile: GoogleProfile): Promise<string> {
+  const email = profile.email.trim().toLowerCase()
+  if (!profile.email_verified) throw new Error('Google email is not verified')
+  if (!isGmail(email)) throw new Error('Only @gmail.com addresses are accepted')
+
+  const existing = db
+    .prepare(
+      `
+        SELECT * FROM users
+        WHERE google_id = ? OR email = ?
+        ORDER BY CASE WHEN google_id = ? THEN 0 ELSE 1 END
+        LIMIT 1
+      `,
+    )
+    .get(profile.sub, email, profile.sub) as UserRow | undefined
+
+  if (existing) {
+    db.prepare(`
+      UPDATE users
+      SET google_id = COALESCE(google_id, ?),
+          auth_provider = CASE WHEN auth_provider = 'password' THEN 'google' ELSE auth_provider END,
+          email_verified = 1,
+          verification_code = NULL,
+          verification_expires = NULL
+      WHERE id = ?
+    `).run(profile.sub, existing.id)
+    return existing.id
+  }
+
+  if (!isPublicSignupEnabled()) {
+    throw new Error('Public signup is closed')
+  }
+
+  const id = uuid()
+  const fullName = googleDisplayName(profile)
+  const hash = await bcrypt.hash(uuid(), 10)
+
+  db.prepare(`
+    INSERT INTO users (
+      id, email, full_name, password_hash, phone_country_code, phone_number,
+      email_verified, google_id, auth_provider
+    )
+    VALUES (?, ?, ?, ?, '+92', '', 1, ?, 'google')
+  `).run(id, email, fullName, hash, profile.sub)
+
+  const signupOwner = resolvePublicSignupOwner()
+  if (signupOwner) {
+    createClientAgencyForSignup({
+      userId: id,
+      name: `${fullName}'s Agency`,
+      preferredSubdomain: subdomainFromSignupName(fullName, email),
+      ownerUserId: signupOwner.userId,
+      parentAgencyId: signupOwner.agency.id,
+    })
+  } else if (process.env.NODE_ENV !== 'production') {
+    createAgencyForUser(id, `${fullName}'s Agency`, 0, subdomainFromSignupName(fullName, email))
+  } else {
+    db.prepare('DELETE FROM users WHERE id = ?').run(id)
+    throw new Error(
+      'Signup is not configured. Set PUBLIC_SIGNUP_OWNER_EMAIL, PUBLIC_SIGNUP_AGENCY_SUBDOMAIN, or PLATFORM_ADMIN_EMAILS for the master agency.',
+    )
+  }
+
+  return id
+}
+
+function postAuthRedirectUrl(userId: string, agencyId?: string | null): string {
+  const session = buildSessionPayload(userId, agencyId)
+  if (session.platformAdmin) return `${publicAppBaseUrl()}/ops`
+
+  const agencyUrl = session.agency?.subdomain ? getAgencySubdomainUrl(session.agency.subdomain) : null
+  return agencyUrl ?? `${publicAppBaseUrl()}/agency`
+}
+
+authRouter.get('/google', googleOAuthLimiter, (req, res) => {
+  if (!isGoogleOAuthConfigured()) {
+    redirectWithAuthError(res, 'Google signup is not configured yet')
+    return
+  }
+
+  const mode = req.query.mode === 'signup' ? 'signup' : 'login'
+  const state = createGoogleState(mode)
+  res.redirect(buildGoogleConsentUrl(state))
+})
+
+authRouter.get('/google/callback', googleOAuthLimiter, async (req, res) => {
+  const error = typeof req.query.error === 'string' ? req.query.error : ''
+  if (error) {
+    redirectWithAuthError(res, `Google sign-in cancelled: ${error}`)
+    return
+  }
+
+  const code = typeof req.query.code === 'string' ? req.query.code : ''
+  const state = typeof req.query.state === 'string' ? req.query.state : ''
+  if (!code || !state || !consumeGoogleState(state)) {
+    redirectWithAuthError(res, 'Google sign-in expired. Please try again.')
+    return
+  }
+
+  try {
+    const profile = await fetchGoogleProfile(code)
+    const userId = await findOrCreateGoogleUser(profile)
+    const agency = resolveAgency(userId)
+    const token = signToken(userId)
+    res.cookie('token', token, COOKIE_OPTIONS)
+    if (agency) setAgencyCookie(res, agency.id)
+    res.redirect(postAuthRedirectUrl(userId, agency?.id))
+  } catch (err) {
+    console.error('[auth] Google OAuth failed:', err)
+    redirectWithAuthError(res, err instanceof Error ? err.message : 'Google sign-in failed')
+  }
+})
 
 authRouter.get('/session', authMiddleware, (req: AuthRequest, res) => {
   const subdomain = getRequestSubdomainHost(req)

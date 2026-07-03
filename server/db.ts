@@ -352,7 +352,31 @@ function migrate() {
   migrateMultiByoc()
   migrateOps()
   migratePasswordReset()
+  migrateGoogleSignIn()
   migrateFacebookOAuth()
+}
+
+function migrateGoogleSignIn() {
+  const cols = db.prepare('PRAGMA table_info(users)').all() as { name: string }[]
+  if (!cols.some((c) => c.name === 'google_id')) {
+    db.exec(`ALTER TABLE users ADD COLUMN google_id TEXT`)
+  }
+  if (!cols.some((c) => c.name === 'auth_provider')) {
+    db.exec(`ALTER TABLE users ADD COLUMN auth_provider TEXT NOT NULL DEFAULT 'password'`)
+  }
+
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id_unique ON users(google_id) WHERE google_id IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS google_oauth_states (
+      state TEXT PRIMARY KEY,
+      mode TEXT NOT NULL DEFAULT 'login',
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_google_oauth_states_expires ON google_oauth_states(expires_at);
+  `)
 }
 
 function migrateFacebookOAuth() {
@@ -769,5 +793,7 @@ export type UserRow = {
   verification_expires: string | null
   password_reset_token: string | null
   password_reset_expires: string | null
+  google_id: string | null
+  auth_provider: string
   created_at: string
 }

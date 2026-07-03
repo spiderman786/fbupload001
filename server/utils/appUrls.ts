@@ -14,6 +14,16 @@ export function clientBaseUrl(): string {
   return (process.env.CLIENT_URL ?? 'http://localhost:5173').replace(/\/$/, '')
 }
 
+export function publicAppBaseUrl(): string {
+  const base = getAppBaseDomain()
+  if (base) return `https://app.${base}`
+  return clientBaseUrl()
+}
+
+export function buildGoogleOAuthCallbackUrl(): string {
+  return `${publicAppBaseUrl()}/api/auth/google/callback`
+}
+
 export function buildAgencyOAuthCallbackUrl(subdomain: string): string | null {
   const base = getAppBaseDomain()
   if (!base || !subdomain.trim()) return null

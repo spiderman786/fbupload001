@@ -70,6 +70,10 @@ export function SignupPage() {
     }
   }
 
+  function handleGoogleSignup() {
+    window.location.assign(api.auth.googleUrl('signup'))
+  }
+
   if (signupOpen === false) {
     return (
       <AuthLayout>
@@ -94,6 +98,20 @@ export function SignupPage() {
       <div className="mb-6">
         <h2 className="text-xl font-bold tracking-tight">Create an account</h2>
         <p className="mt-1 text-sm text-muted-foreground">Registrations use Gmail only (@gmail.com).</p>
+      </div>
+
+      <button
+        type="button"
+        onClick={handleGoogleSignup}
+        className="mb-4 flex h-11 w-full items-center justify-center rounded-lg border border-border bg-background text-sm font-semibold text-foreground shadow-xs transition-all hover:bg-muted"
+      >
+        Continue with Google
+      </button>
+
+      <div className="mb-4 flex items-center gap-3 text-xs text-muted-foreground">
+        <span className="h-px flex-1 bg-border" />
+        <span>or create with Gmail code</span>
+        <span className="h-px flex-1 bg-border" />
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">

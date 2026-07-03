@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { AuthLayout } from '../components/AuthLayout'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../api/client'
@@ -10,6 +10,7 @@ export function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+  const [searchParams] = useSearchParams()
   const from =
     (location.state as { from?: string; redirect?: string; message?: string })?.redirect ??
     (location.state as { from?: string; message?: string })?.from ??
@@ -22,7 +23,7 @@ export function LoginPage() {
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+  const [error, setError] = useState(searchParams.get('error') ?? '')
   const [loading, setLoading] = useState(false)
   const [signupOpen, setSignupOpen] = useState(false)
 
@@ -63,6 +64,10 @@ export function LoginPage() {
     }
   }
 
+  function handleGoogleLogin() {
+    window.location.assign(api.auth.googleUrl('login'))
+  }
+
   return (
     <AuthLayout>
       <div className="mb-6">
@@ -70,6 +75,20 @@ export function LoginPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           Enter your email and password to access your dashboard.
         </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={handleGoogleLogin}
+        className="mb-4 flex h-11 w-full items-center justify-center rounded-lg border border-border bg-background text-sm font-semibold text-foreground shadow-xs transition-all hover:bg-muted"
+      >
+        Continue with Google
+      </button>
+
+      <div className="mb-4 flex items-center gap-3 text-xs text-muted-foreground">
+        <span className="h-px flex-1 bg-border" />
+        <span>or sign in with email</span>
+        <span className="h-px flex-1 bg-border" />
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
