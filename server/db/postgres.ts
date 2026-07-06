@@ -23,7 +23,7 @@ export type PreparedStatement = {
 export type Database = {
   prepare: (sql: string) => PreparedStatement
   exec: (sql: string) => void
-  transaction: <T>(fn: () => T) => T
+  transaction: <T extends (...args: unknown[]) => unknown>(fn: T) => T
   pragma: (value: string) => void
 }
 
@@ -71,21 +71,24 @@ export function createPostgresDatabase(): Database {
         runQuery(chunk)
       }
     },
-    transaction<T>(fn: () => T): T {
-      if (inTransaction) return fn()
-      inTransaction = true
-      workerConnect()
-      workerBegin()
-      try {
-        const result = fn()
-        workerCommit()
-        return result
-      } catch (err) {
-        workerRollback()
-        throw err
-      } finally {
-        inTransaction = false
-      }
+    transaction<T extends (...args: unknown[]) => unknown>(fn: T): T {
+      const wrapped = ((...args: Parameters<T>) => {
+        if (inTransaction) return fn(...args) as ReturnType<T>
+        inTransaction = true
+        workerConnect()
+        workerBegin()
+        try {
+          const result = fn(...args) as ReturnType<T>
+          workerCommit()
+          return result
+        } catch (err) {
+          workerRollback()
+          throw err
+        } finally {
+          inTransaction = false
+        }
+      }) as T
+      return wrapped
     },
     pragma() {
       /* no-op for postgres */
