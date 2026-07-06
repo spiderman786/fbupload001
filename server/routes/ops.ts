@@ -21,6 +21,30 @@ import { explainJobFailure } from '../services/jobExplain.js'
 import { getSmtpConfigStatus, testSmtpConnection } from '../services/email.js'
 
 import { routeParam } from '../utils/routeParam.js'
+
+function opsRead(handler: (req: import('express').Request, res: import('express').Response) => void): import('express').RequestHandler {
+  return (req, res) => {
+    try {
+      handler(req, res)
+    } catch (error) {
+      console.error(`[ops] ${req.method} ${req.path}`, error)
+      if (!res.headersSent) res.status(500).json({ error: 'Internal server error' })
+    }
+  }
+}
+
+function opsWrite(
+  handler: (req: import('express').Request, res: import('express').Response) => void | Promise<void>,
+): import('express').RequestHandler {
+  return (req, res, next) => {
+    Promise.resolve(handler(req, res)).catch((error) => {
+      console.error(`[ops] ${req.method} ${req.path}`, error)
+      if (!res.headersSent) res.status(500).json({ error: 'Internal server error' })
+      else next(error)
+    })
+  }
+}
+
 export const opsRouter = Router()
 
 const guard = [authMiddleware, requireVerified, requirePlatformAdmin] as const
@@ -34,7 +58,7 @@ opsRouter.get('/me', authMiddleware, requireVerified, (req: PlatformAdminRequest
   })
 })
 
-opsRouter.get('/overview', ...guard, (_req, res) => {
+opsRouter.get('/overview', ...guard, opsRead((_req, res) => {
   const today = new Date().toISOString().slice(0, 10)
   const agencies = db.prepare('SELECT COUNT(*) as c FROM agencies').get() as { c: number }
   const users = db.prepare('SELECT COUNT(*) as c FROM users').get() as { c: number }
@@ -71,9 +95,9 @@ opsRouter.get('/overview', ...guard, (_req, res) => {
     proxy: getProxyPoolStats(),
     worker: readWorkerHeartbeat(),
   })
-})
+}))
 
-opsRouter.get('/agencies', ...guard, (_req, res) => {
+opsRouter.get('/agencies', ...guard, opsRead((_req, res) => {
   const healthMap = new Map(getAgencyHealthScores().map((h) => [h.agencyId, h]))
   const rows = db
     .prepare(`
@@ -92,9 +116,9 @@ opsRouter.get('/agencies', ...guard, (_req, res) => {
       return { ...r, healthScore: health?.score ?? null, healthStatus: health?.status ?? null }
     })
   res.json({ agencies: rows })
-})
+}))
 
-opsRouter.get('/agencies/:id', ...guard, (req, res) => {
+opsRouter.get('/agencies/:id', ...guard, opsRead((req, res) => {
   const agency = db.prepare('SELECT * FROM agencies WHERE id = ?').get(routeParam(req.params.id))
   if (!agency) {
     res.status(404).json({ error: 'Agency not found' })
@@ -118,7 +142,7 @@ opsRouter.get('/agencies/:id', ...guard, (req, res) => {
     `)
     .all(routeParam(req.params.id))
   res.json({ agency, pages, sources, members, notes })
-})
+}))
 
 opsRouter.patch('/agencies/:id/members/:userId', ...guard, (req: PlatformAdminRequest, res) => {
   const { role } = req.body ?? {}
@@ -316,7 +340,7 @@ opsRouter.post('/agencies/bulk-credit', ...guard, (req: PlatformAdminRequest, re
   res.json({ credited })
 })
 
-opsRouter.get('/pages', ...guard, (req, res) => {
+opsRouter.get('/pages', ...guard, opsRead((req, res) => {
   const { status, health } = req.query
   let sql = `
     SELECT p.*, a.name as agency_name
@@ -335,7 +359,7 @@ opsRouter.get('/pages', ...guard, (req, res) => {
   }
   sql += ' ORDER BY (p.last_published_at IS NULL), p.last_published_at DESC LIMIT 200'
   res.json({ pages: db.prepare(sql).all(...params) })
-})
+}))
 
 opsRouter.patch('/pages/:id', ...guard, (req: PlatformAdminRequest, res) => {
   const status = req.body?.status as string | undefined
@@ -348,7 +372,7 @@ opsRouter.patch('/pages/:id', ...guard, (req: PlatformAdminRequest, res) => {
   res.json({ ok: true })
 })
 
-opsRouter.get('/jobs', ...guard, (req, res) => {
+opsRouter.get('/jobs', ...guard, opsRead((req, res) => {
   const { status, agencyId, limit = '100' } = req.query
   let sql = `
     SELECT r.*, p.name as page_name, s.username as source_username, a.name as agency_name
@@ -370,12 +394,12 @@ opsRouter.get('/jobs', ...guard, (req, res) => {
   sql += ' ORDER BY r.created_at DESC LIMIT ?'
   params.push(Math.min(500, Number(limit) || 100))
   res.json({ jobs: db.prepare(sql).all(...params) })
-})
+}))
 
-opsRouter.get('/jobs/error-groups', ...guard, (req, res) => {
+opsRouter.get('/jobs/error-groups', ...guard, opsRead((req, res) => {
   const days = Math.min(30, Number(req.query.days) || 7)
   res.json({ groups: getJobErrorGroups(days), days })
-})
+}))
 
 opsRouter.post('/jobs/bulk-retry', ...guard, (req: PlatformAdminRequest, res) => {
   const errorMessage = req.body?.errorMessage as string | undefined
@@ -461,7 +485,7 @@ opsRouter.get('/jobs/:id/explain', ...guard, (req, res) => {
   res.json({ explanation })
 })
 
-opsRouter.get('/analytics', ...guard, (req, res) => {
+opsRouter.get('/analytics', ...guard, opsRead((req, res) => {
   const days = Math.min(30, Number(req.query.days) || 14)
   const daily = db
     .prepare(`
@@ -505,22 +529,22 @@ opsRouter.get('/analytics', ...guard, (req, res) => {
     .all()
 
   res.json({ daily, byPlatform, topErrors, agencyActivity, days })
-})
+}))
 
-opsRouter.get('/audit', ...guard, (req, res) => {
+opsRouter.get('/audit', ...guard, opsRead((req, res) => {
   res.json({ audit: listOpsAudit(Number(req.query.limit) || 100) })
-})
+}))
 
-opsRouter.get('/alerts', ...guard, (_req, res) => {
+opsRouter.get('/alerts', ...guard, opsRead((_req, res) => {
   res.json({ alerts: listRecentAlerts() })
-})
+}))
 
-opsRouter.post('/alerts/run-checks', ...guard, async (_req, res) => {
+opsRouter.post('/alerts/run-checks', ...guard, opsWrite(async (_req, res) => {
   await runOpsAlertChecks()
   res.json({ ok: true, alerts: listRecentAlerts(10) })
-})
+}))
 
-opsRouter.get('/system', ...guard, (_req, res) => {
+opsRouter.get('/system', ...guard, opsRead((_req, res) => {
   const dbPath = process.env.DATABASE_PATH ?? path.join(process.cwd(), 'data', 'fbuploadpro.db')
   let dbSize = 0
   try {
@@ -545,7 +569,7 @@ opsRouter.get('/system', ...guard, (_req, res) => {
     nodeVersion: process.version,
     uptimeSec: Math.floor(process.uptime()),
   })
-})
+}))
 
 opsRouter.post('/impersonate/:agencyId', ...guard, (req: PlatformAdminRequest, res) => {
   const agency = db.prepare('SELECT id FROM agencies WHERE id = ?').get(routeParam(req.params.agencyId))
@@ -558,22 +582,22 @@ opsRouter.post('/impersonate/:agencyId', ...guard, (req: PlatformAdminRequest, r
   res.json(buildSessionPayload(req.user!.id, routeParam(req.params.agencyId)))
 })
 
-opsRouter.get('/search', ...guard, (req, res) => {
+opsRouter.get('/search', ...guard, opsRead((req, res) => {
   const q = String(req.query.q ?? '')
   res.json(globalOpsSearch(q))
-})
+}))
 
-opsRouter.post('/smtp-test', ...guard, async (_req, res) => {
+opsRouter.post('/smtp-test', ...guard, opsWrite(async (_req, res) => {
   const status = getSmtpConfigStatus()
   const result = await testSmtpConnection()
   res.json({ status, result })
-})
+}))
 
-opsRouter.get('/health', ...guard, (_req, res) => {
+opsRouter.get('/health', ...guard, opsRead((_req, res) => {
   res.json({ agencies: getAgencyHealthScores() })
-})
+}))
 
-opsRouter.get('/settings', ...guard, (_req, res) => {
+opsRouter.get('/settings', ...guard, opsRead((_req, res) => {
   const alertConfig = db.prepare('SELECT * FROM ops_alert_config').all().map((row) => {
     const r = row as Record<string, unknown>
     return {
@@ -584,7 +608,7 @@ opsRouter.get('/settings', ...guard, (_req, res) => {
     }
   })
   res.json({ settings: getAllPlatformSettings(), alertConfig })
-})
+}))
 
 opsRouter.patch('/settings', ...guard, (req: PlatformAdminRequest, res) => {
   const settings = req.body?.settings as Record<string, string> | undefined

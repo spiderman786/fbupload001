@@ -276,7 +276,7 @@ export function OpsAgencyDetailPage() {
     } finally {
       setLoading(false)
     }
-  }, [id, toast])
+  }, [id])
 
   useEffect(() => {
     load()
