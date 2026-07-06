@@ -104,7 +104,13 @@ opsRouter.get('/agencies', ...guard, opsRead((_req, res) => {
       SELECT a.*,
         (SELECT COUNT(*) FROM facebook_pages p WHERE p.agency_id = a.id) as page_count,
         (SELECT COUNT(*) FROM agency_members m WHERE m.agency_id = a.id) as member_count,
-        (SELECT email FROM users u JOIN agency_members m ON m.user_id = u.id WHERE m.agency_id = a.id AND m.role = 'owner' LIMIT 1) as owner_email,
+        COALESCE(
+          (SELECT u.email FROM users u JOIN agency_members m ON m.user_id = u.id
+           WHERE m.agency_id = a.id AND m.role = 'admin' AND a.parent_agency_id IS NOT NULL
+           ORDER BY m.created_at ASC LIMIT 1),
+          (SELECT u.email FROM users u JOIN agency_members m ON m.user_id = u.id
+           WHERE m.agency_id = a.id AND m.role = 'owner' LIMIT 1)
+        ) as owner_email,
         (SELECT name FROM agencies pa WHERE pa.id = a.parent_agency_id) as parent_name
       FROM agencies a
       ORDER BY a.created_at DESC

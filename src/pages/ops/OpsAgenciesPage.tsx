@@ -165,7 +165,7 @@ export function OpsAgenciesPage() {
               </th>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Health</th>
-              <th className="px-4 py-3">Owner</th>
+              <th className="px-4 py-3">Client / owner</th>
               <th className="px-4 py-3">Parent</th>
               <th className="px-4 py-3">Pages</th>
               <th className="px-4 py-3">Tokens</th>
