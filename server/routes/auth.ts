@@ -158,7 +158,6 @@ async function findOrCreateGoogleUser(profile: GoogleProfile): Promise<string> {
       userId: id,
       name: `${fullName}'s Agency`,
       preferredSubdomain: subdomainFromSignupName(fullName, email),
-      ownerUserId: signupOwner.userId,
       parentAgencyId: signupOwner.agency.id,
     })
   } else if (process.env.NODE_ENV !== 'production') {
@@ -296,7 +295,6 @@ authRouter.post('/signup', signupLimiter, async (req, res) => {
         name: `${fullName}'s Agency`,
         preferredSubdomain: subdomainFromSignupName(fullName, email),
         whatsappNumber: whatsapp,
-        ownerUserId: signupOwner.userId,
         parentAgencyId: signupOwner.agency.id,
       })
       signupAgency = { subdomain: clientAgency.subdomain, name: clientAgency.name, role: 'admin' }

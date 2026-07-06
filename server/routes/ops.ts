@@ -12,7 +12,7 @@ import { listRecentAlerts, runOpsAlertChecks } from '../services/opsAlerts.js'
 import { getProxyPoolStats } from '../services/proxyPool.js'
 import { readWorkerHeartbeat } from '../services/workerHeartbeat.js'
 import { enqueueJob } from '../services/jobQueue.js'
-import { setAgencyCookie, buildSessionPayload } from '../utils/agency.js'
+import { setAgencyCookie, buildSessionPayload, resolveAgencyTokenUserId } from '../utils/agency.js'
 import { deleteAgency, pauseAllAgencyPages } from '../services/deleteAgency.js'
 import { getAgencyHealthScores, globalOpsSearch, getJobErrorGroups } from '../services/agencyHealth.js'
 import { getAllPlatformSettings, setPlatformSetting, setAgencyMaintenance, type PlatformFlag } from '../services/platformSettings.js'
@@ -106,7 +106,7 @@ opsRouter.get('/agencies', ...guard, opsRead((_req, res) => {
         (SELECT COUNT(*) FROM agency_members m WHERE m.agency_id = a.id) as member_count,
         COALESCE(
           (SELECT u.email FROM users u JOIN agency_members m ON m.user_id = u.id
-           WHERE m.agency_id = a.id AND m.role = 'admin' AND a.parent_agency_id IS NOT NULL
+           WHERE m.agency_id = a.id AND m.role = 'admin'
            ORDER BY m.created_at ASC LIMIT 1),
           (SELECT u.email FROM users u JOIN agency_members m ON m.user_id = u.id
            WHERE m.agency_id = a.id AND m.role = 'owner' LIMIT 1)
@@ -218,14 +218,12 @@ opsRouter.post('/agencies/:id/credit-tokens', ...guard, (req: PlatformAdminReque
     return
   }
   db.prepare('UPDATE agencies SET token_balance = token_balance + ? WHERE id = ?').run(amount, routeParam(req.params.id))
-  const owner = db
-    .prepare("SELECT user_id FROM agency_members WHERE agency_id = ? AND role = 'owner' LIMIT 1")
-    .get(routeParam(req.params.id)) as { user_id: string } | undefined
-  if (owner) {
+  const billingUserId = resolveAgencyTokenUserId(routeParam(req.params.id))
+  if (billingUserId) {
     db.prepare(`
       INSERT INTO token_transactions (id, user_id, agency_id, amount, type, note)
       VALUES (?, ?, ?, ?, 'purchase', ?)
-    `).run(uuid(), owner.user_id, routeParam(req.params.id), amount, `Ops credit by ${req.user!.email}`)
+    `).run(uuid(), billingUserId, routeParam(req.params.id), amount, `Ops credit by ${req.user!.email}`)
   }
   writeOpsAudit(req.user!.id, 'credit_tokens', 'agency', routeParam(req.params.id), { amount })
   res.json({ tokenBalance: agency.token_balance + amount })
@@ -331,14 +329,12 @@ opsRouter.post('/agencies/bulk-credit', ...guard, (req: PlatformAdminRequest, re
       | undefined
     if (!agency) continue
     db.prepare('UPDATE agencies SET token_balance = token_balance + ? WHERE id = ?').run(amount, agencyId)
-    const owner = db
-      .prepare("SELECT user_id FROM agency_members WHERE agency_id = ? AND role = 'owner' LIMIT 1")
-      .get(agencyId) as { user_id: string } | undefined
-    if (owner) {
+    const billingUserId = resolveAgencyTokenUserId(agencyId)
+    if (billingUserId) {
       db.prepare(`
         INSERT INTO token_transactions (id, user_id, agency_id, amount, type, note)
         VALUES (?, ?, ?, ?, 'purchase', ?)
-      `).run(uuid(), owner.user_id, agencyId, amount, `Ops bulk credit by ${req.user!.email}`)
+      `).run(uuid(), billingUserId, agencyId, amount, `Ops bulk credit by ${req.user!.email}`)
     }
     credited++
   }

@@ -163,7 +163,6 @@ export function createClientAgencyForSignup(input: {
   name: string
   preferredSubdomain: string
   whatsappNumber?: string | null
-  ownerUserId: string
   parentAgencyId?: string | null
 }): { agencyId: string; subdomain: string; name: string } {
   const agencyId = uuid()
@@ -174,22 +173,28 @@ export function createClientAgencyForSignup(input: {
     VALUES (?, ?, 0, ?, ?, ?)
   `).run(agencyId, input.name, input.whatsappNumber ?? null, subdomain, input.parentAgencyId ?? null)
 
+  // Client workspace: signup user is admin only. Platform control is via parent_agency_id + Ops.
   db.prepare('INSERT INTO agency_members (id, agency_id, user_id, role) VALUES (?, ?, ?, ?)').run(
     uuid(),
     agencyId,
-    input.ownerUserId,
-    'owner',
+    input.userId,
+    'admin',
   )
-  if (input.ownerUserId !== input.userId) {
-    db.prepare('INSERT INTO agency_members (id, agency_id, user_id, role) VALUES (?, ?, ?, ?)').run(
-      uuid(),
-      agencyId,
-      input.userId,
-      'admin',
-    )
-  }
 
   return { agencyId, subdomain, name: input.name }
+}
+
+/** User id for token ledger entries when crediting an agency (owner or primary admin). */
+export function resolveAgencyTokenUserId(agencyId: string): string | null {
+  const owner = db
+    .prepare("SELECT user_id FROM agency_members WHERE agency_id = ? AND role = 'owner' LIMIT 1")
+    .get(agencyId) as { user_id: string } | undefined
+  if (owner?.user_id) return owner.user_id
+
+  const admin = db
+    .prepare("SELECT user_id FROM agency_members WHERE agency_id = ? AND role = 'admin' ORDER BY created_at ASC LIMIT 1")
+    .get(agencyId) as { user_id: string } | undefined
+  return admin?.user_id ?? null
 }
 
 export function joinAgencyAsMember(
