@@ -182,6 +182,9 @@ async function migratePostgresColumnsAsync(client: pg.PoolClient) {
   await addColumn('page_source_assignments', 'catalog_total', 'INTEGER')
   await addColumn('page_source_assignments', 'agency_id', 'TEXT')
 
+  await addColumn('news_templates', 'brand_type', "TEXT NOT NULL DEFAULT 'page_picture'")
+  await addColumn('news_items', 'image_crop_json', 'TEXT')
+
   await execSql(
     client,
     `

@@ -59,6 +59,8 @@ async function runPublishCycle() {
         console.error(`[news] Publish failed ${item.id}:`, msg)
       }
     }
+  } catch (err) {
+    console.error('[news] Publish cycle error:', err)
   } finally {
     publishing = false
   }
