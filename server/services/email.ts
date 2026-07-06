@@ -37,11 +37,21 @@ function trimEnv(value: string | undefined): string | undefined {
   return value.trim().replace(/^["']|["']$/g, '')
 }
 
+/** Strip accidental emoji/whitespace from pasted SMTP host values. */
+function sanitizeSmtpHost(host: string): string {
+  const firstToken = host.trim().split(/\s+/)[0] ?? ''
+  return firstToken.replace(/[^a-zA-Z0-9.\-]/g, '')
+}
+
 function getSmtpConfig(): SmtpConfig | null {
   const provider = trimEnv(process.env.SMTP_PROVIDER)?.toLowerCase()
   const providerDefaults = provider ? SMTP_PROVIDER_DEFAULTS[provider] : undefined
-  const host = trimEnv(process.env.SMTP_HOST) || providerDefaults?.host
+  const rawHost = trimEnv(process.env.SMTP_HOST)
+  const host = rawHost ? sanitizeSmtpHost(rawHost) : providerDefaults?.host
   if (!host) return null
+  if (rawHost && rawHost !== host) {
+    console.warn(`[smtp] SMTP_HOST sanitized from "${rawHost}" to "${host}"`)
+  }
 
   const port = Number(trimEnv(process.env.SMTP_PORT) ?? providerDefaults?.port ?? 587)
   const user = trimEnv(process.env.SMTP_USER) || trimEnv(process.env.SMTP_FROM)
