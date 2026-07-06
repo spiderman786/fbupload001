@@ -6,7 +6,7 @@ import cookieParser from 'cookie-parser'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import fs from 'fs'
-import { initDb } from './db.js'
+import { initDb, getDatabaseKind } from './db.js'
 import { authRouter } from './routes/auth.js'
 import { pagesRouter } from './routes/pages.js'
 import { sourcesRouter } from './routes/sources.js'
@@ -26,12 +26,14 @@ import { seedPlatformAdmin, logPlatformAdminMode, isPlatformAdminStrictMode } fr
 import { getSmtpConfigStatus, testSmtpConnection } from './services/email.js'
 import { isGoogleOAuthConfigured } from './services/googleOAuth.js'
 import { isPublicSignupEnabled, isPublicSignupAgencyReady } from './utils/signup.js'
+import { backfillNextPublishAtIndex } from './services/scheduleBackfill.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const dataDir = path.join(__dirname, '..', 'data')
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
 
 initDb()
+backfillNextPublishAtIndex()
 await seedPlatformAdmin()
 logPlatformAdminMode()
 initProxyPool()
@@ -68,6 +70,8 @@ app.get('/api/health', (_req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     r2: isR2Enabled(),
+    database: getDatabaseKind(),
+    processRole: process.env.PROCESS_ROLE ?? 'all',
     publicSignupEnabled: isPublicSignupEnabled(),
     publicSignupAgencyReady: isPublicSignupAgencyReady(),
     googleOAuthConfigured: isGoogleOAuthConfigured(),

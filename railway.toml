@@ -8,8 +8,10 @@ healthcheckPath = "/api/health"
 healthcheckTimeout = 120
 restartPolicyType = "on_failure"
 
-# Default: one Railway service runs web + worker (queue, prefill, scheduler).
-# If you use TWO services from this repo, override start commands in Railway:
-#   Web service:    npm start
-#   Worker service: npm run worker
-# Mount the same volume (/app/data) on both if split.
+# ── 10k page scale (PostgreSQL + split services) ─────────────────────────
+# 1. Add Railway Postgres plugin → copy DATABASE_URL to web + all workers
+# 2. Web service:  PROCESS_ROLE=web  + start: npm start
+# 3. Worker(s):   PROCESS_ROLE=worker + start: npm run worker  (scale replicas)
+# 4. Keep R2 env vars on all services. Videos stay in R2; DB only holds job metadata.
+#
+# Single-box (SQLite, <2k pages): leave DATABASE_URL unset, use start:production as-is.

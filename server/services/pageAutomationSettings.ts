@@ -1,4 +1,5 @@
 import { db } from '../db.js'
+import { computeNextPublishAt } from './scheduleIndex.js'
 
 export type PageAutomationSettings = {
   postsPerDay: number
@@ -52,15 +53,18 @@ export function upsertPageAutomationSettings(pageId: string, input: Partial<Page
   ) as Partial<PageAutomationSettings>
   const next = { ...current, ...patch }
 
+  const nextPublishAt = computeNextPublishAt(next.timezone, JSON.stringify(next.scheduleTimes))
+
   db.prepare(`
-    INSERT INTO page_automation_settings (page_id, posts_per_day, posting_logic, timezone, schedule_times, hashtags, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    INSERT INTO page_automation_settings (page_id, posts_per_day, posting_logic, timezone, schedule_times, hashtags, next_publish_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(page_id) DO UPDATE SET
       posts_per_day = excluded.posts_per_day,
       posting_logic = excluded.posting_logic,
       timezone = excluded.timezone,
       schedule_times = excluded.schedule_times,
       hashtags = excluded.hashtags,
+      next_publish_at = excluded.next_publish_at,
       updated_at = excluded.updated_at
   `).run(
     pageId,
@@ -69,6 +73,7 @@ export function upsertPageAutomationSettings(pageId: string, input: Partial<Page
     next.timezone,
     JSON.stringify(next.scheduleTimes),
     JSON.stringify(next.hashtags),
+    nextPublishAt,
   )
 
   if (input.postsPerDay !== undefined) {
