@@ -30,6 +30,8 @@ function getWorker(): Worker {
       idleTimeoutMs: Number(process.env.PG_IDLE_TIMEOUT_MS ?? 30_000),
       ssl: process.env.PG_SSL !== 'false',
     },
+    execArgv: ['--import', 'tsx'],
+    type: 'module',
   })
 
   worker.on('message', (msg: WorkerResponse) => {

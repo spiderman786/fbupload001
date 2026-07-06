@@ -120,11 +120,19 @@ export async function initPostgresDatabase() {
   const schema = fs.readFileSync(schemaPath, 'utf8')
 
   const pool = createInitPool()
+  const client = await pool.connect()
   try {
+    await client.query('SELECT pg_advisory_lock(92001)')
     await execSql(pool, schema)
     await migratePostgresColumnsAsync(pool)
     console.log('[db] PostgreSQL initialized')
   } finally {
+    try {
+      await client.query('SELECT pg_advisory_unlock(92001)')
+    } catch {
+      /* ignore */
+    }
+    client.release()
     await pool.end()
   }
 }
