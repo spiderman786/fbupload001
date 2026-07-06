@@ -1,10 +1,6 @@
 import { db } from '../db.js'
-import { getCurrentTimeHHMM, getTodayDateInTimezone, normalizeHHMM } from '../utils/timezone.js'
-import { canPagePostToday } from './pageQuota.js'
-import { claimQueuedJobForPublish, countQueuedForPage, pageHasInflightPublishJob } from './reelQueue.js'
-import { createAutomationJob } from './automationPipeline.js'
-import { enqueueJob } from './jobQueue.js'
-import { dedupeQueuedJobsForPageSync } from './queueActions.js'
+import { getCurrentTimeHHMM, normalizeHHMM } from '../utils/timezone.js'
+import { buildScheduleFireKey, requestPageScheduledPublish } from './pagePublishScheduler.js'
 
 function parseScheduleTimes(raw: string): string[] {
   try {
@@ -13,38 +9,6 @@ function parseScheduleTimes(raw: string): string[] {
   } catch {
     return []
   }
-}
-
-/** Atomically claim this page's schedule slot so multi-instance deploys cannot double-fire. */
-function tryClaimScheduleFire(pageId: string, fireKey: string): boolean {
-  const result = db
-    .prepare(`
-      UPDATE page_automation_settings
-      SET last_schedule_fire = ?
-      WHERE page_id = ?
-        AND (last_schedule_fire IS NULL OR last_schedule_fire != ?)
-    `)
-    .run(fireKey, pageId, fireKey)
-  return result.changes > 0
-}
-
-function enqueueScheduledPublish(agencyId: string, userId: string, pageId: string) {
-  if (!canPagePostToday(pageId)) return
-  if (pageHasInflightPublishJob(pageId)) return
-
-  dedupeQueuedJobsForPageSync(pageId, agencyId)
-
-  const queuedJobId = claimQueuedJobForPublish(pageId, 'scheduled')
-  if (queuedJobId) {
-    enqueueJob(queuedJobId)
-    return
-  }
-
-  // Queue may still have rows if another worker claimed the head item — never spawn a parallel pipeline job.
-  if (countQueuedForPage(pageId) > 0) return
-
-  const jobId = createAutomationJob(agencyId, userId, pageId, 'scheduled', undefined, new Date().toISOString())
-  enqueueJob(jobId)
 }
 
 /** Publish from queue at each page's configured local schedule time. */
@@ -75,11 +39,10 @@ export function processPageAutomationSchedules() {
     const currentTime = getCurrentTimeHHMM(tz)
     if (!times.includes(currentTime)) continue
 
-    const fireKey = `${getTodayDateInTimezone(tz)}:${currentTime}`
+    const fireKey = buildScheduleFireKey(page.id, tz)
     if (page.last_schedule_fire === fireKey) continue
-    if (!tryClaimScheduleFire(page.id, fireKey)) continue
 
-    enqueueScheduledPublish(page.agency_id, page.user_id, page.id)
+    requestPageScheduledPublish(page.agency_id, page.user_id, page.id, 'scheduled', { fireKey })
   }
 }
 

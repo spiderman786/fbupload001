@@ -2,6 +2,7 @@ export const DEFAULT_PAGE_SIZE = 50
 export const MAX_PAGE_SIZE = 200
 export const CONNECT_PAGES_BATCH_SIZE = 500
 export const SCHEDULER_PAGES_BATCH_SIZE = Number(process.env.SCHEDULER_PAGES_BATCH_SIZE ?? 500)
+export const PREFILL_PAGES_BATCH_SIZE = Number(process.env.PREFILL_PAGES_BATCH_SIZE ?? 250)
 export const FOLLOWER_SYNC_BATCH_SIZE = Number(process.env.FOLLOWER_SYNC_BATCH_SIZE ?? 200)
 
 export function parsePagination(query: Record<string, unknown>) {

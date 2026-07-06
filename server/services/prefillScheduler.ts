@@ -1,6 +1,7 @@
 import cron from 'node-cron'
 import { enqueueJob } from './jobQueue.js'
 import {
+  countActivePagesWithSource,
   countPrefillInflight,
   countQueuedForPage,
   fillPagePrefillQueue,
@@ -12,8 +13,10 @@ import {
 } from './reelQueue.js'
 import { trimPageQueueToLimit } from './queueActions.js'
 import { clearScrapeError, markScrapeIdle, notePrefillBlocked } from './scrapeStatus.js'
+import { PREFILL_PAGES_BATCH_SIZE } from '../utils/pagination.js'
 
 let prefilling = false
+let prefillOffset = 0
 
 export type PrefillSyncResult = {
   trimmed: number
@@ -74,8 +77,30 @@ export function tickPrefillQueue() {
   prefilling = true
   void (async () => {
     try {
-      for (const page of listActivePagesWithSource()) {
-        await syncPagePrefillQueue(page.id, page.agency_id)
+      const total = countActivePagesWithSource()
+      if (total === 0) return
+
+      const batchSize = Math.max(50, PREFILL_PAGES_BATCH_SIZE)
+      const startOffset = prefillOffset
+      const pages = listActivePagesWithSource({ limit: batchSize, offset: prefillOffset })
+      if (!pages.length) {
+        prefillOffset = 0
+        return
+      }
+
+      let created = 0
+      for (const page of pages) {
+        const result = await syncPagePrefillQueue(page.id, page.agency_id)
+        created += result.created
+      }
+
+      prefillOffset += pages.length
+      if (prefillOffset >= total) prefillOffset = 0
+
+      if (created > 0) {
+        console.log(
+          `[prefill] Batch offset=${startOffset}/${total} size=${pages.length} new_downloads=${created}`,
+        )
       }
     } catch (err) {
       console.warn('[prefill] tick failed:', err instanceof Error ? err.message : err)
@@ -99,5 +124,7 @@ export function startPrefillScheduler() {
     console.log('[prefill] Initial queue fill triggered')
   }, 15_000)
 
-  console.log(`[prefill] Pre-download queue scheduler started (${cronExpr})`)
+  console.log(
+    `[prefill] Pre-download queue scheduler started (${cronExpr}, batch=${PREFILL_PAGES_BATCH_SIZE})`,
+  )
 }

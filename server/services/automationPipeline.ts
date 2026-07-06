@@ -167,7 +167,7 @@ function tryClaimPublishJob(jobId: string): PublishClaim {
         SELECT id FROM reel_jobs
         WHERE target_page_id = ?
           AND id != ?
-          AND status IN ('downloading', 'publishing')
+          AND status IN ('pending', 'downloading', 'publishing')
           AND job_type != 'prefill'
           AND (meta_post_id IS NULL OR meta_post_id = '')
         LIMIT 1

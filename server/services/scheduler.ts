@@ -1,10 +1,5 @@
 import cron from 'node-cron'
 import { db } from '../db.js'
-import { createAutomationJob } from './automationPipeline.js'
-import { canPagePostToday } from './pageQuota.js'
-import { enqueueJob } from './jobQueue.js'
-import { claimQueuedJobForPublish, countQueuedForPage, pageHasInflightPublishJob } from './reelQueue.js'
-import { dedupeQueuedJobsForPageSync } from './queueActions.js'
 import { syncAllUsersFollowers } from './followerSync.js'
 import { resetAllDailyQuotas } from './pageQuota.js'
 import { runMaintenance } from './cleanup.js'
@@ -12,37 +7,13 @@ import { processPageAutomationSchedules } from './pageSchedule.js'
 import { DEFAULT_SCHEDULE_TIMEZONE, getCurrentTimeHHMM, normalizeHHMM } from '../utils/timezone.js'
 import { tickTimezoneQuotaResets } from '../utils/pageDayStats.js'
 import { SCHEDULER_PAGES_BATCH_SIZE } from '../utils/pagination.js'
+import { buildScheduleFireKey, requestPageScheduledPublish, shouldUseLegacyScheduleSlot } from './pagePublishScheduler.js'
 
 const scheduleOffsets = new Map<string, number>()
 
 let scheduling = false
 
-function enqueuePageJob(
-  agencyId: string,
-  userId: string,
-  pageId: string,
-  jobType: 'direct' | 'inapp' | 'scheduled',
-  scheduledFor?: string,
-) {
-  if (!canPagePostToday(pageId)) return
-  if (pageHasInflightPublishJob(pageId)) return
-
-  dedupeQueuedJobsForPageSync(pageId, agencyId)
-
-  const queuedJobId = claimQueuedJobForPublish(pageId, jobType)
-  if (queuedJobId) {
-    enqueueJob(queuedJobId)
-    return
-  }
-
-  if (countQueuedForPage(pageId) > 0) return
-
-  const jobId = createAutomationJob(agencyId, userId, pageId, jobType, undefined, scheduledFor)
-  enqueueJob(jobId)
-}
-
 function processScheduledSlots(mode: 'direct' | 'inapp') {
-  const now = new Date()
   const slots = db
     .prepare("SELECT * FROM schedule_slots WHERE status = 'upcoming' AND publish_mode = ?")
     .all(mode) as Record<string, unknown>[]
@@ -91,12 +62,15 @@ function processScheduledSlots(mode: 'direct' | 'inapp') {
     const targets = pageIds.length ? activePages.filter((p) => pageIds.includes(p.id)) : activePages
 
     for (const page of targets) {
-      enqueuePageJob(
+      if (!shouldUseLegacyScheduleSlot(page.id)) continue
+
+      const fireKey = buildScheduleFireKey(page.id, tz)
+      requestPageScheduledPublish(
         slot.agency_id as string,
         slot.user_id as string,
         page.id,
         mode === 'inapp' ? 'inapp' : 'scheduled',
-        now.toISOString(),
+        { fireKey },
       )
     }
 
@@ -111,9 +85,9 @@ function tickScheduler() {
   scheduling = true
   try {
     tickTimezoneQuotaResets()
+    processPageAutomationSchedules()
     processScheduledSlots('direct')
     processScheduledSlots('inapp')
-    processPageAutomationSchedules()
   } finally {
     scheduling = false
   }

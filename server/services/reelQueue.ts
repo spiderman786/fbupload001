@@ -129,7 +129,12 @@ export function fillPagePrefillQueue(page: {
   return created
 }
 
-export function listActivePagesWithSource() {
+export function listActivePagesWithSource(options?: { limit?: number; offset?: number }) {
+  const limit = options?.limit
+  const offset = options?.offset ?? 0
+  const tail = limit != null ? ' LIMIT ? OFFSET ?' : ''
+  const params = limit != null ? [limit, offset] : []
+
   return db
     .prepare(`
       SELECT p.id, p.agency_id, p.user_id
@@ -137,8 +142,24 @@ export function listActivePagesWithSource() {
       INNER JOIN page_source_assignments a ON a.page_id = p.id
       INNER JOIN source_accounts s ON s.id = a.source_account_id AND s.is_active = 1
       WHERE p.status = 'active' AND p.health_status = 'completed'
+      ORDER BY p.id
+      ${tail}
     `)
-    .all() as { id: string; agency_id: string; user_id: string }[]
+    .all(...params) as { id: string; agency_id: string; user_id: string }[]
+}
+
+export function countActivePagesWithSource(): number {
+  return (
+    db
+      .prepare(`
+        SELECT COUNT(*) as c
+        FROM facebook_pages p
+        INNER JOIN page_source_assignments a ON a.page_id = p.id
+        INNER JOIN source_accounts s ON s.id = a.source_account_id AND s.is_active = 1
+        WHERE p.status = 'active' AND p.health_status = 'completed'
+      `)
+      .get() as { c: number }
+  ).c
 }
 
 export type PrefillSkipReason =
