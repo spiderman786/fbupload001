@@ -23,14 +23,13 @@ function getWorker(): Worker {
   const databaseUrl = process.env.DATABASE_URL
   if (!databaseUrl) throw new Error('DATABASE_URL is required for PostgreSQL')
 
-  worker = new Worker(new URL('./pgWorker.ts', import.meta.url), {
+  worker = new Worker(new URL('./pgWorker.mjs', import.meta.url), {
     workerData: {
       databaseUrl,
       poolMax: Number(process.env.PG_POOL_MAX ?? 30),
       idleTimeoutMs: Number(process.env.PG_IDLE_TIMEOUT_MS ?? 30_000),
       ssl: process.env.PG_SSL !== 'false',
     },
-    execArgv: ['--import', 'tsx'],
   })
 
   worker.on('message', (msg: WorkerResponse) => {

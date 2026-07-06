@@ -3,32 +3,25 @@ import pg from 'pg'
 
 const { Pool } = pg
 
-type WorkerRequest = {
-  id: number
-  type: string
-  sql?: string
-  params?: unknown[]
-}
-
 const pool = new Pool({
-  connectionString: workerData.databaseUrl as string,
-  max: workerData.poolMax as number,
-  idleTimeoutMillis: workerData.idleTimeoutMs as number,
+  connectionString: workerData.databaseUrl,
+  max: workerData.poolMax,
+  idleTimeoutMillis: workerData.idleTimeoutMs,
   ssl: workerData.ssl ? { rejectUnauthorized: false } : false,
 })
 
-let txClient: pg.PoolClient | null = null
+let txClient = null
 
-function reply(id: number, payload: Record<string, unknown>) {
-  parentPort!.postMessage({ id, ...payload })
+function reply(id, payload) {
+  parentPort.postMessage({ id, ...payload })
 }
 
-parentPort!.on('message', (msg: WorkerRequest) => {
+parentPort.on('message', (msg) => {
   void (async () => {
     try {
       if (msg.type === 'query') {
         const target = txClient ?? pool
-        const result = await target.query(msg.sql!, msg.params ?? [])
+        const result = await target.query(msg.sql, msg.params ?? [])
         reply(msg.id, { ok: true, rows: result.rows, rowCount: result.rowCount })
         return
       }
