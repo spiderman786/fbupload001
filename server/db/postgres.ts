@@ -103,14 +103,25 @@ function createInitPool() {
   })
 }
 
-async function execSql(pool: pg.Pool, sql: string) {
+function stripLeadingComments(sql: string): string {
+  let statement = sql.trim()
+  while (statement.startsWith('--')) {
+    const lineBreak = statement.indexOf('\n')
+    if (lineBreak === -1) return ''
+    statement = statement.slice(lineBreak + 1).trim()
+  }
+  return statement
+}
+
+async function execSql(client: pg.PoolClient, sql: string) {
   const chunks = sql
     .split(';')
     .map((s) => s.trim())
     .filter(Boolean)
   for (const chunk of chunks) {
-    if (chunk.startsWith('--') || /^PRAGMA/i.test(chunk)) continue
-    await pool.query(toPostgresSql(chunk))
+    const statement = stripLeadingComments(chunk)
+    if (!statement || /^PRAGMA/i.test(statement)) continue
+    await client.query(toPostgresSql(statement))
   }
 }
 
@@ -123,8 +134,8 @@ export async function initPostgresDatabase() {
   const client = await pool.connect()
   try {
     await client.query('SELECT pg_advisory_lock(92001)')
-    await execSql(pool, schema)
-    await migratePostgresColumnsAsync(pool)
+    await execSql(client, schema)
+    await migratePostgresColumnsAsync(client)
     console.log('[db] PostgreSQL initialized')
   } finally {
     try {
@@ -137,9 +148,9 @@ export async function initPostgresDatabase() {
   }
 }
 
-async function migratePostgresColumnsAsync(pool: pg.Pool) {
+async function migratePostgresColumnsAsync(client: pg.PoolClient) {
   const addColumn = async (table: string, column: string, type: string) => {
-    await pool.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${type}`)
+    await client.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${type}`)
   }
 
   await addColumn('page_automation_settings', 'last_schedule_fire', 'TEXT')
@@ -169,7 +180,7 @@ async function migratePostgresColumnsAsync(pool: pg.Pool) {
   await addColumn('page_source_assignments', 'agency_id', 'TEXT')
 
   await execSql(
-    pool,
+    client,
     `
     CREATE INDEX IF NOT EXISTS idx_pas_next_publish ON page_automation_settings(next_publish_at);
     CREATE INDEX IF NOT EXISTS idx_jobs_page_status ON reel_jobs(target_page_id, status);
