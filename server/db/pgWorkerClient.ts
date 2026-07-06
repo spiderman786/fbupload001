@@ -1,7 +1,10 @@
 import { Worker } from 'node:worker_threads'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 type WorkerResponse = {
-  id: number
+  id?: number
+  type?: string
   ok: boolean
   rows?: unknown[]
   rowCount?: number | null
@@ -14,6 +17,7 @@ type Pending = {
 }
 
 let worker: Worker | null = null
+let workerBooted = false
 let nextId = 0
 const pending = new Map<number, Pending>()
 
@@ -23,7 +27,8 @@ function getWorker(): Worker {
   const databaseUrl = process.env.DATABASE_URL
   if (!databaseUrl) throw new Error('DATABASE_URL is required for PostgreSQL')
 
-  worker = new Worker(new URL('./pgWorker.mjs', import.meta.url), {
+  const workerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'pgWorker.cjs')
+  worker = new Worker(workerPath, {
     workerData: {
       databaseUrl,
       poolMax: Number(process.env.PG_POOL_MAX ?? 30),
@@ -32,7 +37,17 @@ function getWorker(): Worker {
     },
   })
 
+  const bootSlot = new Int32Array(new SharedArrayBuffer(4))
+
   worker.on('message', (msg: WorkerResponse) => {
+    if (msg.type === 'boot') {
+      workerBooted = true
+      Atomics.store(bootSlot, 0, 1)
+      Atomics.notify(bootSlot, 0)
+      return
+    }
+
+    if (!msg.id) return
     const entry = pending.get(msg.id)
     if (!entry) return
     entry.response = msg
@@ -47,6 +62,14 @@ function getWorker(): Worker {
   worker.stderr?.on('data', (chunk: Buffer) => {
     console.error('[pg-worker]', chunk.toString().trim())
   })
+
+  const bootDeadline = Date.now() + 10_000
+  while (!workerBooted) {
+    if (Date.now() > bootDeadline) {
+      throw new Error('PostgreSQL worker failed to start within 10s')
+    }
+    Atomics.wait(bootSlot, 0, 0, 250)
+  }
 
   return worker
 }
@@ -104,4 +127,5 @@ export async function closePgWorker() {
   }
   await worker.terminate()
   worker = null
+  workerBooted = false
 }

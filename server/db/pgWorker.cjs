@@ -1,9 +1,7 @@
-import { parentPort, workerData } from 'node:worker_threads'
-import pg from 'pg'
+const { parentPort, workerData } = require('node:worker_threads')
+const pg = require('pg')
 
-const { Pool } = pg
-
-const pool = new Pool({
+const pool = new pg.Pool({
   connectionString: workerData.databaseUrl,
   max: workerData.poolMax,
   idleTimeoutMillis: workerData.idleTimeoutMs,
@@ -77,3 +75,5 @@ parentPort.on('message', (msg) => {
     }
   })()
 })
+
+parentPort.postMessage({ type: 'boot', ok: true })
