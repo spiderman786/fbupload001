@@ -36,7 +36,7 @@ function inferConflictColumn(table: string, cols: string[]): string | null {
   if (t === 'page_automation_settings') return 'page_id'
   if (t === 'page_news_settings') return 'page_id'
   if (t === 'agency_ai_settings') return 'agency_id'
-  if (t === 'agency_members') return 'agency_id, user_id'
+  // agency_members: do not auto-upsert — signup and invites must surface duplicate errors
   if (t === 'byoc_credentials' && cols.includes('user_id') && cols.includes('platform') && !cols.includes('id')) {
     return 'user_id, platform'
   }

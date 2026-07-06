@@ -211,8 +211,7 @@ export function joinAgencyAsMember(
   return { agencyId: agency.id, subdomain: agency.subdomain, name: agency.name }
 }
 
-/** Remove an unverified signup and any agencies they solely own (e.g. SMTP failure or re-signup). */
-export function deleteUnverifiedSignup(userId: string): void {
+function listSignupAgenciesToRemove(userId: string): string[] {
   const ownedAgencies = db
     .prepare(`
       SELECT a.id FROM agencies a
@@ -227,15 +226,52 @@ export function deleteUnverifiedSignup(userId: string): void {
     `)
     .all(userId) as { id: string }[]
 
+  return [...new Set([...ownedAgencies, ...clientAgencies].map((row) => row.id))]
+}
+
+/** Remove an unverified signup and any agencies they solely own (e.g. SMTP failure or re-signup). */
+export function deleteUnverifiedSignup(userId: string): void {
+  const agencyIds = listSignupAgenciesToRemove(userId)
+
   db.transaction(() => {
-    for (const { id } of [...ownedAgencies, ...clientAgencies]) {
-      db.prepare('DELETE FROM agency_members WHERE agency_id = ?').run(id)
-      db.prepare('DELETE FROM token_transactions WHERE agency_id = ?').run(id)
-      db.prepare('DELETE FROM agencies WHERE id = ?').run(id)
+    for (const agencyId of agencyIds) {
+      db.prepare('DELETE FROM agencies WHERE id = ?').run(agencyId)
     }
     db.prepare('DELETE FROM agency_members WHERE user_id = ?').run(userId)
     db.prepare('DELETE FROM users WHERE id = ? AND email_verified = 0').run(userId)
   })()
+}
+
+/** Best-effort cleanup — never throw (signup must not 500 when SMTP or rollback fails). */
+export function safeDeleteUnverifiedSignup(userId: string): void {
+  try {
+    deleteUnverifiedSignup(userId)
+    return
+  } catch (error) {
+    console.error('[agency] deleteUnverifiedSignup failed, retrying best-effort:', error)
+  }
+
+  try {
+    for (const agencyId of listSignupAgenciesToRemove(userId)) {
+      try {
+        db.prepare('DELETE FROM agencies WHERE id = ?').run(agencyId)
+      } catch (error) {
+        console.error('[agency] failed to delete agency', agencyId, error)
+      }
+    }
+    try {
+      db.prepare('DELETE FROM agency_members WHERE user_id = ?').run(userId)
+    } catch {
+      /* ignore */
+    }
+    try {
+      db.prepare('DELETE FROM users WHERE id = ? AND email_verified = 0').run(userId)
+    } catch {
+      /* ignore */
+    }
+  } catch (error) {
+    console.error('[agency] deleteUnverifiedSignup fallback failed:', error)
+  }
 }
 
 export function getAgencySubdomainUrl(subdomain: string): string | null {

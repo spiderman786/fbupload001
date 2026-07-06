@@ -20,7 +20,7 @@ import {
   clearAgencyCookie,
   createClientAgencyForSignup,
   createAgencyForUser,
-  deleteUnverifiedSignup,
+  safeDeleteUnverifiedSignup,
   getAgencySubdomainUrl,
   resolveAgency,
   setAgencyCookie,
@@ -232,6 +232,11 @@ authRouter.get('/session', authMiddleware, (req: AuthRequest, res) => {
   res.json(buildSessionPayload(req.user!.id, agencyId))
 })
 
+function isUniqueViolation(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /unique constraint|duplicate key|UNIQUE constraint failed/i.test(message)
+}
+
 authRouter.post('/signup', signupLimiter, async (req, res) => {
   if (!isPublicSignupEnabled()) {
     res.status(403).json({
@@ -255,76 +260,96 @@ authRouter.post('/signup', signupLimiter, async (req, res) => {
     return
   }
 
-  const existing = db.prepare('SELECT id, email_verified FROM users WHERE email = ?').get(email.toLowerCase()) as
-    | { id: string; email_verified: number }
-    | undefined
-  if (existing) {
-    if (existing.email_verified) {
-      res.status(409).json({ error: 'An account with this email already exists' })
-      return
-    }
-    deleteUnverifiedSignup(existing.id)
-  }
-
-  const code = generateVerificationCode()
-  const expires = new Date(Date.now() + 15 * 60 * 1000).toISOString()
-  const id = uuid()
-  const hash = await bcrypt.hash(password, 10)
-
-  db.prepare(`
-    INSERT INTO users (id, email, full_name, password_hash, phone_country_code, phone_number, verification_code, verification_expires)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, email.toLowerCase(), fullName, hash, phoneCountryCode ?? '+92', phoneNumber, code, expires)
-
-  const signupOwner = resolvePublicSignupOwner()
-  let signupAgency: { subdomain: string | null; name: string | null; role: 'owner' | 'admin' }
-
-  if (signupOwner) {
-    const whatsapp = `${phoneCountryCode ?? '+92'}${phoneNumber}`.replace(/\s+/g, '')
-    const clientAgency = createClientAgencyForSignup({
-      userId: id,
-      name: `${fullName}'s Agency`,
-      preferredSubdomain: subdomainFromSignupName(fullName, email),
-      whatsappNumber: whatsapp,
-      ownerUserId: signupOwner.userId,
-      parentAgencyId: signupOwner.agency.id,
-    })
-    signupAgency = { subdomain: clientAgency.subdomain, name: clientAgency.name, role: 'admin' }
-  } else if (process.env.NODE_ENV !== 'production') {
-    const whatsapp = `${phoneCountryCode ?? '+92'}${phoneNumber}`.replace(/\s+/g, '')
-    const createdAgency = createAgencyForUser(
-      id,
-      `${fullName}'s Agency`,
-      0,
-      subdomainFromSignupName(fullName, email),
-      whatsapp,
-    )
-    signupAgency = { subdomain: createdAgency.subdomain, name: `${fullName}'s Agency`, role: 'owner' }
-  } else {
-    db.prepare('DELETE FROM users WHERE id = ?').run(id)
-    res.status(503).json({
-      error:
-        'Signup is not configured. Set PUBLIC_SIGNUP_OWNER_EMAIL, PUBLIC_SIGNUP_AGENCY_SUBDOMAIN, or PLATFORM_ADMIN_EMAILS for the master agency.',
-    })
-    return
-  }
+  const normalizedEmail = email.toLowerCase()
+  let newUserId: string | null = null
 
   try {
-    await sendVerificationEmail(email, code)
-  } catch (error) {
-    deleteUnverifiedSignup(id)
-    res.status(502).json({ error: userFacingEmailError(error) })
-    return
-  }
+    const existing = db.prepare('SELECT id, email_verified FROM users WHERE email = ?').get(normalizedEmail) as
+      | { id: string; email_verified: number }
+      | undefined
+    if (existing) {
+      if (existing.email_verified) {
+        res.status(409).json({ error: 'An account with this email already exists' })
+        return
+      }
+      safeDeleteUnverifiedSignup(existing.id)
+    }
 
-  res.status(201).json({
-    message: 'Verification code sent to your Gmail',
-    userId: id,
-    role: signupAgency.role,
-    agencyName: signupAgency.name,
-    agencySubdomain: signupAgency.subdomain,
-    agencyUrl: signupAgency.subdomain ? getAgencySubdomainUrl(signupAgency.subdomain) : null,
-  })
+    const code = generateVerificationCode()
+    const expires = new Date(Date.now() + 15 * 60 * 1000).toISOString()
+    const id = uuid()
+    newUserId = id
+    const hash = await bcrypt.hash(password, 10)
+
+    db.prepare(`
+      INSERT INTO users (id, email, full_name, password_hash, phone_country_code, phone_number, verification_code, verification_expires)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, normalizedEmail, fullName, hash, phoneCountryCode ?? '+92', phoneNumber, code, expires)
+
+    const signupOwner = resolvePublicSignupOwner()
+    let signupAgency: { subdomain: string | null; name: string | null; role: 'owner' | 'admin' }
+
+    if (signupOwner) {
+      const whatsapp = `${phoneCountryCode ?? '+92'}${phoneNumber}`.replace(/\s+/g, '')
+      const clientAgency = createClientAgencyForSignup({
+        userId: id,
+        name: `${fullName}'s Agency`,
+        preferredSubdomain: subdomainFromSignupName(fullName, email),
+        whatsappNumber: whatsapp,
+        ownerUserId: signupOwner.userId,
+        parentAgencyId: signupOwner.agency.id,
+      })
+      signupAgency = { subdomain: clientAgency.subdomain, name: clientAgency.name, role: 'admin' }
+    } else if (process.env.NODE_ENV !== 'production') {
+      const whatsapp = `${phoneCountryCode ?? '+92'}${phoneNumber}`.replace(/\s+/g, '')
+      const createdAgency = createAgencyForUser(
+        id,
+        `${fullName}'s Agency`,
+        0,
+        subdomainFromSignupName(fullName, email),
+        whatsapp,
+      )
+      signupAgency = { subdomain: createdAgency.subdomain, name: `${fullName}'s Agency`, role: 'owner' }
+    } else {
+      res.status(503).json({
+        error:
+          'Signup is not configured. Set PUBLIC_SIGNUP_OWNER_EMAIL, PUBLIC_SIGNUP_AGENCY_SUBDOMAIN, or PLATFORM_ADMIN_EMAILS for the master agency.',
+      })
+      return
+    }
+
+    await sendVerificationEmail(email, code)
+
+    res.status(201).json({
+      message: 'Verification code sent to your Gmail',
+      userId: id,
+      role: signupAgency.role,
+      agencyName: signupAgency.name,
+      agencySubdomain: signupAgency.subdomain,
+      agencyUrl: signupAgency.subdomain ? getAgencySubdomainUrl(signupAgency.subdomain) : null,
+    })
+  } catch (error) {
+    if (newUserId) safeDeleteUnverifiedSignup(newUserId)
+
+    if (isUniqueViolation(error)) {
+      res.status(409).json({ error: 'An account with this email already exists. Try signing in or use Forgot password.' })
+      return
+    }
+
+    const message = error instanceof Error ? error.message : String(error)
+    if (/smtp|mail|email delivery|verification code/i.test(message)) {
+      res.status(502).json({ error: userFacingEmailError(error) })
+      return
+    }
+
+    console.error('[auth] signup failed:', error)
+    res.status(500).json({
+      error:
+        process.env.NODE_ENV === 'production'
+          ? 'Signup failed. Please try again in a minute or contact support.'
+          : message || 'Signup failed',
+    })
+  }
 })
 
 authRouter.post('/verify', verifyLimiter, (req, res) => {
