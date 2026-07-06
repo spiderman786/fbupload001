@@ -1,11 +1,15 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import pg from 'pg'
 import { toPgParams, toPostgresSql } from './dialect.js'
-import { runSync } from './syncWait.js'
-
-const { Pool } = pg
+import {
+  workerBegin,
+  workerCommit,
+  workerConnect,
+  workerQuery,
+  workerRollback,
+  closePgWorker,
+} from './pgWorkerClient.js'
 
 export type RunResult = { changes: number; lastInsertRowid?: number | bigint }
 
@@ -22,42 +26,23 @@ export type Database = {
   pragma: (value: string) => void
 }
 
-let pool: pg.Pool | null = null
-let txClient: pg.PoolClient | null = null
-
-function getPool(): pg.Pool {
-  if (!pool) {
-    const url = process.env.DATABASE_URL
-    if (!url) throw new Error('DATABASE_URL is required for PostgreSQL')
-    pool = new Pool({
-      connectionString: url,
-      max: Number(process.env.PG_POOL_MAX ?? 30),
-      idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT_MS ?? 30_000),
-      ssl: process.env.PG_SSL === 'false' ? false : { rejectUnauthorized: false },
-    })
-  }
-  return pool
-}
-
-function queryTarget(): pg.Pool | pg.PoolClient {
-  return txClient ?? getPool()
-}
+let inTransaction = false
 
 function runQuery(sql: string, params: unknown[] = []) {
   const text = toPostgresSql(sql)
   const values = toPgParams(params)
-  return runSync(queryTarget().query(text, values))
+  return workerQuery(text, values)
 }
 
 function makeStatement(sql: string): PreparedStatement {
   return {
     get(...params: unknown[]) {
       const result = runQuery(sql, params)
-      return result.rows[0]
+      return result.rows?.[0]
     },
     all(...params: unknown[]) {
       const result = runQuery(sql, params)
-      return result.rows
+      return result.rows ?? []
     },
     run(...params: unknown[]) {
       const result = runQuery(sql, params)
@@ -86,20 +71,19 @@ export function createPostgresDatabase(): Database {
       }
     },
     transaction<T>(fn: () => T): T {
-      if (txClient) return fn()
-      const client = runSync(getPool().connect())
-      txClient = client
+      if (inTransaction) return fn()
+      inTransaction = true
+      workerConnect()
+      workerBegin()
       try {
-        runSync(client.query('BEGIN'))
         const result = fn()
-        runSync(client.query('COMMIT'))
+        workerCommit()
         return result
       } catch (err) {
-        runSync(client.query('ROLLBACK'))
+        workerRollback()
         throw err
       } finally {
-        txClient = null
-        client.release()
+        inTransaction = false
       }
     },
     pragma() {
@@ -160,8 +144,5 @@ function migratePostgresColumns(db: Database) {
 }
 
 export async function closePostgresPool() {
-  if (pool) {
-    await pool.end()
-    pool = null
-  }
+  await closePgWorker()
 }
