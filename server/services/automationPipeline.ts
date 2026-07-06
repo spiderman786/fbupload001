@@ -7,7 +7,7 @@ import { getPageAccessToken, publishReelVideo } from './publisher.js'
 import { isFacebookConfiguredForAgency } from './byoc.js'
 import { isMockMetaPageId } from './facebook.js'
 import { discoverNextReel } from './reelDiscovery.js'
-import { recordPostedReel, isReelAlreadyPosted } from './dedup.js'
+import { isPublishDuplicateOnPage, recordPostedReel, recordSkippedReel, resolvePublishReelIdentity } from './dedup.js'
 import { canPagePostToday, refreshPagePostedToday } from './pageQuota.js'
 import { markPageHealthCompleted } from './pageHealth.js'
 import { appendJobLog } from './jobLog.js'
@@ -214,9 +214,31 @@ async function publishCleanedFile(
 ) {
   const { userId, agencyId, pageId, page, sourceId, source } = ctx
   const tokenCost = source.tokens_per_reel as number
+  const platform = source.platform as string
+  const duplicateCheck = isPublishDuplicateOnPage(
+    pageId,
+    jobId,
+    platform,
+    discovered.reelId,
+    downloadSourceUrl || discovered.sourceUrl,
+  )
 
-  if (discovered.reelId !== 'unknown' && isReelAlreadyPosted(pageId, discovered.reelId)) {
-    appendJobLog(jobId, 'publish', `Reel ${discovered.reelId} already on page — skipping duplicate upload`, 'warn')
+  if (duplicateCheck.blocked) {
+    appendJobLog(
+      jobId,
+      'publish',
+      `Reel ${duplicateCheck.reelId} already on page — skipping duplicate upload`,
+      'warn',
+      { sourceUrl: duplicateCheck.sourceUrl },
+    )
+    recordSkippedReel({
+      agencyId,
+      pageId,
+      sourceAccountId: sourceId,
+      sourceReelId: duplicateCheck.reelId,
+      sourceUrl: duplicateCheck.sourceUrl,
+      jobId,
+    })
     db.prepare(`
       UPDATE reel_jobs
       SET status = 'failed', error_message = 'Duplicate reel — already published to this page', completed_at = datetime('now')
@@ -224,6 +246,8 @@ async function publishCleanedFile(
     `).run(jobId)
     return
   }
+
+  const publishIdentity = duplicateCheck
 
   if (!canPagePostToday(pageId)) {
     const job = loadJob(jobId)
@@ -283,8 +307,8 @@ async function publishCleanedFile(
       agencyId,
       pageId,
       sourceAccountId: sourceId,
-      sourceReelId: discovered.reelId,
-      sourceUrl: downloadSourceUrl,
+      sourceReelId: publishIdentity.reelId,
+      sourceUrl: publishIdentity.sourceUrl,
       metaPostId: postId,
       jobId,
     })
@@ -348,8 +372,8 @@ async function publishCleanedFile(
       agencyId,
       pageId,
       sourceAccountId: sourceId,
-      sourceReelId: discovered.reelId,
-      sourceUrl: downloadSourceUrl,
+      sourceReelId: publishIdentity.reelId,
+      sourceUrl: publishIdentity.sourceUrl,
       metaPostId: postId,
       jobId,
     })
@@ -432,12 +456,12 @@ async function runPublishFromQueueJob(jobId: string) {
 
   const cleanedPath = await resolvePublishVideoPath(job, agencyId)
 
-  const discovered = {
-    reelId: (job.source_reel_id as string) ?? 'unknown',
-    sourceUrl: (job.source_url as string) ?? '',
-  }
+  const platform = ctx.source.platform as string
+  const rawUrl = (job.source_url as string) ?? ''
+  const identity = resolvePublishReelIdentity(platform, (job.source_reel_id as string) ?? null, rawUrl)
+  const discovered = { reelId: identity.reelId, sourceUrl: identity.sourceUrl }
 
-  await publishCleanedFile(jobId, ctx, cleanedPath, discovered, discovered.sourceUrl)
+  await publishCleanedFile(jobId, ctx, cleanedPath, discovered, discovered.sourceUrl || rawUrl)
 
   void triggerPrefillRefill()
 }

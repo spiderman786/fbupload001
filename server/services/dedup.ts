@@ -1,6 +1,6 @@
 import { v4 as uuid } from 'uuid'
 import { db } from '../db.js'
-import { isMockSourceUrl } from '../utils/reelIdentity.js'
+import { canonicalSourceUrl, isMockSourceUrl, normalizeSourceReelId } from '../utils/reelIdentity.js'
 
 const ACTIVE_JOB_STATUSES = "('pending', 'downloading', 'queued', 'publishing', 'failed')"
 
@@ -36,6 +36,34 @@ function isSourceUrlTakenOnPage(pageId: string, sourceUrl: string, excludeJobId?
     `)
     .get(pageId, sourceUrl, excludeJobId ?? null, excludeJobId ?? null)
   return Boolean(row)
+}
+
+export function resolvePublishReelIdentity(
+  platform: string,
+  reelId?: string | null,
+  sourceUrl?: string | null,
+): { reelId: string; sourceUrl: string } {
+  const url = sourceUrl?.trim() ?? ''
+  const rawId = reelId?.trim() ?? ''
+  const normalizedId = normalizeSourceReelId(platform, rawId === 'unknown' ? '' : rawId, url)
+  return {
+    reelId: normalizedId || (rawId && rawId !== 'unknown' ? rawId : 'unknown'),
+    sourceUrl: canonicalSourceUrl(platform, normalizedId || rawId, url),
+  }
+}
+
+/** Block publish when this reel id or canonical source URL already exists on the page. */
+export function isPublishDuplicateOnPage(
+  pageId: string,
+  jobId: string,
+  platform: string,
+  reelId?: string | null,
+  sourceUrl?: string | null,
+): { blocked: boolean; reelId: string; sourceUrl: string } {
+  const identity = resolvePublishReelIdentity(platform, reelId, sourceUrl)
+  const idForCheck = identity.reelId !== 'unknown' ? identity.reelId : ''
+  const blocked = isReelConsumedByPage(pageId, idForCheck, jobId, identity.sourceUrl)
+  return { blocked, ...identity }
 }
 
 /** True when this page already posted, skipped, queued, or is downloading this source reel. */
