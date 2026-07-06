@@ -35,7 +35,7 @@ export function OpsSettingsPage() {
     } finally {
       setLoading(false)
     }
-  }, [toast])
+  }, [])
 
   useEffect(() => {
     load()

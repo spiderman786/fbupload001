@@ -22,7 +22,7 @@ export function OpsSystemPage() {
     } catch (err) {
       toast.error(getApiError(err, 'Failed to load system info'))
     }
-  }, [toast])
+  }, [])
 
   useEffect(() => {
     load()

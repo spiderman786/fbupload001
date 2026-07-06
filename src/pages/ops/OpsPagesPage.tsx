@@ -19,7 +19,7 @@ export function OpsPagesPage() {
     } finally {
       setLoading(false)
     }
-  }, [statusFilter, toast])
+  }, [statusFilter])
 
   useEffect(() => {
     load()

@@ -1,5 +1,9 @@
 const NOW_SQL = "to_char((NOW() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')"
 
+function pgIntervalFromNowLiteral(interval: string): string {
+  return `to_char((NOW() AT TIME ZONE 'UTC' + INTERVAL '${interval}'), 'YYYY-MM-DD HH24:MI:SS')`
+}
+
 /** Adapt SQLite-style SQL for PostgreSQL prepared statements. */
 export function toPostgresSql(sql: string): string {
   let out = sql
@@ -17,9 +21,16 @@ export function toPostgresSql(sql: string): string {
     }
   }
 
+  out = out.replace(/GROUP_CONCAT\s*\(\s*([^)]+?)\s*\)/gi, 'STRING_AGG($1::text, \',\')')
+  out = out.replace(
+    /datetime\s*\(\s*'now'\s*,\s*'(-?\d+\s+(?:day|days|hour|hours|minute|minutes|second|seconds|month|months|year|years))'\s*\)/gi,
+    (_match, interval: string) => pgIntervalFromNowLiteral(interval),
+  )
   out = out.replace(/datetime\s*\(\s*'now'\s*,\s*\?\s*\)/gi, `(NOW() AT TIME ZONE 'UTC' + (?::text)::interval)::text`)
   out = out.replace(/datetime\s*\(\s*'now'\s*\)/gi, NOW_SQL)
   out = out.replace(/datetime\s*\(\s*([a-z_][\w.]*)\s*\)\s*<\s*datetime\s*\(\s*'now'\s*\)/gi, "($1::timestamp AT TIME ZONE 'UTC') < (NOW() AT TIME ZONE 'UTC')")
+  out = out.replace(/date\(([a-z_][\w.]*)\)/gi, 'LEFT($1, 10)')
+  out = out.replace(/date\(\?\)/gi, '?')
   out = out.replace(/PRAGMA\s+\w+\s*=\s*\w+/gi, '-- pragma stripped')
 
   let index = 0

@@ -38,7 +38,7 @@ export function OpsJobsPage() {
     } finally {
       setLoading(false)
     }
-  }, [status, toast])
+  }, [status])
 
   useEffect(() => {
     loadJobs()
