@@ -1,6 +1,4 @@
 import { Worker } from 'node:worker_threads'
-import { fileURLToPath } from 'node:url'
-import path from 'node:path'
 
 type WorkerResponse = {
   id: number
@@ -25,15 +23,13 @@ function getWorker(): Worker {
   const databaseUrl = process.env.DATABASE_URL
   if (!databaseUrl) throw new Error('DATABASE_URL is required for PostgreSQL')
 
-  const workerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'pgWorker.ts')
-  worker = new Worker(workerPath, {
+  worker = new Worker(new URL('./pgWorker.ts', import.meta.url), {
     workerData: {
       databaseUrl,
       poolMax: Number(process.env.PG_POOL_MAX ?? 30),
       idleTimeoutMs: Number(process.env.PG_IDLE_TIMEOUT_MS ?? 30_000),
       ssl: process.env.PG_SSL !== 'false',
     },
-    execArgv: process.execArgv,
   })
 
   worker.on('message', (msg: WorkerResponse) => {
@@ -46,6 +42,10 @@ function getWorker(): Worker {
 
   worker.on('error', (err) => {
     console.error('[pg-worker] fatal:', err)
+  })
+
+  worker.stderr?.on('data', (chunk: Buffer) => {
+    console.error('[pg-worker]', chunk.toString().trim())
   })
 
   return worker

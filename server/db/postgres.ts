@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import pg from 'pg'
 import { toPgParams, toPostgresSql } from './dialect.js'
 import {
   workerBegin,
@@ -92,55 +93,82 @@ export function createPostgresDatabase(): Database {
   }
 }
 
-export function initPostgresDatabase() {
+function createInitPool() {
+  const url = process.env.DATABASE_URL
+  if (!url) throw new Error('DATABASE_URL is required for PostgreSQL')
+  return new pg.Pool({
+    connectionString: url,
+    max: 2,
+    ssl: process.env.PG_SSL === 'false' ? false : { rejectUnauthorized: false },
+  })
+}
+
+async function execSql(pool: pg.Pool, sql: string) {
+  const chunks = sql
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  for (const chunk of chunks) {
+    if (chunk.startsWith('--') || /^PRAGMA/i.test(chunk)) continue
+    await pool.query(toPostgresSql(chunk))
+  }
+}
+
+export async function initPostgresDatabase() {
   const __dirname = path.dirname(fileURLToPath(import.meta.url))
   const schemaPath = path.join(__dirname, 'schema.postgres.sql')
   const schema = fs.readFileSync(schemaPath, 'utf8')
 
-  const db = createPostgresDatabase()
-  db.exec(schema)
-
-  migratePostgresColumns(db)
-  console.log('[db] PostgreSQL initialized')
+  const pool = createInitPool()
+  try {
+    await execSql(pool, schema)
+    await migratePostgresColumnsAsync(pool)
+    console.log('[db] PostgreSQL initialized')
+  } finally {
+    await pool.end()
+  }
 }
 
-function migratePostgresColumns(db: Database) {
-  const addColumn = (table: string, column: string, type: string) => {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${type}`)
+async function migratePostgresColumnsAsync(pool: pg.Pool) {
+  const addColumn = async (table: string, column: string, type: string) => {
+    await pool.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${type}`)
   }
 
-  addColumn('page_automation_settings', 'last_schedule_fire', 'TEXT')
-  addColumn('page_automation_settings', 'next_publish_at', 'TEXT')
-  addColumn('users', 'google_id', 'TEXT')
-  addColumn('users', 'auth_provider', "TEXT NOT NULL DEFAULT 'password'")
-  addColumn('users', 'password_reset_token', 'TEXT')
-  addColumn('users', 'password_reset_expires', 'TEXT')
-  addColumn('agencies', 'parent_agency_id', 'TEXT')
-  addColumn('agencies', 'maintenance_mode', 'INTEGER NOT NULL DEFAULT 0')
-  addColumn('agencies', 'whatsapp_number', 'TEXT')
-  addColumn('agencies', 'subdomain', 'TEXT')
-  addColumn('facebook_pages', 'health_status', "TEXT NOT NULL DEFAULT 'completed'")
-  addColumn('facebook_pages', 'page_access_token', 'TEXT')
-  addColumn('facebook_pages', 'daily_reel_limit', 'INTEGER NOT NULL DEFAULT 6')
-  addColumn('facebook_pages', 'consecutive_failures', 'INTEGER NOT NULL DEFAULT 0')
-  addColumn('reel_jobs', 'caption', 'TEXT')
-  addColumn('reel_jobs', 'thumbnail_path', 'TEXT')
-  addColumn('reel_jobs', 'r2_video_key', 'TEXT')
-  addColumn('reel_jobs', 'r2_thumb_key', 'TEXT')
-  addColumn('reel_jobs', 'source_reel_id', 'TEXT')
-  addColumn('reel_jobs', 'retry_count', 'INTEGER NOT NULL DEFAULT 0')
-  addColumn('reel_jobs', 'agency_id', 'TEXT')
-  addColumn('page_source_assignments', 'scrape_status', "TEXT NOT NULL DEFAULT 'idle'")
-  addColumn('page_source_assignments', 'scrape_error', 'TEXT')
-  addColumn('page_source_assignments', 'catalog_total', 'INTEGER')
-  addColumn('page_source_assignments', 'agency_id', 'TEXT')
+  await addColumn('page_automation_settings', 'last_schedule_fire', 'TEXT')
+  await addColumn('page_automation_settings', 'next_publish_at', 'TEXT')
+  await addColumn('users', 'google_id', 'TEXT')
+  await addColumn('users', 'auth_provider', "TEXT NOT NULL DEFAULT 'password'")
+  await addColumn('users', 'password_reset_token', 'TEXT')
+  await addColumn('users', 'password_reset_expires', 'TEXT')
+  await addColumn('agencies', 'parent_agency_id', 'TEXT')
+  await addColumn('agencies', 'maintenance_mode', 'INTEGER NOT NULL DEFAULT 0')
+  await addColumn('agencies', 'whatsapp_number', 'TEXT')
+  await addColumn('agencies', 'subdomain', 'TEXT')
+  await addColumn('facebook_pages', 'health_status', "TEXT NOT NULL DEFAULT 'completed'")
+  await addColumn('facebook_pages', 'page_access_token', 'TEXT')
+  await addColumn('facebook_pages', 'daily_reel_limit', 'INTEGER NOT NULL DEFAULT 6')
+  await addColumn('facebook_pages', 'consecutive_failures', 'INTEGER NOT NULL DEFAULT 0')
+  await addColumn('reel_jobs', 'caption', 'TEXT')
+  await addColumn('reel_jobs', 'thumbnail_path', 'TEXT')
+  await addColumn('reel_jobs', 'r2_video_key', 'TEXT')
+  await addColumn('reel_jobs', 'r2_thumb_key', 'TEXT')
+  await addColumn('reel_jobs', 'source_reel_id', 'TEXT')
+  await addColumn('reel_jobs', 'retry_count', 'INTEGER NOT NULL DEFAULT 0')
+  await addColumn('reel_jobs', 'agency_id', 'TEXT')
+  await addColumn('page_source_assignments', 'scrape_status', "TEXT NOT NULL DEFAULT 'idle'")
+  await addColumn('page_source_assignments', 'scrape_error', 'TEXT')
+  await addColumn('page_source_assignments', 'catalog_total', 'INTEGER')
+  await addColumn('page_source_assignments', 'agency_id', 'TEXT')
 
-  db.exec(`
+  await execSql(
+    pool,
+    `
     CREATE INDEX IF NOT EXISTS idx_pas_next_publish ON page_automation_settings(next_publish_at);
     CREATE INDEX IF NOT EXISTS idx_jobs_page_status ON reel_jobs(target_page_id, status);
     CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON reel_jobs(status, created_at);
     CREATE INDEX IF NOT EXISTS idx_pages_active ON facebook_pages(status, health_status);
-  `)
+  `,
+  )
 }
 
 export async function closePostgresPool() {

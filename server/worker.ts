@@ -12,7 +12,7 @@ import { backfillNextPublishAtIndex } from './services/scheduleBackfill.js'
 const role = (process.env.PROCESS_ROLE ?? 'all').toLowerCase()
 const runWorker = role === 'all' || role === 'worker'
 
-initDb()
+await initDb()
 backfillNextPublishAtIndex()
 await seedPlatformAdmin()
 logPlatformAdminMode()

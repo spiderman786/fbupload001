@@ -32,7 +32,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const dataDir = path.join(__dirname, '..', 'data')
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
 
-initDb()
+await initDb()
 backfillNextPublishAtIndex()
 await seedPlatformAdmin()
 logPlatformAdminMode()
