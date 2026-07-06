@@ -12,7 +12,11 @@ export const db: Database.Database = (isPostgresEnabled()
 export async function initDb() {
   if (isPostgresEnabled()) {
     await initPostgresDatabase()
-    await migrateSqliteToPostgresIfNeeded()
+    try {
+      await migrateSqliteToPostgresIfNeeded()
+    } catch (err) {
+      console.error('[migrate] SQLite copy failed (app will continue):', err)
+    }
   } else {
     initSqliteDb()
   }

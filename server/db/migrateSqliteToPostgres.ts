@@ -117,6 +117,7 @@ export async function migrateSqliteToPostgresIfNeeded(): Promise<void> {
 
       await execSchema(client, schema)
       await client.query('BEGIN')
+      await client.query("SET session_replication_role = 'replica'")
 
       let copied = 0
       for (const table of TABLES) {
@@ -138,19 +139,30 @@ export async function migrateSqliteToPostgresIfNeeded(): Promise<void> {
         const sql = `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`
 
         let inserted = 0
+        let skippedRows = 0
         for (const row of rows) {
-          const result = await client.query(
-            sql,
-            cols.map((c) => row[c] ?? null),
-          )
-          inserted += result.rowCount ?? 0
+          try {
+            await client.query('SAVEPOINT migrate_row')
+            const result = await client.query(
+              sql,
+              cols.map((c) => row[c] ?? null),
+            )
+            await client.query('RELEASE SAVEPOINT migrate_row')
+            inserted += result.rowCount ?? 0
+          } catch (err) {
+            await client.query('ROLLBACK TO SAVEPOINT migrate_row')
+            skippedRows++
+            const msg = err instanceof Error ? err.message : String(err)
+            console.warn(`[migrate] skip ${table} row: ${msg}`)
+          }
         }
-        if (inserted > 0) {
-          console.log(`[migrate] ${table}: ${inserted}/${rows.length}`)
-          copied++
+        if (inserted > 0 || skippedRows > 0) {
+          console.log(`[migrate] ${table}: ${inserted}/${rows.length} inserted, ${skippedRows} skipped`)
+          if (inserted > 0) copied++
         }
       }
 
+      await client.query("SET session_replication_role = 'origin'")
       await client.query('COMMIT')
       console.log(`[migrate] Complete (${copied} tables with data copied)`)
     } catch (err) {
