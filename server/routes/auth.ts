@@ -337,7 +337,11 @@ authRouter.post('/signup', signupLimiter, async (req, res) => {
     }
 
     const message = error instanceof Error ? error.message : String(error)
-    if (/smtp|mail|email delivery|verification code/i.test(message)) {
+    if (/violates foreign key constraint/i.test(message)) {
+      res.status(503).json({ error: 'Signup is misconfigured on the server. Contact support.' })
+      return
+    }
+    if (/smtp|mail|email delivery|verification code|enotfound|getaddrinfo/i.test(message)) {
       res.status(502).json({ error: userFacingEmailError(error) })
       return
     }

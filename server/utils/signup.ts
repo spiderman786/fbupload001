@@ -80,17 +80,17 @@ export function resolvePublicSignupOwner(): PublicSignupOwner | null {
 
   const row = db
     .prepare(`
-      SELECT u.id as userId, u.email
+      SELECT u.id AS user_id, u.email
       FROM users u
       JOIN agency_members m ON m.user_id = u.id
       WHERE m.agency_id = ? AND m.role = 'owner'
       ORDER BY m.created_at ASC
       LIMIT 1
     `)
-    .get(byAgency.id) as { userId: string; email: string } | undefined
+    .get(byAgency.id) as { user_id: string; email: string } | undefined
 
-  if (!row) return null
-  return { userId: row.userId, email: row.email, agency: byAgency }
+  if (!row?.user_id) return null
+  return { userId: row.user_id, email: row.email, agency: byAgency }
 }
 
 function trimEnv(value: string | undefined): string | undefined {
@@ -146,5 +146,6 @@ function resolvePublicSignupAgencyFallback(): PublicSignupAgency | null {
 }
 
 export function isPublicSignupAgencyReady(): boolean {
-  return resolvePublicSignupOwner() !== null
+  const owner = resolvePublicSignupOwner()
+  return Boolean(owner?.userId)
 }

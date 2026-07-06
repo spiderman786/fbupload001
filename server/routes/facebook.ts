@@ -241,9 +241,9 @@ facebookRouter.post(
         connected.length > 0
           ? (db
               .prepare(
-                `SELECT id, meta_page_id as metaPageId FROM facebook_pages WHERE id IN (${connected.map(() => '?').join(',')})`,
+                `SELECT id, meta_page_id FROM facebook_pages WHERE id IN (${connected.map(() => '?').join(',')})`,
               )
-              .all(...connected) as { id: string; metaPageId: string }[])
+              .all(...connected) as { id: string; meta_page_id: string }[])
           : []
 
       res.json({
@@ -251,7 +251,7 @@ facebookRouter.post(
         pagesConnected: connected.length,
         skipped,
         ids: connected,
-        connectedPages,
+        connectedPages: connectedPages.map((p) => ({ id: p.id, metaPageId: p.meta_page_id })),
       })
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to add pages' })
