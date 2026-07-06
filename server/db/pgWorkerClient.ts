@@ -31,7 +31,6 @@ function getWorker(): Worker {
       ssl: process.env.PG_SSL !== 'false',
     },
     execArgv: ['--import', 'tsx'],
-    type: 'module',
   })
 
   worker.on('message', (msg: WorkerResponse) => {
