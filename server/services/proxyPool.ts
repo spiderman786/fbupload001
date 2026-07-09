@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { getLegacySingleProxyUrl } from '../utils/ytdlpProxy.js'
+import { testProxyUrls, type ProxyHealthResult } from './proxyHealth.js'
 
 export type ProxyPoolEntry = {
   id: string
@@ -8,6 +9,7 @@ export type ProxyPoolEntry = {
   label: string
   failures: number
   successes: number
+  strikes: number
   cooldownUntil: number
   lastUsedAt: number
 }
@@ -50,10 +52,67 @@ export type ProxyUploadResult = {
   stats: ProxyPoolStats
 }
 
+export type ProxyPruneResult = {
+  kept: number
+  removed: number
+  aborted: boolean
+  results: ProxyHealthResult[]
+  stats: ProxyPoolStats
+}
+
 const entries: ProxyPoolEntry[] = []
 let roundRobinIndex = 0
 let initialized = false
 let loadedFileMtime = 0
+let pruneInFlight: Promise<ProxyPruneResult> | null = null
+
+function strikesMetaPath(): string {
+  return `${getManagedProxyPoolPath()}.strikes.json`
+}
+
+function loadStrikeCounts(): Record<string, number> {
+  const filePath = strikesMetaPath()
+  if (!fs.existsSync(filePath)) return {}
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Record<string, number>
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveStrikeCounts(strikes: Record<string, number>): void {
+  const filePath = strikesMetaPath()
+  const cleaned = Object.fromEntries(Object.entries(strikes).filter(([, count]) => count > 0))
+  if (!Object.keys(cleaned).length) {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
+    return
+  }
+  fs.mkdirSync(path.dirname(filePath), { recursive: true })
+  fs.writeFileSync(filePath, `${JSON.stringify(cleaned, null, 2)}\n`, 'utf8')
+}
+
+function removeStrike(url: string): void {
+  const strikes = loadStrikeCounts()
+  if (!(url in strikes)) return
+  delete strikes[url]
+  saveStrikeCounts(strikes)
+}
+
+export function isAutoPruneEnabled(): boolean {
+  return process.env.PROXY_AUTO_PRUNE !== 'false'
+}
+
+function removeAfterStrikes(): number {
+  return Number(process.env.PROXY_REMOVE_AFTER_STRIKES ?? 3)
+}
+
+function writeProxyPoolUrls(urls: string[]): void {
+  const filePath = getManagedProxyPoolPath()
+  fs.mkdirSync(path.dirname(filePath), { recursive: true })
+  fs.writeFileSync(filePath, urls.length ? `${urls.join('\n')}\n` : '', 'utf8')
+  process.env.PROXY_POOL_FILE = filePath
+}
 
 /** Default on-disk pool (same folder as DATABASE_PATH). */
 export function getManagedProxyPoolPath(): string {
@@ -215,6 +274,7 @@ export function initProxyPool(): void {
   loadedFileMtime = readManagedFileMtime()
 
   const urls = loadProxyUrlsFromEnv()
+  const strikes = loadStrikeCounts()
   entries.length = 0
 
   urls.forEach((url, index) => {
@@ -224,6 +284,7 @@ export function initProxyPool(): void {
       label: proxyLabel(url),
       failures: 0,
       successes: 0,
+      strikes: strikes[url] ?? 0,
       cooldownUntil: 0,
       lastUsedAt: 0,
     })
@@ -234,24 +295,86 @@ export function initProxyPool(): void {
   }
 }
 
+export function removeProxyFromPool(url: string, reason?: string): boolean {
+  const filePath = getManagedProxyPoolPath()
+  if (!fs.existsSync(filePath)) return false
+
+  const content = fs.readFileSync(filePath, 'utf8')
+  const parsed = parseAndNormalizeProxyContent(content)
+  const remaining = parsed.urls.filter((entryUrl) => entryUrl !== url)
+  if (remaining.length === parsed.urls.length) return false
+
+  writeProxyPoolUrls(remaining)
+  removeStrike(url)
+  reloadProxyPool()
+  console.warn(`[proxy-pool] removed dead proxy ${proxyLabel(url)}${reason ? ` (${reason})` : ''}`)
+  return true
+}
+
+export async function pruneDeadProxies(): Promise<ProxyPruneResult> {
+  if (pruneInFlight) return pruneInFlight
+
+  pruneInFlight = (async () => {
+    reloadProxyPoolIfNeeded()
+    initProxyPool()
+
+    const urls = entries.map((entry) => entry.url)
+    if (!urls.length) {
+      return { kept: 0, removed: 0, aborted: false, results: [], stats: getProxyPoolStats() }
+    }
+
+    const results = await testProxyUrls(urls)
+    const working = results.filter((result) => result.ok).map((result) => result.url)
+
+    if (!working.length) {
+      console.warn('[proxy-pool] health check failed for all proxies — keeping list unchanged')
+      return {
+        kept: urls.length,
+        removed: 0,
+        aborted: true,
+        results,
+        stats: getProxyPoolStats(),
+      }
+    }
+
+    const removed = urls.length - working.length
+    if (removed > 0) {
+      writeProxyPoolUrls(working)
+      for (const result of results) {
+        if (!result.ok) removeStrike(result.url)
+      }
+      reloadProxyPool()
+      console.log(`[proxy-pool] auto-prune kept ${working.length}, removed ${removed}`)
+    }
+
+    return {
+      kept: working.length,
+      removed,
+      aborted: false,
+      results,
+      stats: getProxyPoolStats(),
+    }
+  })().finally(() => {
+    pruneInFlight = null
+  })
+
+  return pruneInFlight
+}
+
 export function saveProxyPoolFromUpload(rawContent: string): ProxyUploadResult {
   const { urls, invalid, duplicates } = parseAndNormalizeProxyContent(rawContent)
   if (!urls.length) {
     throw new Error('No valid proxy lines found. Use http://user:pass@host:port or host:port:user:pass per line.')
   }
 
-  const filePath = getManagedProxyPoolPath()
-  fs.mkdirSync(path.dirname(filePath), { recursive: true })
-  fs.writeFileSync(`${filePath}`, `${urls.join('\n')}\n`, 'utf8')
-  process.env.PROXY_POOL_FILE = filePath
-
+  writeProxyPoolUrls(urls)
   reloadProxyPool()
 
   return {
     count: urls.length,
     invalid,
     duplicates,
-    filePath,
+    filePath: getManagedProxyPoolPath(),
     stats: getProxyPoolStats(),
   }
 }
@@ -318,8 +441,17 @@ export function markProxySuccess(entryId: string): void {
   if (!entry) return
   entry.successes++
   entry.failures = 0
+  entry.strikes = 0
   entry.cooldownUntil = 0
   entry.lastUsedAt = Date.now()
+  removeStrike(entry.url)
+}
+
+function maybeAutoRemoveProxy(entry: ProxyPoolEntry): void {
+  if (!isAutoPruneEnabled()) return
+  if (entry.strikes < removeAfterStrikes()) return
+  if (entries.length <= 1) return
+  removeProxyFromPool(entry.url, `${entry.strikes} download failures`)
 }
 
 export function markProxyFailure(entryId: string): void {
@@ -330,7 +462,12 @@ export function markProxyFailure(entryId: string): void {
   if (entry.failures >= maxFailuresBeforeCooldown()) {
     entry.cooldownUntil = Date.now() + cooldownMs()
     entry.failures = 0
-    console.warn(`[proxy-pool] ${entry.label} cooling down for ${cooldownMs()}ms`)
+    entry.strikes++
+    const strikes = loadStrikeCounts()
+    strikes[entry.url] = entry.strikes
+    saveStrikeCounts(strikes)
+    console.warn(`[proxy-pool] ${entry.label} cooling down for ${cooldownMs()}ms (strike ${entry.strikes})`)
+    maybeAutoRemoveProxy(entry)
   }
 }
 

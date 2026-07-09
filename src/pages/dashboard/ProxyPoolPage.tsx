@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { RefreshCw, Server } from 'lucide-react'
+import { RefreshCw, Server, Sparkles } from 'lucide-react'
 import { ProxyPoolUploadPanel } from '../../components/ProxyPoolUploadPanel'
 import { api } from '../../api/client'
 import { useAuth } from '../../context/AuthContext'
@@ -14,6 +14,7 @@ export function ProxyPoolPage() {
   const { platformAdmin } = useAuth()
   const [stats, setStats] = useState<ProxyStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [pruning, setPruning] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -29,6 +30,26 @@ export function ProxyPoolPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  const runAutoPrune = useCallback(async () => {
+    if (!platformAdmin) return
+    setPruning(true)
+    try {
+      const result = await api.proxyPool.prune()
+      setStats(result.stats)
+      if (result.aborted) {
+        toast.error('Every proxy failed the health check — nothing was removed')
+      } else if (result.removed > 0) {
+        toast.success(`Kept ${result.kept} working proxies, removed ${result.removed} dead`)
+      } else {
+        toast.success(`All ${result.kept} proxies passed the health check`)
+      }
+    } catch (err) {
+      toast.error(getApiError(err, 'Proxy health check failed'))
+    } finally {
+      setPruning(false)
+    }
+  }, [platformAdmin, toast])
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -57,7 +78,12 @@ export function ProxyPoolPage() {
       <div className="rounded-xl border-2 border-primary/25 bg-primary/5 p-5">
         <h2 className="mb-3 text-lg font-semibold">Step 1 — Upload your proxy list</h2>
         {platformAdmin ? (
-          <ProxyPoolUploadPanel onUploaded={load} />
+          <ProxyPoolUploadPanel
+            onUploaded={async () => {
+              await load()
+              await runAutoPrune()
+            }}
+          />
         ) : (
           <p className="text-sm text-muted-foreground">
             Proxy uploads are managed by your platform administrator. Contact support if downloads fail due to missing
@@ -94,7 +120,27 @@ export function ProxyPoolPage() {
               <span className="text-muted-foreground">Saved to:</span>{' '}
               <code className="rounded bg-muted px-1 text-xs">{stats.filePath}</code>
             </p>
+            {platformAdmin ? (
+              <p className="text-muted-foreground">
+                Auto-clean is on: dead proxies are removed after upload, every 6 hours, and after repeated download
+                failures.
+              </p>
+            ) : null}
           </div>
+
+          {platformAdmin && stats.proxies.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void runAutoPrune()}
+                disabled={pruning || loading}
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                <Sparkles className={`h-4 w-4 ${pruning ? 'animate-pulse' : ''}`} />
+                {pruning ? 'Testing proxies…' : 'Test & remove dead proxies'}
+              </button>
+            </div>
+          ) : null}
 
           {stats.proxies.length > 0 && (
             <div className="overflow-hidden rounded-xl border border-border">

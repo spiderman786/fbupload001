@@ -604,6 +604,34 @@ export const api = {
           }[]
         }
       }>('/proxy-pool/reload', { method: 'POST' }),
+    prune: () =>
+      request<{
+        kept: number
+        removed: number
+        aborted: boolean
+        autoPruneEnabled: boolean
+        results: { url: string; label: string; ok: boolean; latencyMs: number | null; error?: string }[]
+        stats: {
+          enabled: boolean
+          poolSize: number
+          availableNow: number
+          directFirst: boolean
+          maxAttemptsPerJob: number
+          cooldownMs: number
+          filePath: string
+          fileExists: boolean
+          fileLastModified: string | null
+          proxies: {
+            id: string
+            label: string
+            failures: number
+            successes: number
+            available: boolean
+            cooldownUntil: string | null
+            lastUsedAt: string | null
+          }[]
+        }
+      }>('/proxy-pool/prune', { method: 'POST' }),
   },
   agencies: {
     switch: (agencyId: string) =>

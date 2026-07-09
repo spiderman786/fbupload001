@@ -4,6 +4,7 @@ import { startJobQueue } from './services/jobQueue.js'
 import { startScheduler } from './services/scheduler.js'
 import { startPrefillScheduler } from './services/prefillScheduler.js'
 import { initProxyPool, getProxyPoolStats } from './services/proxyPool.js'
+import { startProxyPoolPruneScheduler } from './services/proxyPoolPruneScheduler.js'
 import { runOpsAlertChecks } from './services/opsAlerts.js'
 import { startNewsScheduler } from './services/news/newsScheduler.js'
 import { seedPlatformAdmin, logPlatformAdminMode } from './services/platformAdmin.js'
@@ -23,6 +24,8 @@ if (runWorker) {
   startScheduler()
   startPrefillScheduler()
   startNewsScheduler()
+
+  startProxyPoolPruneScheduler()
 
   const alertIntervalMs = Number(process.env.OPS_ALERT_INTERVAL_MS ?? 15 * 60 * 1000)
   setInterval(() => {
