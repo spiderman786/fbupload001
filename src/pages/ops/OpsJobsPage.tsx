@@ -6,6 +6,15 @@ import { getApiError } from '../../lib/apiError'
 
 const STATUSES = ['', 'pending', 'downloading', 'publishing', 'published', 'failed']
 
+const DATE_RANGES = [
+  { value: 'today', label: 'Today' },
+  { value: 'yesterday', label: 'Yesterday' },
+  { value: '7d', label: 'Last 7 days' },
+  { value: '30d', label: 'Last 30 days' },
+  { value: 'custom', label: 'Custom dates' },
+  { value: 'all', label: 'All time' },
+] as const
+
 function statusColor(status: string) {
   if (status === 'published') return 'text-emerald-400'
   if (status === 'failed') return 'text-red-400'
@@ -13,32 +22,80 @@ function statusColor(status: string) {
   return 'text-slate-300'
 }
 
+function formatJobWhen(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return String(iso).slice(0, 16)
+  return d.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function utcToday(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
 export function OpsJobsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const status = searchParams.get('status') ?? ''
+  const range = searchParams.get('range') ?? 'today'
+  const fromParam = searchParams.get('from') ?? utcToday()
+  const toParam = searchParams.get('to') ?? utcToday()
   const [jobs, setJobs] = useState<OpsJob[]>([])
   const [groups, setGroups] = useState<OpsErrorGroup[]>([])
+  const [groupDays, setGroupDays] = useState(1)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [logs, setLogs] = useState<OpsJobLog[]>([])
   const [explanation, setExplanation] = useState<JobExplanation | null>(null)
   const [loading, setLoading] = useState(true)
   const toast = useToast()
 
+  const updateParams = useCallback(
+    (patch: Record<string, string | undefined>) => {
+      const next = new URLSearchParams(searchParams)
+      for (const [key, value] of Object.entries(patch)) {
+        if (!value) next.delete(key)
+        else next.set(key, value)
+      }
+      setSearchParams(next)
+    },
+    [searchParams, setSearchParams],
+  )
+
   const loadJobs = useCallback(async () => {
     setLoading(true)
     try {
+      const groupDaysMap: Record<string, number> = {
+        today: 1,
+        yesterday: 2,
+        '7d': 7,
+        '30d': 30,
+        custom: 30,
+        all: 7,
+      }
+      const days = groupDaysMap[range] ?? 1
       const [j, g] = await Promise.all([
-        api.ops.jobs({ status: status || undefined, limit: 200 }),
-        api.ops.errorGroups(7),
+        api.ops.jobs({
+          status: status || undefined,
+          limit: 200,
+          range,
+          from: range === 'custom' ? fromParam : undefined,
+          to: range === 'custom' ? toParam : undefined,
+        }),
+        api.ops.errorGroups(days),
       ])
       setJobs(j.jobs)
       setGroups(g.groups)
+      setGroupDays(g.days)
     } catch (err) {
       toast.error(getApiError(err, 'Failed to load jobs'))
     } finally {
       setLoading(false)
     }
-  }, [status])
+  }, [status, range, fromParam, toParam])
 
   useEffect(() => {
     loadJobs()
@@ -86,17 +143,60 @@ export function OpsJobsPage() {
           <h1 className="text-2xl font-bold">Jobs &amp; Errors</h1>
           <p className="text-sm text-slate-400">Error groups, bulk retry, AI explain (v2.4 / v3.1)</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <a
-            href={api.ops.exportJobsUrl(status || 'failed')}
+            href={api.ops.exportJobsUrl({
+              status: status || 'failed',
+              range,
+              from: range === 'custom' ? fromParam : undefined,
+              to: range === 'custom' ? toParam : undefined,
+            })}
             className="rounded-lg border border-slate-600 px-3 py-2 text-sm hover:bg-slate-800"
           >
             Export CSV
           </a>
           <select
-            value={status}
-            onChange={(e) => setSearchParams(e.target.value ? { status: e.target.value } : {})}
+            value={range}
+            onChange={(e) => {
+              const next = e.target.value
+              if (next === 'custom') {
+                updateParams({ range: next, from: fromParam || utcToday(), to: toParam || utcToday() })
+              } else {
+                updateParams({ range: next === 'today' ? undefined : next, from: undefined, to: undefined })
+              }
+            }}
             className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+            aria-label="Date range"
+          >
+            {DATE_RANGES.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+          {range === 'custom' ? (
+            <>
+              <input
+                type="date"
+                value={fromParam}
+                onChange={(e) => updateParams({ range: 'custom', from: e.target.value, to: toParam })}
+                className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+                aria-label="From date"
+              />
+              <input
+                type="date"
+                value={toParam}
+                onChange={(e) => updateParams({ range: 'custom', from: fromParam, to: e.target.value })}
+                className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+                aria-label="To date"
+              />
+            </>
+          ) : null}
+          <select
+            value={status}
+            onChange={(e) => updateParams({ status: e.target.value || undefined })}
+            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+            aria-label="Job status"
           >
             <option value="">All statuses</option>
             {STATUSES.filter(Boolean).map((s) => (
@@ -110,7 +210,7 @@ export function OpsJobsPage() {
 
       {groups.length > 0 && (
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-          <h2 className="text-sm font-medium text-slate-400">Error groups (7d)</h2>
+          <h2 className="text-sm font-medium text-slate-400">Error groups ({groupDays}d)</h2>
           <ul className="mt-2 space-y-2">
             {groups.slice(0, 8).map((g) => (
               <li key={g.errorMessage} className="flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -134,11 +234,14 @@ export function OpsJobsPage() {
         <div className="overflow-x-auto rounded-xl border border-slate-800 max-h-[65vh] overflow-y-auto">
           {loading ? (
             <p className="p-4 text-slate-400">Loading…</p>
+          ) : jobs.length === 0 ? (
+            <p className="p-4 text-slate-500">No jobs in this date range</p>
           ) : (
             <table className="w-full text-left text-sm">
               <thead className="sticky top-0 border-b border-slate-800 bg-slate-900 text-slate-400">
                 <tr>
                   <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2">When</th>
                   <th className="px-3 py-2">Agency</th>
                   <th className="px-3 py-2">Page</th>
                 </tr>
@@ -151,6 +254,7 @@ export function OpsJobsPage() {
                     className={`cursor-pointer border-b border-slate-800/60 hover:bg-slate-900/50 ${selectedId === j.id ? 'bg-slate-800/50' : ''}`}
                   >
                     <td className={`px-3 py-2 ${statusColor(j.status)}`}>{j.status}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-slate-400">{formatJobWhen(j.created_at)}</td>
                     <td className="px-3 py-2 text-slate-300">{j.agency_name ?? '—'}</td>
                     <td className="px-3 py-2">{j.page_name ?? '—'}</td>
                   </tr>
@@ -172,6 +276,7 @@ export function OpsJobsPage() {
                   <div className="mb-4 space-y-2 border-b border-slate-800 pb-4">
                     <p className="font-mono text-xs text-slate-500">{job.id}</p>
                     <p className={statusColor(job.status)}>{job.status}</p>
+                    <p className="text-xs text-slate-500">{formatJobWhen(job.created_at)}</p>
                     {job.error_message && <p className="text-sm text-red-400">{job.error_message}</p>}
                     {job.status === 'failed' && (
                       <button type="button" onClick={() => retryJob(job.id)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm hover:bg-emerald-500">
@@ -201,7 +306,7 @@ export function OpsJobsPage() {
                   <li key={log.id} className="rounded-lg bg-slate-950/60 p-2">
                     <div className="flex justify-between gap-2">
                       <span className="font-medium text-emerald-400/80">{log.step}</span>
-                      <span className="text-xs text-slate-500">{new Date(log.createdAt).toLocaleTimeString()}</span>
+                      <span className="text-xs text-slate-500">{new Date(log.createdAt).toLocaleString()}</span>
                     </div>
                     <p className="mt-0.5 text-slate-300">{log.message}</p>
                   </li>

@@ -723,13 +723,28 @@ export const api = {
     },
     updatePage: (id: string, status: 'active' | 'paused') =>
       request<{ ok: boolean }>(`/ops/pages/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
-    jobs: (params?: { status?: string; agencyId?: string; limit?: number }) => {
+    jobs: (params?: {
+      status?: string
+      agencyId?: string
+      limit?: number
+      range?: string
+      from?: string
+      to?: string
+    }) => {
       const q = new URLSearchParams()
       if (params?.status) q.set('status', params.status)
       if (params?.agencyId) q.set('agencyId', params.agencyId)
       if (params?.limit) q.set('limit', String(params.limit))
+      if (params?.range) q.set('range', params.range)
+      if (params?.from) q.set('from', params.from)
+      if (params?.to) q.set('to', params.to)
       const qs = q.toString()
-      return request<{ jobs: OpsJob[] }>(`/ops/jobs${qs ? `?${qs}` : ''}`)
+      return request<{
+        jobs: OpsJob[]
+        range?: string
+        from?: string | null
+        to?: string | null
+      }>(`/ops/jobs${qs ? `?${qs}` : ''}`)
     },
     job: (id: string) => request<{ job: OpsJob; logs: OpsJobLog[] }>(`/ops/jobs/${id}`),
     retryJob: (id: string) => request<{ ok: boolean }>(`/ops/jobs/${id}/retry`, { method: 'POST' }),
@@ -756,7 +771,14 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify(body),
       }),
-    exportJobsUrl: (status = 'failed') => `/api/ops/export/jobs?status=${encodeURIComponent(status)}`,
+    exportJobsUrl: (params?: { status?: string; range?: string; from?: string; to?: string }) => {
+      const q = new URLSearchParams()
+      q.set('status', params?.status || 'failed')
+      if (params?.range) q.set('range', params.range)
+      if (params?.from) q.set('from', params.from)
+      if (params?.to) q.set('to', params.to)
+      return `/api/ops/export/jobs?${q.toString()}`
+    },
     liveStreamUrl: () => '/api/ops/live/stream',
   },
 }

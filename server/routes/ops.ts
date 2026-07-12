@@ -374,8 +374,58 @@ opsRouter.patch('/pages/:id', ...guard, (req: PlatformAdminRequest, res) => {
   res.json({ ok: true })
 })
 
+function utcYmd(d: Date): string {
+  return d.toISOString().slice(0, 10)
+}
+
+/** Jobs date filter: today | yesterday | 7d | 30d | all | custom (+ from/to YYYY-MM-DD). */
+function parseOpsJobsDateFilter(query: {
+  range?: unknown
+  from?: unknown
+  to?: unknown
+}): { range: string; from?: string; to?: string; daysForGroups: number } {
+  const range = String(query.range ?? 'today').toLowerCase()
+  const now = new Date()
+  const today = utcYmd(now)
+
+  if (range === 'all') return { range, daysForGroups: 7 }
+
+  if (range === 'yesterday') {
+    const y = new Date(now)
+    y.setUTCDate(y.getUTCDate() - 1)
+    const yd = utcYmd(y)
+    return { range, from: yd, to: yd, daysForGroups: 2 }
+  }
+
+  if (range === '7d') {
+    const d = new Date(now)
+    d.setUTCDate(d.getUTCDate() - 6)
+    return { range, from: utcYmd(d), to: today, daysForGroups: 7 }
+  }
+
+  if (range === '30d') {
+    const d = new Date(now)
+    d.setUTCDate(d.getUTCDate() - 29)
+    return { range, from: utcYmd(d), to: today, daysForGroups: 30 }
+  }
+
+  if (range === 'custom') {
+    const from = String(query.from ?? '').slice(0, 10)
+    const to = String(query.to ?? '').slice(0, 10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      const [lo, hi] = from <= to ? [from, to] : [to, from]
+      return { range, from: lo, to: hi, daysForGroups: 30 }
+    }
+    return { range: 'today', from: today, to: today, daysForGroups: 1 }
+  }
+
+  // today (default)
+  return { range: 'today', from: today, to: today, daysForGroups: 1 }
+}
+
 opsRouter.get('/jobs', ...guard, opsRead((req, res) => {
   const { status, agencyId, limit = '100' } = req.query
+  const dateFilter = parseOpsJobsDateFilter(req.query)
   let sql = `
     SELECT r.*, p.name as page_name, s.username as source_username, a.name as agency_name
     FROM reel_jobs r
@@ -393,9 +443,22 @@ opsRouter.get('/jobs', ...guard, opsRead((req, res) => {
     sql += ' AND r.agency_id = ?'
     params.push(agencyId)
   }
+  if (dateFilter.from) {
+    sql += ' AND date(r.created_at) >= ?'
+    params.push(dateFilter.from)
+  }
+  if (dateFilter.to) {
+    sql += ' AND date(r.created_at) <= ?'
+    params.push(dateFilter.to)
+  }
   sql += ' ORDER BY r.created_at DESC LIMIT ?'
   params.push(Math.min(500, Number(limit) || 100))
-  res.json({ jobs: db.prepare(sql).all(...params) })
+  res.json({
+    jobs: db.prepare(sql).all(...params),
+    range: dateFilter.range,
+    from: dateFilter.from ?? null,
+    to: dateFilter.to ?? null,
+  })
 }))
 
 opsRouter.get('/jobs/error-groups', ...guard, opsRead((req, res) => {
@@ -681,8 +744,8 @@ opsRouter.get('/live/stream', ...guard, (req, res) => {
 
 opsRouter.get('/export/jobs', ...guard, (req, res) => {
   const status = String(req.query.status ?? 'failed')
-  const rows = db
-    .prepare(`
+  const dateFilter = parseOpsJobsDateFilter(req.query)
+  let sql = `
       SELECT r.id, r.status, r.error_message, r.created_at, r.completed_at, r.retry_count,
         a.name as agency_name, p.name as page_name, s.username as source_username
       FROM reel_jobs r
@@ -690,9 +753,18 @@ opsRouter.get('/export/jobs', ...guard, (req, res) => {
       LEFT JOIN facebook_pages p ON p.id = r.target_page_id
       LEFT JOIN source_accounts s ON s.id = r.source_account_id
       WHERE r.status = ?
-      ORDER BY r.created_at DESC LIMIT 500
-    `)
-    .all(status) as Record<string, unknown>[]
+  `
+  const params: unknown[] = [status]
+  if (dateFilter.from) {
+    sql += ' AND date(r.created_at) >= ?'
+    params.push(dateFilter.from)
+  }
+  if (dateFilter.to) {
+    sql += ' AND date(r.created_at) <= ?'
+    params.push(dateFilter.to)
+  }
+  sql += ' ORDER BY r.created_at DESC LIMIT 500'
+  const rows = db.prepare(sql).all(...params) as Record<string, unknown>[]
 
   const header = 'id,status,agency,page,source,error,created_at,completed_at,retry_count\n'
   const csv =
@@ -714,6 +786,6 @@ opsRouter.get('/export/jobs', ...guard, (req, res) => {
       .join('\n')
 
   res.setHeader('Content-Type', 'text/csv')
-  res.setHeader('Content-Disposition', `attachment; filename="jobs-${status}.csv"`)
+  res.setHeader('Content-Disposition', `attachment; filename="jobs-${status}-${dateFilter.range}.csv"`)
   res.send(csv)
 })
