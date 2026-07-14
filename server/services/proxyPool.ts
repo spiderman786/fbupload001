@@ -1,7 +1,10 @@
 import fs from 'fs'
 import path from 'path'
+import { db, getDatabaseKind } from '../db.js'
 import { getLegacySingleProxyUrl } from '../utils/ytdlpProxy.js'
 import { testProxyUrls, type ProxyHealthResult } from './proxyHealth.js'
+
+const PROXY_POOL_DB_KEY = 'download_proxy_pool'
 
 export type ProxyPoolEntry = {
   id: string
@@ -64,7 +67,54 @@ const entries: ProxyPoolEntry[] = []
 let roundRobinIndex = 0
 let initialized = false
 let loadedFileMtime = 0
+let loadedDbUpdatedAt = 0
 let pruneInFlight: Promise<ProxyPruneResult> | null = null
+
+function isPostgresBacked(): boolean {
+  return getDatabaseKind() === 'postgres'
+}
+
+function readProxyPoolContentFromDb(): { content: string; updatedAtMs: number } | null {
+  if (!isPostgresBacked()) return null
+  const row = db
+    .prepare('SELECT value, updated_at FROM platform_settings WHERE key = ?')
+    .get(PROXY_POOL_DB_KEY) as { value: string; updated_at: string } | undefined
+  if (!row?.value?.trim()) return null
+  const updatedAtMs = Date.parse(row.updated_at)
+  return {
+    content: row.value,
+    updatedAtMs: Number.isFinite(updatedAtMs) ? updatedAtMs : 0,
+  }
+}
+
+function writeProxyPoolContentToDb(content: string): void {
+  if (!isPostgresBacked()) return
+  db.prepare(`
+    INSERT INTO platform_settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).run(PROXY_POOL_DB_KEY, content)
+  const row = db
+    .prepare('SELECT updated_at FROM platform_settings WHERE key = ?')
+    .get(PROXY_POOL_DB_KEY) as { updated_at: string } | undefined
+  const updatedAtMs = row?.updated_at ? Date.parse(row.updated_at) : Date.now()
+  loadedDbUpdatedAt = Number.isFinite(updatedAtMs) ? updatedAtMs : Date.now()
+}
+
+function readProxyPoolFileContent(): string | null {
+  const filePath = getManagedProxyPoolPath()
+  if (!fs.existsSync(filePath)) return null
+  return fs.readFileSync(filePath, 'utf8')
+}
+
+function syncProxyPoolContentToDb(content: string): void {
+  writeProxyPoolContentToDb(content)
+}
+
+function maybeMigrateProxyPoolFileToDb(fileContent: string | null): void {
+  if (!isPostgresBacked() || !fileContent?.trim()) return
+  if (readProxyPoolContentFromDb()?.content?.trim()) return
+  syncProxyPoolContentToDb(fileContent.endsWith('\n') ? fileContent : `${fileContent.trimEnd()}\n`)
+}
 
 function strikesMetaPath(): string {
   return `${getManagedProxyPoolPath()}.strikes.json`
@@ -108,10 +158,13 @@ function removeAfterStrikes(): number {
 }
 
 function writeProxyPoolUrls(urls: string[]): void {
+  const content = urls.length ? `${urls.join('\n')}\n` : ''
   const filePath = getManagedProxyPoolPath()
   fs.mkdirSync(path.dirname(filePath), { recursive: true })
-  fs.writeFileSync(filePath, urls.length ? `${urls.join('\n')}\n` : '', 'utf8')
+  fs.writeFileSync(filePath, content, 'utf8')
   process.env.PROXY_POOL_FILE = filePath
+  loadedFileMtime = fs.statSync(filePath).mtimeMs
+  syncProxyPoolContentToDb(content)
 }
 
 /** Default on-disk pool (same folder as DATABASE_PATH). */
@@ -202,10 +255,13 @@ function loadProxyUrlsFromEnv(): string[] {
     for (const url of parseProxyList(pool)) urls.add(url)
   }
 
-  const filePath = getManagedProxyPoolPath()
-  if (fs.existsSync(filePath)) {
-    const content = fs.readFileSync(filePath, 'utf8')
-    for (const url of parseProxyList(content)) urls.add(url)
+  const fileContent = readProxyPoolFileContent()
+  maybeMigrateProxyPoolFileToDb(fileContent)
+
+  const dbContent = readProxyPoolContentFromDb()?.content ?? null
+  const pooledContent = fileContent?.trim() ? fileContent : dbContent
+  if (pooledContent?.trim()) {
+    for (const url of parseProxyList(pooledContent)) urls.add(url)
   }
 
   const legacy = getLegacySingleProxyUrl()
@@ -254,10 +310,11 @@ function readManagedFileMtime(): number {
   return fs.statSync(filePath).mtimeMs
 }
 
-/** Reload when proxy-pool.txt changes (Web + Worker share volume on Railway). */
+/** Reload when proxy-pool.txt or Postgres copy changes (split web/worker on Railway). */
 export function reloadProxyPoolIfNeeded(): void {
-  const mtime = readManagedFileMtime()
-  if (mtime !== loadedFileMtime) {
+  const fileMtime = readManagedFileMtime()
+  const dbUpdatedAt = readProxyPoolContentFromDb()?.updatedAtMs ?? 0
+  if (fileMtime !== loadedFileMtime || dbUpdatedAt !== loadedDbUpdatedAt) {
     reloadProxyPool()
   }
 }
@@ -265,6 +322,7 @@ export function reloadProxyPoolIfNeeded(): void {
 export function reloadProxyPool(): void {
   initialized = false
   roundRobinIndex = 0
+  loadedDbUpdatedAt = readProxyPoolContentFromDb()?.updatedAtMs ?? 0
   initProxyPool()
 }
 
@@ -272,6 +330,7 @@ export function initProxyPool(): void {
   if (initialized) return
   initialized = true
   loadedFileMtime = readManagedFileMtime()
+  loadedDbUpdatedAt = readProxyPoolContentFromDb()?.updatedAtMs ?? 0
 
   const urls = loadProxyUrlsFromEnv()
   const strikes = loadStrikeCounts()
@@ -291,18 +350,20 @@ export function initProxyPool(): void {
   })
 
   if (entries.length) {
-    console.log(`[proxy-pool] loaded ${entries.length} proxy/proxies from ${getManagedProxyPoolPath()}`)
+    const source = readProxyPoolFileContent()?.trim()
+      ? getManagedProxyPoolPath()
+      : isPostgresBacked()
+        ? 'platform_settings.download_proxy_pool'
+        : getManagedProxyPoolPath()
+    console.log(`[proxy-pool] loaded ${entries.length} proxy/proxies from ${source}`)
   }
 }
 
 export function removeProxyFromPool(url: string, reason?: string): boolean {
-  const filePath = getManagedProxyPoolPath()
-  if (!fs.existsSync(filePath)) return false
-
-  const content = fs.readFileSync(filePath, 'utf8')
-  const parsed = parseAndNormalizeProxyContent(content)
-  const remaining = parsed.urls.filter((entryUrl) => entryUrl !== url)
-  if (remaining.length === parsed.urls.length) return false
+  reloadProxyPoolIfNeeded()
+  initProxyPool()
+  const remaining = entries.map((entry) => entry.url).filter((entryUrl) => entryUrl !== url)
+  if (remaining.length === entries.length) return false
 
   writeProxyPoolUrls(remaining)
   removeStrike(url)
