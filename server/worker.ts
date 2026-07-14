@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import express from 'express'
 import { initDb, getDatabaseKind } from './db.js'
 import { startJobQueue } from './services/jobQueue.js'
 import { startScheduler } from './services/scheduler.js'
@@ -31,6 +32,15 @@ if (runWorker) {
   setInterval(() => {
     void runOpsAlertChecks()
   }, alertIntervalMs)
+
+  const app = express()
+  const port = Number(process.env.PORT ?? 3001)
+  app.get('/api/health', (_req, res) => {
+    res.json({ status: 'ok', role: 'worker', timestamp: new Date().toISOString() })
+  })
+  app.listen(port, () => {
+    console.log(`[worker] Health endpoint on :${port}`)
+  })
 
   console.log(`[worker] Running (role=${role}, db=${getDatabaseKind()}, queue + scheduler + ops alerts)`)
   console.log(`[worker] Proxy pool: ${getProxyPoolStats().poolSize} proxies loaded`)
