@@ -89,7 +89,7 @@ function redirectWithAuthError(res: Response, message: string) {
 function createGoogleState(mode: string): string {
   const state = crypto.randomBytes(24).toString('hex')
   const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString()
-  db.prepare("DELETE FROM google_oauth_states WHERE datetime(expires_at) < datetime('now')").run()
+  db.prepare("DELETE FROM google_oauth_states WHERE expires_at < datetime('now')").run()
   db.prepare('INSERT INTO google_oauth_states (state, mode, expires_at) VALUES (?, ?, ?)').run(state, mode, expires)
   return state
 }

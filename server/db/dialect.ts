@@ -27,8 +27,17 @@ export function toPostgresSql(sql: string): string {
     (_match, interval: string) => pgIntervalFromNowLiteral(interval),
   )
   out = out.replace(/datetime\s*\(\s*'now'\s*,\s*\?\s*\)/gi, `(NOW() AT TIME ZONE 'UTC' + (?::text)::interval)::text`)
+  // Column-vs-now comparisons must run before bare datetime('now') replacement,
+  // otherwise Postgres receives datetime(column) which does not exist.
+  out = out.replace(
+    /datetime\s*\(\s*([a-z_][\w.]*)\s*\)\s*<\s*datetime\s*\(\s*'now'\s*\)/gi,
+    "($1::timestamp AT TIME ZONE 'UTC') < (NOW() AT TIME ZONE 'UTC')",
+  )
+  out = out.replace(
+    /datetime\s*\(\s*([a-z_][\w.]*)\s*\)\s*>\s*datetime\s*\(\s*'now'\s*\)/gi,
+    "($1::timestamp AT TIME ZONE 'UTC') > (NOW() AT TIME ZONE 'UTC')",
+  )
   out = out.replace(/datetime\s*\(\s*'now'\s*\)/gi, NOW_SQL)
-  out = out.replace(/datetime\s*\(\s*([a-z_][\w.]*)\s*\)\s*<\s*datetime\s*\(\s*'now'\s*\)/gi, "($1::timestamp AT TIME ZONE 'UTC') < (NOW() AT TIME ZONE 'UTC')")
   out = out.replace(/date\(([a-z_][\w.]*)\)/gi, 'LEFT($1, 10)')
   out = out.replace(/date\(\?\)/gi, '?')
   out = out.replace(/PRAGMA\s+\w+\s*=\s*\w+/gi, '-- pragma stripped')
