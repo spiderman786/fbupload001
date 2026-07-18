@@ -40,6 +40,7 @@ byocRouter.post('/:platform/apps', requireRole('owner', 'admin'), (req: AgencyRe
       appId,
       appSecret,
       redirectUri ?? process.env.FACEBOOK_REDIRECT_URI ?? 'http://localhost:5173/facebook/callback',
+      req.user!.id,
     )
     const apps = listByocApps(req.agency!.id, routeParam(req.params.platform))
     const app = apps.find((a) => a.id === id)
@@ -95,6 +96,7 @@ byocRouter.put('/:platform', requireRole('owner', 'admin'), (req: AgencyRequest,
       appId,
       appSecret,
       redirectUri ?? process.env.FACEBOOK_REDIRECT_URI ?? 'http://localhost:5173/facebook/callback',
+      req.user!.id,
     )
     if (label && existing) updateByocApp(req.agency!.id, existing.id, { label })
   }

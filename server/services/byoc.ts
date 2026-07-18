@@ -1,5 +1,6 @@
 import { v4 as uuid } from 'uuid'
 import { db } from '../db.js'
+import { resolveAgencyTokenUserId } from '../utils/agency.js'
 
 export type ByocCredentials = {
   id?: string
@@ -84,12 +85,12 @@ export function isFacebookConfiguredForUser(agencyId: string): boolean {
   return isFacebookConfiguredForAgency(agencyId)
 }
 
-function getAgencyOwnerUserId(agencyId: string): string {
-  const row = db
-    .prepare("SELECT user_id FROM agency_members WHERE agency_id = ? AND role = 'owner' LIMIT 1")
-    .get(agencyId) as { user_id: string } | undefined
-  if (!row) throw new Error('Agency owner not found')
-  return row.user_id
+/** Prefer agency owner; fall back to primary admin (client signup workspaces have no owner row). */
+function getAgencyOwnerUserId(agencyId: string, actingUserId?: string): string {
+  const resolved = resolveAgencyTokenUserId(agencyId)
+  if (resolved) return resolved
+  if (actingUserId) return actingUserId
+  throw new Error('Agency owner not found')
 }
 
 function countLinkedAccounts(credentialId: string): number {
@@ -121,8 +122,9 @@ export function createByocApp(
   appId: string,
   appSecret: string,
   redirectUri: string,
+  actingUserId?: string,
 ) {
-  const ownerUserId = getAgencyOwnerUserId(agencyId)
+  const ownerUserId = getAgencyOwnerUserId(agencyId, actingUserId)
   const id = uuid()
   const trimmedLabel = label.trim() || `App ${listByocApps(agencyId, platform).length + 1}`
 
@@ -184,6 +186,7 @@ export function saveByocCredentials(
   appId: string,
   appSecret: string,
   redirectUri: string,
+  actingUserId?: string,
 ) {
   const existing = db
     .prepare('SELECT id FROM byoc_credentials WHERE agency_id = ? AND platform = ? ORDER BY updated_at ASC LIMIT 1')
@@ -194,7 +197,7 @@ export function saveByocCredentials(
     return existing.id
   }
 
-  return createByocApp(agencyId, platform, 'Default App', appId, appSecret, redirectUri)
+  return createByocApp(agencyId, platform, 'Default App', appId, appSecret, redirectUri, actingUserId)
 }
 
 export function getByocPublic(agencyId: string, platform: string) {
