@@ -117,12 +117,23 @@ facebookRouter.post('/callback', authMiddleware, requireVerified, agencyMiddlewa
   try {
     const { accessToken, metaUserId, displayName } = await exchangeCodeForToken(agencyId, code ?? 'mock_code', byocCredentialId)
     const accountId = saveFacebookAccount(agencyId, userId, metaUserId, accessToken, byocCredentialId, displayName)
-    const pageIds = await connectPagesForAgency(agencyId, userId, accountId, accessToken)
+
+    let pageIds: string[] = []
+    let pagesError: string | null = null
+    try {
+      pageIds = await connectPagesForAgency(agencyId, userId, accountId, accessToken)
+    } catch (err) {
+      pagesError = err instanceof Error ? err.message : 'Failed to import pages'
+      console.error('[facebook] page import after OAuth failed:', pagesError)
+    }
 
     res.json({
-      message: 'Facebook account connected',
+      message: pagesError
+        ? 'Facebook account connected, but pages could not be imported automatically'
+        : 'Facebook account connected',
       accountId,
       pagesConnected: pageIds.length,
+      pagesError,
       mockMode: !isFacebookConfigured(agencyId),
       byocCredentialId,
     })

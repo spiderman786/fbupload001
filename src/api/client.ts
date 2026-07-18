@@ -259,7 +259,7 @@ export const api = {
     startMagicLink: (token: string) =>
       request<{ url: string; state: string }>(`/facebook/magic-link/${encodeURIComponent(token)}/start`),
     callback: (code: string, state?: string) =>
-      request<{ message: string; pagesConnected: number }>('/facebook/callback', {
+      request<{ message: string; pagesConnected: number; pagesError?: string | null }>('/facebook/callback', {
         method: 'POST',
         body: JSON.stringify({ code, state }),
       }),

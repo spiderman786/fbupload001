@@ -27,7 +27,15 @@ export function FacebookCallbackPage() {
     api.facebook
       .callback(code, state)
       .then((res) => {
-        setStatus(`Connected! ${res.pagesConnected} page(s) added. Redirecting...`)
+        if (res.pagesError) {
+          setStatus(
+            `Account connected. Pages need to be added manually (${res.pagesError}). Redirecting...`,
+          )
+        } else if (res.pagesConnected === 0) {
+          setStatus('Account connected. No pages were auto-imported — add them next. Redirecting...')
+        } else {
+          setStatus(`Connected! ${res.pagesConnected} page(s) added. Redirecting...`)
+        }
         redirectTimer = setTimeout(() => navigate('/facebook/accounts'), 1500)
       })
       .catch((err) => {
