@@ -89,8 +89,8 @@ function send(type: string, extra: Record<string, unknown> = {}) {
   return response
 }
 
-export function workerQuery(sql: string, params: unknown[] = []) {
-  return send('query', { sql, params })
+export function workerQuery(sql: string, params: unknown[] = [], transactional = false) {
+  return send(transactional ? 'txQuery' : 'query', { sql, params })
 }
 
 export function workerConnect() {

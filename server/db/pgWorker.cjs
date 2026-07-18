@@ -14,21 +14,36 @@ function reply(id, payload) {
   parentPort.postMessage({ id, ...payload })
 }
 
+async function releaseTxClient() {
+  if (!txClient) return
+  try {
+    txClient.release()
+  } catch {
+    /* ignore */
+  }
+  txClient = null
+}
+
 parentPort.on('message', (msg) => {
   void (async () => {
     try {
       if (msg.type === 'query') {
-        const target = txClient ?? pool
-        const result = await target.query(msg.sql, msg.params ?? [])
+        // Always use the shared pool — never the transaction client.
+        // Routing normal requests through txClient poisoned auth under concurrency.
+        const result = await pool.query(msg.sql, msg.params ?? [])
+        reply(msg.id, { ok: true, rows: result.rows, rowCount: result.rowCount })
+        return
+      }
+
+      if (msg.type === 'txQuery') {
+        if (!txClient) throw new Error('No transaction client')
+        const result = await txClient.query(msg.sql, msg.params ?? [])
         reply(msg.id, { ok: true, rows: result.rows, rowCount: result.rowCount })
         return
       }
 
       if (msg.type === 'connect') {
-        if (txClient) {
-          txClient.release()
-          txClient = null
-        }
+        await releaseTxClient()
         txClient = await pool.connect()
         reply(msg.id, { ok: true })
         return
@@ -44,26 +59,24 @@ parentPort.on('message', (msg) => {
       if (msg.type === 'commit') {
         if (!txClient) throw new Error('No transaction client')
         await txClient.query('COMMIT')
-        txClient.release()
-        txClient = null
+        await releaseTxClient()
         reply(msg.id, { ok: true })
         return
       }
 
       if (msg.type === 'rollback') {
         if (!txClient) throw new Error('No transaction client')
-        await txClient.query('ROLLBACK')
-        txClient.release()
-        txClient = null
+        try {
+          await txClient.query('ROLLBACK')
+        } finally {
+          await releaseTxClient()
+        }
         reply(msg.id, { ok: true })
         return
       }
 
       if (msg.type === 'close') {
-        if (txClient) {
-          txClient.release()
-          txClient = null
-        }
+        await releaseTxClient()
         await pool.end()
         reply(msg.id, { ok: true })
         return

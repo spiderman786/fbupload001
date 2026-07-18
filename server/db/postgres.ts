@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import deasync from 'deasync'
 import pg from 'pg'
 import { toPgParams, toPostgresSql } from './dialect.js'
 import {
@@ -28,11 +29,12 @@ export type Database = {
 }
 
 let inTransaction = false
+let transactionGateOpen = true
 
 function runQuery(sql: string, params: unknown[] = []) {
   const text = toPostgresSql(sql)
   const values = toPgParams(params)
-  return workerQuery(text, values)
+  return workerQuery(text, values, inTransaction)
 }
 
 function makeStatement(sql: string): PreparedStatement {
@@ -74,6 +76,16 @@ export function createPostgresDatabase(): Database {
     transaction<T extends (...args: unknown[]) => unknown>(fn: T): T {
       const wrapped = ((...args: Parameters<T>) => {
         if (inTransaction) return fn(...args) as ReturnType<T>
+
+        // Serialize transactions so concurrent HTTP handlers don't interleave on one tx client.
+        const deadline = Date.now() + 60_000
+        deasync.loopWhile(() => {
+          if (transactionGateOpen) return false
+          if (Date.now() > deadline) throw new Error('Database transaction gate timed out after 60s')
+          return true
+        })
+
+        transactionGateOpen = false
         inTransaction = true
         workerConnect()
         workerBegin()
@@ -82,10 +94,15 @@ export function createPostgresDatabase(): Database {
           workerCommit()
           return result
         } catch (err) {
-          workerRollback()
+          try {
+            workerRollback()
+          } catch {
+            /* ignore rollback errors after failed tx */
+          }
           throw err
         } finally {
           inTransaction = false
+          transactionGateOpen = true
         }
       }) as T
       return wrapped

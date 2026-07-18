@@ -106,21 +106,43 @@ export function AddPageModal({ open, onClose, onComplete }: { open: boolean; onC
 
   const loadAccounts = useCallback(async () => {
     setLoadingAccounts(true)
+    setAccounts([])
+    setPagesByAccount({})
+    setExistingSources([])
     try {
       const res = await api.facebook.accounts()
-      setAccounts(res.accounts as FbAccount[])
-      const srcRes = await api.sources.list()
-      setExistingSources(srcRes.sources.filter((s) => s.isActive).map((s) => ({ id: s.id, username: s.username, platform: s.platform })))
-      const first = res.accounts[0]?.id ?? ''
+      const list = (res.accounts as FbAccount[]) ?? []
+      setAccounts(list)
+      setLoadingAccounts(false)
+
+      const first = list[0]?.id ?? ''
       setSelectedAccountId(first)
+
+      // Sources are only needed on later wizard steps — never block account list.
+      void api.sources
+        .list()
+        .then((srcRes) => {
+          setExistingSources(
+            srcRes.sources.filter((s) => s.isActive).map((s) => ({ id: s.id, username: s.username, platform: s.platform })),
+          )
+        })
+        .catch(() => {
+          /* optional for step 1 */
+        })
+
       if (first) {
         setLoadingPages(true)
-        const pagesRes = await api.facebook.accountPages(first)
-        setPagesByAccount({ [first]: pagesRes.pages.map((p) => ({ ...p, accountId: first })) })
+        try {
+          const pagesRes = await api.facebook.accountPages(first)
+          setPagesByAccount({ [first]: pagesRes.pages.map((p) => ({ ...p, accountId: first })) })
+        } catch (err) {
+          toast.error(getApiError(err, 'Failed to load pages for this account'))
+        } finally {
+          setLoadingPages(false)
+        }
       }
     } catch (err) {
       toast.error(getApiError(err, 'Failed to load Facebook accounts'))
-    } finally {
       setLoadingAccounts(false)
       setLoadingPages(false)
     }
