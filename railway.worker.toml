@@ -14,3 +14,7 @@ restartPolicyType = "on_failure"
 # WORKER_POLL_MS=2000
 # PREFILL_STARTUP_DELAY_MS=45000
 # Use at least 1–2 GB RAM on the worker service for ffmpeg/yt-dlp jobs.
+#
+# Multi-replica: use railway.worker.json as the worker service config file.
+# Set multiRegionConfig region to match your Railway project (default us-west2).
+# Each replica gets RAILWAY_REPLICA_ID / RAILWAY_REPLICA_REGION automatically.

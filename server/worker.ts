@@ -10,6 +10,7 @@ import { runOpsAlertChecks } from './services/opsAlerts.js'
 import { startNewsScheduler } from './services/news/newsScheduler.js'
 import { seedPlatformAdmin, logPlatformAdminMode } from './services/platformAdmin.js'
 import { backfillNextPublishAtIndex } from './services/scheduleBackfill.js'
+import { pruneStaleWorkerHeartbeats } from './services/workerHeartbeat.js'
 import {
   resolveWorkerConcurrency,
   resolveWorkerPollMs,
@@ -31,6 +32,8 @@ function startWorkerHealthServer() {
       role: 'worker',
       timestamp: new Date().toISOString(),
       database: databaseKind,
+      replicaId: process.env.RAILWAY_REPLICA_ID ?? process.env.HOSTNAME ?? null,
+      region: process.env.RAILWAY_REPLICA_REGION ?? null,
     })
   })
   app.listen(port, '0.0.0.0', () => {
@@ -72,6 +75,10 @@ if (runWorker) {
   setInterval(() => {
     void runOpsAlertChecks()
   }, alertIntervalMs)
+
+  setInterval(() => {
+    pruneStaleWorkerHeartbeats()
+  }, 60 * 60 * 1000)
 
   workerReady = true
 

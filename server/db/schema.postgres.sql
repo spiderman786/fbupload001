@@ -375,6 +375,17 @@ CREATE TABLE IF NOT EXISTS agency_ai_settings (
   updated_at TEXT NOT NULL DEFAULT (to_char((NOW() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS'))
 );
 
+CREATE TABLE IF NOT EXISTS worker_heartbeats (
+  replica_id TEXT PRIMARY KEY,
+  region TEXT,
+  pid INTEGER NOT NULL DEFAULT 0,
+  active_jobs INTEGER NOT NULL DEFAULT 0,
+  last_beat TEXT NOT NULL,
+  started_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_worker_heartbeats_last_beat ON worker_heartbeats(last_beat);
+
 CREATE INDEX IF NOT EXISTS idx_pages_agency ON facebook_pages(agency_id);
 CREATE INDEX IF NOT EXISTS idx_pages_active ON facebook_pages(status, health_status);
 CREATE INDEX IF NOT EXISTS idx_sources_agency ON source_accounts(agency_id);

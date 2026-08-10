@@ -63,7 +63,12 @@ export async function runOpsAlertChecks() {
 
   const hb = readWorkerHeartbeat()
   if (!hb || hb.stale) {
-    await fireAlert('worker_stale', hb ? `Worker heartbeat ${Math.round(hb.ageMs / 1000)}s old` : 'Worker heartbeat missing')
+    const detail = hb
+      ? hb.replicaCount > 1
+        ? `${hb.healthyReplicas}/${hb.replicaCount} replicas healthy; freshest ${Math.round(hb.ageMs / 1000)}s old`
+        : `Worker heartbeat ${Math.round(hb.ageMs / 1000)}s old`
+      : 'Worker heartbeat missing'
+    await fireAlert('worker_stale', detail)
   }
 
   const proxy = getProxyPoolStats()

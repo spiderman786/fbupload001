@@ -81,7 +81,13 @@ export function OpsOverviewPage() {
           {workerStale ? (
             <p className="mt-2 text-amber-400">Worker heartbeat stale — check Railway worker service</p>
           ) : (
-            <p className="mt-2 text-emerald-400">Worker active · last seen {data.worker?.lastBeat ?? '—'}</p>
+            <p className="mt-2 text-emerald-400">
+              Worker active
+              {(data.worker?.replicaCount ?? 0) > 1
+                ? ` · ${data.worker?.healthyReplicas ?? 0}/${data.worker?.replicaCount} replicas healthy`
+                : ''}
+              {' · '}last seen {data.worker?.lastBeat ?? '—'}
+            </p>
           )}
         </div>
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">

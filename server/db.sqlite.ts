@@ -523,6 +523,17 @@ function migrateOps() {
       hashtags TEXT NOT NULL DEFAULT '["#reels","#viral","#trending","#foryou","#shorts"]',
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS worker_heartbeats (
+      replica_id TEXT PRIMARY KEY,
+      region TEXT,
+      pid INTEGER NOT NULL DEFAULT 0,
+      active_jobs INTEGER NOT NULL DEFAULT 0,
+      last_beat TEXT NOT NULL,
+      started_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_worker_heartbeats_last_beat ON worker_heartbeats(last_beat);
   `)
 
   migrateReelJobsQueuedStatus()
