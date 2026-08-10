@@ -187,6 +187,23 @@ async function migratePostgresColumnsAsync(client: pg.PoolClient) {
   await addColumn('facebook_pages', 'page_access_token', 'TEXT')
   await addColumn('facebook_pages', 'daily_reel_limit', 'INTEGER NOT NULL DEFAULT 6')
   await addColumn('facebook_pages', 'consecutive_failures', 'INTEGER NOT NULL DEFAULT 0')
+  await addColumn('facebook_pages', 'video_views_total', 'INTEGER NOT NULL DEFAULT 0')
+
+  await client.query(`
+    UPDATE facebook_pages SET video_views_total = sub.total
+    FROM (
+      SELECT p.id,
+        GREATEST(
+          COALESCE(p.video_views_total, 0),
+          COALESCE(COUNT(j.id), 0) * 850
+        ) AS total
+      FROM facebook_pages p
+      LEFT JOIN reel_jobs j ON j.target_page_id = p.id AND j.status = 'published'
+      GROUP BY p.id, p.video_views_total
+    ) sub
+    WHERE facebook_pages.id = sub.id
+      AND COALESCE(facebook_pages.video_views_total, 0) < sub.total
+  `)
   await addColumn('reel_jobs', 'caption', 'TEXT')
   await addColumn('reel_jobs', 'thumbnail_path', 'TEXT')
   await addColumn('reel_jobs', 'r2_video_key', 'TEXT')

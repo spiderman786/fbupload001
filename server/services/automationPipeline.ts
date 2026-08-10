@@ -22,6 +22,7 @@ import {
   handlePrefillSuccess,
   markScrapeIdle,
 } from './scrapeStatus.js'
+import { incrementPageVideoViews } from './pageVideoViews.js'
 
 async function triggerPrefillRefill() {
   try {
@@ -303,6 +304,7 @@ async function publishCleanedFile(
       UPDATE facebook_pages SET reels_posted_today = reels_posted_today + 1, last_published_at = datetime('now')
       WHERE id = ?
     `).run(pageId)
+    incrementPageVideoViews(pageId)
     recordPostedReel({
       agencyId,
       pageId,
@@ -367,6 +369,7 @@ async function publishCleanedFile(
       UPDATE facebook_pages SET reels_posted_today = reels_posted_today + 1, last_published_at = datetime('now')
       WHERE id = ?
     `).run(pageId)
+    incrementPageVideoViews(pageId)
 
     recordPostedReel({
       agencyId,

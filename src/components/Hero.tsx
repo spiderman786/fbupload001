@@ -9,6 +9,7 @@ const EMPTY_SNAPSHOT: PublicLiveSnapshot = {
   pagesSynced: 0,
   activeUsers: 0,
   followersGained: 0,
+  totalViews: 0,
   publishedLastHour: 0,
   events: [],
   serverTime: new Date(0).toISOString(),
@@ -80,6 +81,7 @@ export function Hero() {
   const pagesDisplay = useAnimatedNumber(snapshot.pagesSynced, loaded)
   const usersDisplay = useAnimatedNumber(snapshot.activeUsers, loaded)
   const followersDisplay = useAnimatedNumber(snapshot.followersGained, loaded)
+  const viewsDisplay = useAnimatedNumber(snapshot.totalViews, loaded)
 
   useEffect(() => {
     let cancelled = false
@@ -222,10 +224,11 @@ export function Hero() {
 
                 <div className="space-y-5">
                   <MetricBlock
-                    value={formatExact(pagesDisplay)}
-                    label="Facebook pages synced"
+                    value={formatExact(viewsDisplay)}
+                    label="Total views across synced pages"
                     emphasize
                   />
+                  <MetricBlock value={formatExact(pagesDisplay)} label="Facebook pages synced" />
                   <MetricBlock value={formatExact(usersDisplay)} label="Users using FBupload Plus" />
                   <MetricBlock
                     value={formatExact(followersDisplay)}
