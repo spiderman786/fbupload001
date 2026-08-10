@@ -11,6 +11,7 @@ export type PublicLiveSnapshot = {
   pagesSynced: number
   activeUsers: number
   followersGained: number
+  totalViews: number
   publishedLastHour: number
   events: PublicLiveEvent[]
   serverTime: string
@@ -51,6 +52,12 @@ function buildSnapshot(): PublicLiveSnapshot {
     }
   ).total
 
+  const totalViews = (
+    db.prepare('SELECT COALESCE(SUM(video_views_total), 0) as total FROM facebook_pages').get() as {
+      total: number
+    }
+  ).total
+
   const publishedLastHour = (
     db
       .prepare(
@@ -86,6 +93,7 @@ function buildSnapshot(): PublicLiveSnapshot {
     pagesSynced,
     activeUsers,
     followersGained,
+    totalViews,
     publishedLastHour,
     events,
     serverTime: new Date().toISOString(),

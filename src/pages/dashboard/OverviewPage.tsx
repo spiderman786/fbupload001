@@ -10,6 +10,7 @@ import {
   Server,
   TrendingUp,
   Users,
+  Eye,
 } from 'lucide-react'
 import { api } from '../../api/client'
 import { QUICK_LINKS } from '../../config/dashboardNav'
@@ -25,6 +26,7 @@ type DashboardStats = {
   connectedPages: number
   activePages: number
   followersGained: number
+  totalViews: number
   inAppPending: number
   directScheduled: number
   needsAttention: number
@@ -144,10 +146,11 @@ export function OverviewPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         {[
           { label: 'Token Balance', value: stats?.tokenBalance ?? 0, sub: 'Available for automation', icon: Coins },
           { label: 'Connected Pages', value: stats?.connectedPages ?? 0, sub: `Active: ${stats?.activePages ?? 0} / ${stats?.connectedPages ?? 0} accounts`, icon: Globe },
+          { label: 'Total Views', value: stats?.totalViews ?? 0, sub: 'Video views across all synced pages', icon: Eye },
           { label: 'Followers Gained', value: stats?.followersGained ?? 0, sub: 'Net change across all pages', icon: TrendingUp },
           { label: 'InApp Pending', value: stats?.inAppPending ?? 0, sub: 'Queued for in-app publish', icon: Users, link: '/facebook/jobs' },
           { label: 'Direct Scheduled', value: stats?.directScheduled ?? 0, sub: 'Scheduled via Graph API', icon: CalendarClock },

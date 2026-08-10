@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS facebook_pages (
   followers_count INTEGER,
   followers_baseline INTEGER,
   followers_gained INTEGER NOT NULL DEFAULT 0,
+  video_views_total INTEGER NOT NULL DEFAULT 0,
   last_followers_sync_at TEXT,
   status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'paused')),
   health_status TEXT NOT NULL DEFAULT 'completed',

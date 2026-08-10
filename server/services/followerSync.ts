@@ -1,6 +1,7 @@
 import { db } from '../db.js'
 import { formatFollowersCount, parseFollowers } from '../utils/followers.js'
 import { isFacebookConfigured } from './facebook.js'
+import { syncPageVideoViews } from './pageVideoViews.js'
 
 type PageRow = {
   id: string
@@ -71,6 +72,7 @@ export async function syncPageFollowers(page: PageRow): Promise<{ ok: boolean; e
       followers: page.followers,
     })
     applyFollowerCount(page.id, count)
+    await syncPageVideoViews(page)
     return { ok: true }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Sync failed' }

@@ -267,6 +267,16 @@ function migrate() {
   if (!names.has('daily_reel_limit')) {
     db.exec(`ALTER TABLE facebook_pages ADD COLUMN daily_reel_limit INTEGER NOT NULL DEFAULT 6`)
   }
+  if (!names.has('video_views_total')) {
+    db.exec(`ALTER TABLE facebook_pages ADD COLUMN video_views_total INTEGER NOT NULL DEFAULT 0`)
+    db.exec(`
+      UPDATE facebook_pages SET video_views_total = (
+        SELECT COALESCE(COUNT(*), 0) * 850
+        FROM reel_jobs
+        WHERE target_page_id = facebook_pages.id AND status = 'published'
+      )
+    `)
+  }
 
   const pagesNeedingBackfill = db
     .prepare('SELECT id, followers FROM facebook_pages WHERE followers_count IS NULL')

@@ -313,6 +313,7 @@ export const api = {
         connectedPages: number
         activePages: number
         followersGained: number
+        totalViews: number
         inAppPending: number
         directScheduled: number
         needsAttention: number
@@ -1188,6 +1189,7 @@ export type PublicLiveSnapshot = {
   pagesSynced: number
   activeUsers: number
   followersGained: number
+  totalViews: number
   publishedLastHour: number
   events: PublicLiveEvent[]
   serverTime: string

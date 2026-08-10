@@ -27,6 +27,10 @@ dashboardRouter.get('/stats', (req: AgencyRequest, res) => {
     .prepare('SELECT COALESCE(SUM(followers_gained), 0) as total FROM facebook_pages WHERE agency_id = ?')
     .get(agencyId) as { total: number }
 
+  const totalViews = db
+    .prepare('SELECT COALESCE(SUM(video_views_total), 0) as total FROM facebook_pages WHERE agency_id = ?')
+    .get(agencyId) as { total: number }
+
   const inAppPending = db
     .prepare("SELECT COUNT(*) as count FROM reel_jobs WHERE agency_id = ? AND status IN ('pending', 'downloading', 'publishing')")
     .get(agencyId) as { count: number }
@@ -44,6 +48,7 @@ dashboardRouter.get('/stats', (req: AgencyRequest, res) => {
     connectedPages: totalPages.count,
     activePages: activePages.count,
     followersGained: followersGained.total,
+    totalViews: totalViews.total,
     inAppPending: inAppPending.count,
     directScheduled: directScheduled.count,
     needsAttention: needsAttention.count,
