@@ -3,36 +3,23 @@ import { ArrowRight, ServerCog, ShieldCheck } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api, type PublicLiveEvent, type PublicLiveSnapshot } from '../api/client'
 
-const PAGES_FLOOR = 7000
-const USERS_FLOOR = 200
-const POLL_MS = 6000
+const POLL_MS = 4000
 
-const FALLBACK_SNAPSHOT: PublicLiveSnapshot = {
-  pagesAutomated: PAGES_FLOOR,
-  activeUsers: USERS_FLOOR,
+const EMPTY_SNAPSHOT: PublicLiveSnapshot = {
+  pagesSynced: 0,
+  activeUsers: 0,
+  followersGained: 0,
   publishedLastHour: 0,
   events: [],
   serverTime: new Date(0).toISOString(),
 }
 
-function formatCount(n: number): string {
-  const rounded = Math.max(0, Math.floor(n))
-  if (rounded >= 1000) {
-    return `${rounded.toLocaleString('en-US')}+`
-  }
-  return `${rounded}+`
-}
-
-function flooredPages(n: number): number {
-  return Math.max(n, PAGES_FLOOR)
-}
-
-function flooredUsers(n: number): number {
-  return Math.max(n, USERS_FLOOR)
+function formatExact(n: number): string {
+  return Math.max(0, Math.floor(n)).toLocaleString('en-US')
 }
 
 function relativeTime(iso: string, nowMs: number): string {
-  const then = Date.parse(iso)
+  const then = Date.parse(iso.includes('T') ? iso : iso.replace(' ', 'T') + 'Z')
   if (Number.isNaN(then)) return 'just now'
   const diffSec = Math.max(0, Math.floor((nowMs - then) / 1000))
   if (diffSec < 15) return 'just now'
@@ -44,13 +31,55 @@ function relativeTime(iso: string, nowMs: number): string {
   return `${Math.floor(diffHr / 24)}d ago`
 }
 
+function useAnimatedNumber(target: number, enabled: boolean): number {
+  const [display, setDisplay] = useState(target)
+  const displayRef = useRef(target)
+
+  useEffect(() => {
+    displayRef.current = display
+  }, [display])
+
+  useEffect(() => {
+    if (!enabled) {
+      setDisplay(target)
+      return
+    }
+    const from = displayRef.current
+    if (from === target) return
+
+    const durationMs = 700
+    const start = performance.now()
+    let frame = 0
+
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / durationMs)
+      const eased = 1 - (1 - t) ** 3
+      const next = Math.round(from + (target - from) * eased)
+      setDisplay(next)
+      if (t < 1) {
+        frame = requestAnimationFrame(tick)
+      }
+    }
+
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [target, enabled])
+
+  return display
+}
+
 export function Hero() {
   const sectionRef = useRef<HTMLElement | null>(null)
-  const [snapshot, setSnapshot] = useState<PublicLiveSnapshot>(FALLBACK_SNAPSHOT)
+  const [snapshot, setSnapshot] = useState<PublicLiveSnapshot>(EMPTY_SNAPSHOT)
   const [connected, setConnected] = useState(false)
+  const [loaded, setLoaded] = useState(false)
   const [nowMs, setNowMs] = useState(() => Date.now())
   const inViewRef = useRef(true)
   const pageVisibleRef = useRef(typeof document === 'undefined' ? true : document.visibilityState === 'visible')
+
+  const pagesDisplay = useAnimatedNumber(snapshot.pagesSynced, loaded)
+  const usersDisplay = useAnimatedNumber(snapshot.activeUsers, loaded)
+  const followersDisplay = useAnimatedNumber(snapshot.followersGained, loaded)
 
   useEffect(() => {
     let cancelled = false
@@ -83,6 +112,7 @@ export function Hero() {
         if (cancelled) return
         setSnapshot(next)
         setConnected(true)
+        setLoaded(true)
         setNowMs(Date.now())
       } catch {
         if (cancelled) return
@@ -131,9 +161,7 @@ export function Hero() {
     }
   }, [])
 
-  const pagesLabel = formatCount(flooredPages(snapshot.pagesAutomated))
-  const usersLabel = formatCount(flooredUsers(snapshot.activeUsers))
-  const events = snapshot.events.slice(0, 4)
+  const events = snapshot.events.slice(0, 3)
 
   return (
     <section ref={sectionRef} className="relative flex min-h-dvh flex-col overflow-hidden bg-background">
@@ -184,7 +212,7 @@ export function Hero() {
             </div>
 
             <div className="automation-snapshot-surface">
-              <div className="space-y-5">
+              <div className="space-y-6">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs font-medium tracking-[0.12em] text-primary uppercase">
                     Automation snapshot
@@ -192,23 +220,17 @@ export function Hero() {
                   <LiveBadge connected={connected} />
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
-                  <div className="rounded-xl border border-border bg-muted/25 p-4 shadow-sm transition-shadow hover:shadow-md">
-                    <p className="font-mono text-3xl font-bold tracking-tight text-foreground tabular-nums transition-opacity duration-300">
-                      {pagesLabel}
-                    </p>
-                    <p className="mt-1 text-sm leading-snug text-muted-foreground">
-                      Facebook pages running automated workflows
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-border bg-muted/25 p-4 shadow-sm transition-shadow hover:shadow-md">
-                    <p className="font-mono text-3xl font-bold tracking-tight text-foreground tabular-nums transition-opacity duration-300">
-                      {usersLabel}
-                    </p>
-                    <p className="mt-1 text-sm leading-snug text-muted-foreground">
-                      Users scaling posting operations daily
-                    </p>
-                  </div>
+                <div className="space-y-5">
+                  <MetricBlock
+                    value={formatExact(pagesDisplay)}
+                    label="Facebook pages synced"
+                    emphasize
+                  />
+                  <MetricBlock value={formatExact(usersDisplay)} label="Users using FBupload Plus" />
+                  <MetricBlock
+                    value={formatExact(followersDisplay)}
+                    label="Followers gained across automated pages"
+                  />
                 </div>
 
                 <ActivityStrip events={events} nowMs={nowMs} publishedLastHour={snapshot.publishedLastHour} />
@@ -218,6 +240,29 @@ export function Hero() {
         </div>
       </div>
     </section>
+  )
+}
+
+function MetricBlock({
+  value,
+  label,
+  emphasize = false,
+}: {
+  value: string
+  label: string
+  emphasize?: boolean
+}) {
+  return (
+    <div>
+      <p
+        className={`font-mono font-bold tracking-tight text-foreground tabular-nums ${
+          emphasize ? 'text-4xl sm:text-5xl' : 'text-3xl'
+        }`}
+      >
+        {value}
+      </p>
+      <p className="mt-1 text-sm leading-snug text-muted-foreground">{label}</p>
+    </div>
   )
 }
 
@@ -257,23 +302,20 @@ function ActivityStrip({
 }) {
   if (events.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-border/80 bg-muted/15 px-3 py-2.5">
+      <div className="border-t border-border/70 pt-4">
         <p className="text-xs text-muted-foreground">
           {publishedLastHour > 0
             ? `${publishedLastHour.toLocaleString('en-US')} reels published in the last hour`
-            : 'Waiting for live automation activity…'}
+            : 'Live dashboard updating from synced pages…'}
         </p>
       </div>
     )
   }
 
   return (
-    <div className="space-y-2" aria-live="polite">
+    <div className="space-y-2 border-t border-border/70 pt-4" aria-live="polite">
       {events.map((event) => (
-        <div
-          key={event.id}
-          className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-background/60 px-3 py-2 text-xs"
-        >
+        <div key={event.id} className="flex items-center justify-between gap-3 text-xs">
           <span className="min-w-0 truncate text-foreground/90">{event.label}</span>
           <span className="shrink-0 tabular-nums text-muted-foreground">{relativeTime(event.at, nowMs)}</span>
         </div>

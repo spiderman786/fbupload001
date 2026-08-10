@@ -8,8 +8,9 @@ export type PublicLiveEvent = {
 }
 
 export type PublicLiveSnapshot = {
-  pagesAutomated: number
+  pagesSynced: number
   activeUsers: number
+  followersGained: number
   publishedLastHour: number
   events: PublicLiveEvent[]
   serverTime: string
@@ -40,11 +41,15 @@ function eventLabel(kind: PublicLiveEvent['kind']): string {
 }
 
 function buildSnapshot(): PublicLiveSnapshot {
-  const pagesAutomated = (
-    db.prepare("SELECT COUNT(*) as c FROM facebook_pages WHERE status = 'active'").get() as { c: number }
-  ).c
+  const pagesSynced = (db.prepare('SELECT COUNT(*) as c FROM facebook_pages').get() as { c: number }).c
 
   const activeUsers = (db.prepare('SELECT COUNT(*) as c FROM users').get() as { c: number }).c
+
+  const followersGained = (
+    db.prepare('SELECT COALESCE(SUM(followers_gained), 0) as total FROM facebook_pages').get() as {
+      total: number
+    }
+  ).total
 
   const publishedLastHour = (
     db
@@ -78,8 +83,9 @@ function buildSnapshot(): PublicLiveSnapshot {
   })
 
   return {
-    pagesAutomated,
+    pagesSynced,
     activeUsers,
+    followersGained,
     publishedLastHour,
     events,
     serverTime: new Date().toISOString(),

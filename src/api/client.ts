@@ -1185,8 +1185,9 @@ export type PublicLiveEvent = {
 }
 
 export type PublicLiveSnapshot = {
-  pagesAutomated: number
+  pagesSynced: number
   activeUsers: number
+  followersGained: number
   publishedLastHour: number
   events: PublicLiveEvent[]
   serverTime: string
