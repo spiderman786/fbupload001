@@ -781,6 +781,9 @@ export const api = {
     },
     liveStreamUrl: () => '/api/ops/live/stream',
   },
+  public: {
+    liveSnapshot: () => request<PublicLiveSnapshot>('/public/live-snapshot'),
+  },
 }
 
 export type ByocApp = {
@@ -1172,6 +1175,22 @@ export type OpsLiveEvent = {
   agencyName?: string | null
   pageName?: string | null
   at: string
+}
+
+export type PublicLiveEvent = {
+  id: string
+  kind: 'published' | 'publishing' | 'queued' | 'failed'
+  label: string
+  at: string
+}
+
+export type PublicLiveSnapshot = {
+  pagesSynced: number
+  activeUsers: number
+  followersGained: number
+  publishedLastHour: number
+  events: PublicLiveEvent[]
+  serverTime: string
 }
 
 export type NewsTemplateColors = {

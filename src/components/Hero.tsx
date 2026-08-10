@@ -1,9 +1,170 @@
+import { useEffect, useRef, useState } from 'react'
 import { ArrowRight, ServerCog, ShieldCheck } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { api, type PublicLiveEvent, type PublicLiveSnapshot } from '../api/client'
+
+const POLL_MS = 4000
+
+const EMPTY_SNAPSHOT: PublicLiveSnapshot = {
+  pagesSynced: 0,
+  activeUsers: 0,
+  followersGained: 0,
+  publishedLastHour: 0,
+  events: [],
+  serverTime: new Date(0).toISOString(),
+}
+
+function formatExact(n: number): string {
+  return Math.max(0, Math.floor(n)).toLocaleString('en-US')
+}
+
+function relativeTime(iso: string, nowMs: number): string {
+  const then = Date.parse(iso.includes('T') ? iso : iso.replace(' ', 'T') + 'Z')
+  if (Number.isNaN(then)) return 'just now'
+  const diffSec = Math.max(0, Math.floor((nowMs - then) / 1000))
+  if (diffSec < 15) return 'just now'
+  if (diffSec < 60) return `${diffSec}s ago`
+  const diffMin = Math.floor(diffSec / 60)
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+  return `${Math.floor(diffHr / 24)}d ago`
+}
+
+function useAnimatedNumber(target: number, enabled: boolean): number {
+  const [display, setDisplay] = useState(target)
+  const displayRef = useRef(target)
+
+  useEffect(() => {
+    displayRef.current = display
+  }, [display])
+
+  useEffect(() => {
+    if (!enabled) {
+      setDisplay(target)
+      return
+    }
+    const from = displayRef.current
+    if (from === target) return
+
+    const durationMs = 700
+    const start = performance.now()
+    let frame = 0
+
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / durationMs)
+      const eased = 1 - (1 - t) ** 3
+      const next = Math.round(from + (target - from) * eased)
+      setDisplay(next)
+      if (t < 1) {
+        frame = requestAnimationFrame(tick)
+      }
+    }
+
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [target, enabled])
+
+  return display
+}
 
 export function Hero() {
+  const sectionRef = useRef<HTMLElement | null>(null)
+  const [snapshot, setSnapshot] = useState<PublicLiveSnapshot>(EMPTY_SNAPSHOT)
+  const [connected, setConnected] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  const inViewRef = useRef(true)
+  const pageVisibleRef = useRef(typeof document === 'undefined' ? true : document.visibilityState === 'visible')
+
+  const pagesDisplay = useAnimatedNumber(snapshot.pagesSynced, loaded)
+  const usersDisplay = useAnimatedNumber(snapshot.activeUsers, loaded)
+  const followersDisplay = useAnimatedNumber(snapshot.followersGained, loaded)
+
+  useEffect(() => {
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const clearTimer = () => {
+      if (timer) {
+        clearTimeout(timer)
+        timer = null
+      }
+    }
+
+    const schedule = () => {
+      clearTimer()
+      if (cancelled) return
+      if (!inViewRef.current || !pageVisibleRef.current) return
+      timer = setTimeout(() => {
+        void poll()
+      }, POLL_MS)
+    }
+
+    const poll = async () => {
+      if (cancelled) return
+      if (!inViewRef.current || !pageVisibleRef.current) {
+        schedule()
+        return
+      }
+      try {
+        const next = await api.public.liveSnapshot()
+        if (cancelled) return
+        setSnapshot(next)
+        setConnected(true)
+        setLoaded(true)
+        setNowMs(Date.now())
+      } catch {
+        if (cancelled) return
+        setConnected(false)
+      } finally {
+        if (!cancelled) schedule()
+      }
+    }
+
+    const onVisibility = () => {
+      pageVisibleRef.current = document.visibilityState === 'visible'
+      if (pageVisibleRef.current) {
+        void poll()
+      } else {
+        clearTimer()
+      }
+    }
+
+    document.addEventListener('visibilitychange', onVisibility)
+
+    const node = sectionRef.current
+    let observer: IntersectionObserver | null = null
+    if (node && typeof IntersectionObserver !== 'undefined') {
+      observer = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0]
+          inViewRef.current = entry?.isIntersecting ?? true
+          if (inViewRef.current) {
+            void poll()
+          } else {
+            clearTimer()
+          }
+        },
+        { threshold: 0.15 },
+      )
+      observer.observe(node)
+    }
+
+    void poll()
+
+    return () => {
+      cancelled = true
+      clearTimer()
+      document.removeEventListener('visibilitychange', onVisibility)
+      observer?.disconnect()
+    }
+  }, [])
+
+  const events = snapshot.events.slice(0, 3)
+
   return (
-    <section className="relative flex min-h-dvh flex-col overflow-hidden bg-background">
+    <section ref={sectionRef} className="relative flex min-h-dvh flex-col overflow-hidden bg-background">
       <div className="absolute -top-32 -left-20 h-80 w-80 animate-pulse-slow rounded-full bg-primary/10 blur-3xl" />
       <div className="animate-mist-drift absolute top-28 right-0 h-72 w-72 rounded-full bg-primary/[0.07] blur-3xl" />
 
@@ -51,44 +212,114 @@ export function Hero() {
             </div>
 
             <div className="automation-snapshot-surface">
-              <div className="space-y-5">
+              <div className="space-y-6">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs font-medium tracking-[0.12em] text-primary uppercase">
                     Automation snapshot
                   </p>
-                  <span className="inline-flex items-center gap-2 rounded-full border border-border bg-background/90 px-2.5 py-1 text-xs text-muted-foreground">
-                    <span className="relative flex h-2 w-2 shrink-0">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/35 opacity-75" />
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-                    </span>
-                    <ServerCog className="h-3.5 w-3.5 shrink-0 text-primary" />
-                    Live
-                  </span>
+                  <LiveBadge connected={connected} />
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
-                  <div className="rounded-xl border border-border bg-muted/25 p-4 shadow-sm transition-shadow hover:shadow-md">
-                    <p className="font-mono text-3xl font-bold tracking-tight text-foreground tabular-nums">
-                      7000+
-                    </p>
-                    <p className="mt-1 text-sm leading-snug text-muted-foreground">
-                      Facebook pages running automated workflows
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-border bg-muted/25 p-4 shadow-sm transition-shadow hover:shadow-md">
-                    <p className="font-mono text-3xl font-bold tracking-tight text-foreground tabular-nums">
-                      200+
-                    </p>
-                    <p className="mt-1 text-sm leading-snug text-muted-foreground">
-                      Users scaling posting operations daily
-                    </p>
-                  </div>
+                <div className="space-y-5">
+                  <MetricBlock
+                    value={formatExact(pagesDisplay)}
+                    label="Facebook pages synced"
+                    emphasize
+                  />
+                  <MetricBlock value={formatExact(usersDisplay)} label="Users using FBupload Plus" />
+                  <MetricBlock
+                    value={formatExact(followersDisplay)}
+                    label="Followers gained across automated pages"
+                  />
                 </div>
+
+                <ActivityStrip events={events} nowMs={nowMs} publishedLastHour={snapshot.publishedLastHour} />
               </div>
             </div>
           </div>
         </div>
       </div>
     </section>
+  )
+}
+
+function MetricBlock({
+  value,
+  label,
+  emphasize = false,
+}: {
+  value: string
+  label: string
+  emphasize?: boolean
+}) {
+  return (
+    <div>
+      <p
+        className={`font-mono font-bold tracking-tight text-foreground tabular-nums ${
+          emphasize ? 'text-4xl sm:text-5xl' : 'text-3xl'
+        }`}
+      >
+        {value}
+      </p>
+      <p className="mt-1 text-sm leading-snug text-muted-foreground">{label}</p>
+    </div>
+  )
+}
+
+function LiveBadge({ connected }: { connected: boolean }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs ${
+        connected
+          ? 'border-border bg-background/90 text-muted-foreground'
+          : 'border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400'
+      }`}
+    >
+      <span className="relative flex h-2 w-2 shrink-0">
+        {connected ? (
+          <>
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/35 opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+          </>
+        ) : (
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
+        )}
+      </span>
+      <ServerCog className={`h-3.5 w-3.5 shrink-0 ${connected ? 'text-primary' : 'text-amber-600'}`} />
+      {connected ? 'Live' : 'Reconnecting…'}
+    </span>
+  )
+}
+
+function ActivityStrip({
+  events,
+  nowMs,
+  publishedLastHour,
+}: {
+  events: PublicLiveEvent[]
+  nowMs: number
+  publishedLastHour: number
+}) {
+  if (events.length === 0) {
+    return (
+      <div className="border-t border-border/70 pt-4">
+        <p className="text-xs text-muted-foreground">
+          {publishedLastHour > 0
+            ? `${publishedLastHour.toLocaleString('en-US')} reels published in the last hour`
+            : 'Live dashboard updating from synced pages…'}
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2 border-t border-border/70 pt-4" aria-live="polite">
+      {events.map((event) => (
+        <div key={event.id} className="flex items-center justify-between gap-3 text-xs">
+          <span className="min-w-0 truncate text-foreground/90">{event.label}</span>
+          <span className="shrink-0 tabular-nums text-muted-foreground">{relativeTime(event.at, nowMs)}</span>
+        </div>
+      ))}
+    </div>
   )
 }

@@ -22,6 +22,7 @@ import { initProxyPool, getProxyPoolStats } from './services/proxyPool.js'
 import { proxyPoolRouter } from './routes/proxyPool.js'
 import { opsRouter } from './routes/ops.js'
 import { newsRouter } from './routes/news.js'
+import { publicRouter } from './routes/public.js'
 import { seedPlatformAdmin, logPlatformAdminMode, isPlatformAdminStrictMode } from './services/platformAdmin.js'
 import { getSmtpConfigStatus, testSmtpConnection } from './services/email.js'
 import { isGoogleOAuthConfigured } from './services/googleOAuth.js'
@@ -95,6 +96,7 @@ app.use('/api/agencies', agenciesRouter)
 app.use('/api/proxy-pool', proxyPoolRouter)
 app.use('/api/ops', opsRouter)
 app.use('/api/news', newsRouter)
+app.use('/api/public', publicRouter)
 
 // Serve frontend in production (never swallow /api/* — dist/ exists in dev after builds)
 const distPath = path.join(__dirname, '..', 'dist')
