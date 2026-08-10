@@ -210,6 +210,7 @@ async function migratePostgresColumnsAsync(client: pg.PoolClient) {
   await addColumn('reel_jobs', 'r2_thumb_key', 'TEXT')
   await addColumn('reel_jobs', 'source_reel_id', 'TEXT')
   await addColumn('reel_jobs', 'retry_count', 'INTEGER NOT NULL DEFAULT 0')
+  await addColumn('reel_jobs', 'claimed_at', 'TEXT')
   await addColumn('reel_jobs', 'agency_id', 'TEXT')
   await addColumn('page_source_assignments', 'scrape_status', "TEXT NOT NULL DEFAULT 'idle'")
   await addColumn('page_source_assignments', 'scrape_error', 'TEXT')

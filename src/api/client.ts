@@ -1039,7 +1039,25 @@ export type OpsOverview = {
     poolSize: number
     availableNow: number
   }
-  worker: { lastBeat: string; stale: boolean; activeJobs?: number; pid?: number } | null
+  worker: {
+    lastBeat: string
+    stale: boolean
+    activeJobs?: number
+    pid?: number
+    replicaId?: string
+    region?: string | null
+    replicaCount?: number
+    healthyReplicas?: number
+    replicas?: {
+      replicaId: string
+      region: string | null
+      lastBeat: string
+      activeJobs: number
+      pid: number
+      stale: boolean
+      ageMs: number
+    }[]
+  } | null
 }
 
 export type OpsAgency = {

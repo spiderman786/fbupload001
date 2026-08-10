@@ -144,6 +144,7 @@ CREATE TABLE IF NOT EXISTS reel_jobs (
   r2_video_key TEXT,
   r2_thumb_key TEXT,
   retry_count INTEGER NOT NULL DEFAULT 0,
+  claimed_at TEXT,
   created_at TEXT NOT NULL DEFAULT (to_char((NOW() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS'))
 );
 
@@ -374,6 +375,17 @@ CREATE TABLE IF NOT EXISTS agency_ai_settings (
   ai_provider TEXT NOT NULL DEFAULT 'gemini',
   updated_at TEXT NOT NULL DEFAULT (to_char((NOW() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS'))
 );
+
+CREATE TABLE IF NOT EXISTS worker_heartbeats (
+  replica_id TEXT PRIMARY KEY,
+  region TEXT,
+  pid INTEGER NOT NULL DEFAULT 0,
+  active_jobs INTEGER NOT NULL DEFAULT 0,
+  last_beat TEXT NOT NULL,
+  started_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_worker_heartbeats_last_beat ON worker_heartbeats(last_beat);
 
 CREATE INDEX IF NOT EXISTS idx_pages_agency ON facebook_pages(agency_id);
 CREATE INDEX IF NOT EXISTS idx_pages_active ON facebook_pages(status, health_status);

@@ -35,5 +35,5 @@ ENV DATABASE_PATH=/app/data/fbuploadpro.db
 
 EXPOSE 3001
 
-# Default: web + background worker (prefill queue, scheduler, job processing)
-CMD ["npm", "run", "start:production"]
+# Default: web API only — worker service overrides startCommand via railway.worker.toml/json
+CMD ["npm", "start"]

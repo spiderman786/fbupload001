@@ -14,6 +14,8 @@ import {
 import { trimPageQueueToLimit } from './queueActions.js'
 import { clearScrapeError, markScrapeIdle, notePrefillBlocked } from './scrapeStatus.js'
 import { PREFILL_PAGES_BATCH_SIZE } from '../utils/pagination.js'
+import { resolvePrefillStartupDelayMs } from '../utils/workerRuntime.js'
+import { runIfWorkerLeader } from './workerLeader.js'
 
 let prefilling = false
 let prefillOffset = 0
@@ -74,6 +76,7 @@ export async function tickPrefillQueueForPage(pageId: string, agencyId?: string)
 
 export function tickPrefillQueue() {
   if (!isPrefillEnabled() || prefilling) return
+  if (!runIfWorkerLeader(() => true)) return
   prefilling = true
   void (async () => {
     try {
@@ -119,12 +122,13 @@ export function startPrefillScheduler() {
   const cronExpr = process.env.PREFILL_CRON ?? '*/3 * * * *'
   cron.schedule(cronExpr, tickPrefillQueue)
 
+  const startupDelayMs = resolvePrefillStartupDelayMs()
   setTimeout(() => {
     tickPrefillQueue()
-    console.log('[prefill] Initial queue fill triggered')
-  }, 15_000)
+    console.log(`[prefill] Initial queue fill triggered (after ${startupDelayMs}ms warmup)`)
+  }, startupDelayMs)
 
   console.log(
-    `[prefill] Pre-download queue scheduler started (${cronExpr}, batch=${PREFILL_PAGES_BATCH_SIZE})`,
+    `[prefill] Pre-download queue scheduler started (${cronExpr}, batch=${PREFILL_PAGES_BATCH_SIZE}, startupDelay=${startupDelayMs}ms)`,
   )
 }

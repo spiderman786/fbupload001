@@ -55,7 +55,25 @@ export function OpsSystemPage() {
           {system.worker?.stale ? (
             <p className="mt-2 text-amber-400">Stale — worker may be down</p>
           ) : (
-            <p className="mt-2 text-emerald-400">Healthy · {system.worker?.lastBeat ?? 'unknown'}</p>
+            <p className="mt-2 text-emerald-400">
+              Healthy
+              {(system.worker?.replicaCount ?? 0) > 0
+                ? ` · ${system.worker?.healthyReplicas ?? 0}/${system.worker?.replicaCount} replicas`
+                : ''}
+              {' · '}
+              {system.worker?.lastBeat ?? 'unknown'}
+            </p>
+          )}
+          {(system.worker?.replicas?.length ?? 0) > 1 && (
+            <ul className="mt-3 space-y-1 text-xs text-slate-400">
+              {system.worker!.replicas!.map((r) => (
+                <li key={r.replicaId} className={r.stale ? 'text-amber-400' : ''}>
+                  {r.replicaId}
+                  {r.region ? ` (${r.region})` : ''} — {r.activeJobs} active job{r.activeJobs === 1 ? '' : 's'}
+                  {r.stale ? ' · stale' : ''}
+                </li>
+              ))}
+            </ul>
           )}
         </div>
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">

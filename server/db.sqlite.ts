@@ -474,6 +474,9 @@ function migrateOps() {
   if (!jobCols.some((c) => c.name === 'retry_count')) {
     db.exec(`ALTER TABLE reel_jobs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`)
   }
+  if (!jobCols.some((c) => c.name === 'claimed_at')) {
+    db.exec(`ALTER TABLE reel_jobs ADD COLUMN claimed_at TEXT`)
+  }
 
   const agencyCols = db.prepare('PRAGMA table_info(agencies)').all() as { name: string }[]
   if (!agencyCols.some((c) => c.name === 'parent_agency_id')) {
@@ -523,6 +526,17 @@ function migrateOps() {
       hashtags TEXT NOT NULL DEFAULT '["#reels","#viral","#trending","#foryou","#shorts"]',
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS worker_heartbeats (
+      replica_id TEXT PRIMARY KEY,
+      region TEXT,
+      pid INTEGER NOT NULL DEFAULT 0,
+      active_jobs INTEGER NOT NULL DEFAULT 0,
+      last_beat TEXT NOT NULL,
+      started_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_worker_heartbeats_last_beat ON worker_heartbeats(last_beat);
   `)
 
   migrateReelJobsQueuedStatus()
