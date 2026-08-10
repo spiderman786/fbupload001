@@ -8,11 +8,19 @@ healthcheckPath = "/api/health"
 healthcheckTimeout = 120
 restartPolicyType = "on_failure"
 
+# Web service env (set in Railway dashboard):
+# PROCESS_ROLE=web
+# DATABASE_URL=<from Railway Postgres>
+# CLIENT_URL=https://app.fbuploadplus.com
+# JWT_SECRET=<random>
+# (copy R2, SMTP, Facebook, Google OAuth vars from existing service)
+
 # ── 10k page scale (PostgreSQL + split services) ─────────────────────────
-# 1. Add Railway Postgres plugin → copy DATABASE_URL to web + all workers
-# 2. Web service:  PROCESS_ROLE=web  + start: npm start
-# 3. Worker(s):   PROCESS_ROLE=worker + start: npm run worker  (scale replicas)
-#    Worker RAM: 1–2 GB minimum. Defaults: WORKER_CONCURRENCY=3, WORKER_POLL_MS=2000
+# 1. Add Railway Postgres plugin → copy DATABASE_URL to web + worker
+# 2. Web service:  PROCESS_ROLE=web  + config file railway.toml (this file)
+# 3. Worker service: PROCESS_ROLE=worker + config file railway.worker.json
+#    Worker env: WORKER_CONCURRENCY=2, PG_POOL_MAX=5, NODE_OPTIONS=--max-old-space-size=768
+#    Worker RAM: 1 GB minimum
 # 4. Keep R2 env vars on all services. Videos stay in R2; DB only holds job metadata.
 #
 # Single-box (SQLite, <2k pages): leave DATABASE_URL unset, use start:production as-is.

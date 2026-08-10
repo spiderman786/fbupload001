@@ -49,6 +49,7 @@ function startWorkerHealthServer() {
       status: ready ? 'ok' : workerReady ? 'degraded' : 'starting',
       role: 'worker',
       timestamp: new Date().toISOString(),
+      gitCommit: process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GIT_COMMIT ?? null,
       database: databaseKind,
       dbOk,
       replicaId: process.env.RAILWAY_REPLICA_ID ?? process.env.HOSTNAME ?? null,

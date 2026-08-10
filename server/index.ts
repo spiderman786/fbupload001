@@ -70,6 +70,7 @@ app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
+    gitCommit: process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GIT_COMMIT ?? null,
     r2: isR2Enabled(),
     database: getDatabaseKind(),
     processRole: process.env.PROCESS_ROLE ?? 'all',
