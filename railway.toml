@@ -12,6 +12,7 @@ restartPolicyType = "on_failure"
 # 1. Add Railway Postgres plugin → copy DATABASE_URL to web + all workers
 # 2. Web service:  PROCESS_ROLE=web  + start: npm start
 # 3. Worker(s):   PROCESS_ROLE=worker + start: npm run worker  (scale replicas)
+#    Worker RAM: 1–2 GB minimum. Defaults: WORKER_CONCURRENCY=3, WORKER_POLL_MS=2000
 # 4. Keep R2 env vars on all services. Videos stay in R2; DB only holds job metadata.
 #
 # Single-box (SQLite, <2k pages): leave DATABASE_URL unset, use start:production as-is.

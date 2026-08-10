@@ -1,9 +1,10 @@
 import { db } from '../db.js'
 import { runAutomationJob, failAutomationJob } from './automationPipeline.js'
 import { touchWorkerHeartbeat } from './workerHeartbeat.js'
+import { resolveWorkerConcurrency, resolveWorkerPollMs } from '../utils/workerRuntime.js'
 
-const CONCURRENCY = Number(process.env.WORKER_CONCURRENCY ?? 20)
-const POLL_MS = Number(process.env.WORKER_POLL_MS ?? 1000)
+const CONCURRENCY = resolveWorkerConcurrency()
+const POLL_MS = resolveWorkerPollMs()
 
 let activeCount = 0
 let pollTimer: ReturnType<typeof setInterval> | null = null
