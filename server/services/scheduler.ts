@@ -8,6 +8,7 @@ import { DEFAULT_SCHEDULE_TIMEZONE, getCurrentTimeHHMM, normalizeHHMM } from '..
 import { tickTimezoneQuotaResets } from '../utils/pageDayStats.js'
 import { SCHEDULER_PAGES_BATCH_SIZE } from '../utils/pagination.js'
 import { buildScheduleFireKey, requestPageScheduledPublish, shouldUseLegacyScheduleSlot } from './pagePublishScheduler.js'
+import { runIfWorkerLeader } from './workerLeader.js'
 
 const scheduleOffsets = new Map<string, number>()
 
@@ -99,20 +100,24 @@ export function startScheduler() {
   cron.schedule(
     '0 0 * * *',
     () => {
-      resetAllDailyQuotas()
-      console.log(`[scheduler] Daily reel quotas reset (${DEFAULT_SCHEDULE_TIMEZONE})`)
+      runIfWorkerLeader(() => {
+        resetAllDailyQuotas()
+        console.log(`[scheduler] Daily reel quotas reset (${DEFAULT_SCHEDULE_TIMEZONE})`)
+      })
     },
     { timezone: DEFAULT_SCHEDULE_TIMEZONE },
   )
 
   cron.schedule('0 */6 * * *', () => {
-    syncAllUsersFollowers()
-      .then(() => console.log('[scheduler] Follower counts synced'))
-      .catch((err) => console.error('[scheduler] Follower sync failed', err))
+    runIfWorkerLeader(() => {
+      syncAllUsersFollowers()
+        .then(() => console.log('[scheduler] Follower counts synced'))
+        .catch((err) => console.error('[scheduler] Follower sync failed', err))
+    })
   })
 
   cron.schedule('0 3 * * *', () => {
-    runMaintenance()
+    runIfWorkerLeader(() => runMaintenance())
   })
 
   console.log('[scheduler] Slot scheduler + daily reset + cleanup crons started')

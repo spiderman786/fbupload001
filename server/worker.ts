@@ -1,7 +1,8 @@
 import 'dotenv/config'
 import express from 'express'
 import { initDb, getDatabaseKind } from './db.js'
-import { startJobQueue } from './services/jobQueue.js'
+import { db } from './db.js'
+import { startJobQueue, stopJobQueue, getActiveJobCount } from './services/jobQueue.js'
 import { startScheduler } from './services/scheduler.js'
 import { startPrefillScheduler } from './services/prefillScheduler.js'
 import { initProxyPool, getProxyPoolStats } from './services/proxyPool.js'
@@ -10,7 +11,8 @@ import { runOpsAlertChecks } from './services/opsAlerts.js'
 import { startNewsScheduler } from './services/news/newsScheduler.js'
 import { seedPlatformAdmin, logPlatformAdminMode } from './services/platformAdmin.js'
 import { backfillNextPublishAtIndex } from './services/scheduleBackfill.js'
-import { pruneStaleWorkerHeartbeats } from './services/workerHeartbeat.js'
+import { pruneStaleWorkerHeartbeats, removeWorkerHeartbeat, touchWorkerHeartbeat } from './services/workerHeartbeat.js'
+import { runIfWorkerLeaderAsync } from './services/workerLeader.js'
 import {
   resolveWorkerConcurrency,
   resolveWorkerPollMs,
@@ -20,18 +22,35 @@ import {
 const role = (process.env.PROCESS_ROLE ?? 'all').toLowerCase()
 const runWorker = role === 'all' || role === 'worker'
 
+if (process.argv[1]?.includes('worker') && role === 'web') {
+  console.error('[worker] PROCESS_ROLE=web disables worker tasks — set PROCESS_ROLE=worker on the worker service')
+  process.exit(1)
+}
+
 let workerReady = false
 let databaseKind: ReturnType<typeof getDatabaseKind> | null = null
+
+function pingDatabase(): boolean {
+  try {
+    db.prepare('SELECT 1 AS ok').get()
+    return true
+  } catch {
+    return false
+  }
+}
 
 function startWorkerHealthServer() {
   const app = express()
   const port = Number(process.env.PORT ?? 3001)
   app.get('/api/health', (_req, res) => {
-    res.json({
-      status: workerReady ? 'ok' : 'starting',
+    const dbOk = pingDatabase()
+    const ready = workerReady && dbOk
+    res.status(ready ? 200 : 503).json({
+      status: ready ? 'ok' : workerReady ? 'degraded' : 'starting',
       role: 'worker',
       timestamp: new Date().toISOString(),
       database: databaseKind,
+      dbOk,
       replicaId: process.env.RAILWAY_REPLICA_ID ?? process.env.HOSTNAME ?? null,
       region: process.env.RAILWAY_REPLICA_REGION ?? null,
     })
@@ -43,11 +62,23 @@ function startWorkerHealthServer() {
 
 process.on('unhandledRejection', (reason) => {
   console.error('[worker] unhandledRejection:', reason)
+  if (process.env.NODE_ENV === 'production') process.exit(1)
 })
 
 process.on('uncaughtException', (err) => {
   console.error('[worker] uncaughtException:', err)
+  process.exit(1)
 })
+
+function shutdown() {
+  stopJobQueue()
+  try {
+    removeWorkerHeartbeat()
+  } catch {
+    /* ignore */
+  }
+  process.exit(0)
+}
 
 if (runWorker) {
   startWorkerHealthServer()
@@ -71,9 +102,13 @@ if (runWorker) {
   startNewsScheduler()
   startProxyPoolPruneScheduler()
 
+  setInterval(() => {
+    touchWorkerHeartbeat(getActiveJobCount())
+  }, 30_000)
+
   const alertIntervalMs = Number(process.env.OPS_ALERT_INTERVAL_MS ?? 15 * 60 * 1000)
   setInterval(() => {
-    void runOpsAlertChecks()
+    void runIfWorkerLeaderAsync(() => runOpsAlertChecks())
   }, alertIntervalMs)
 
   setInterval(() => {
@@ -88,5 +123,5 @@ if (runWorker) {
   console.log(`[worker] Skipped — PROCESS_ROLE=${role} (web-only node)`)
 }
 
-process.on('SIGINT', () => process.exit(0))
-process.on('SIGTERM', () => process.exit(0))
+process.on('SIGINT', shutdown)
+process.on('SIGTERM', shutdown)

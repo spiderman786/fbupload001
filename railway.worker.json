@@ -11,7 +11,7 @@
     "restartPolicyType": "ON_FAILURE",
     "multiRegionConfig": {
       "us-west2": {
-        "numReplicas": 2
+        "numReplicas": 1
       }
     }
   }

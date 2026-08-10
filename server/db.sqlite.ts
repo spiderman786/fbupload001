@@ -474,6 +474,9 @@ function migrateOps() {
   if (!jobCols.some((c) => c.name === 'retry_count')) {
     db.exec(`ALTER TABLE reel_jobs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`)
   }
+  if (!jobCols.some((c) => c.name === 'claimed_at')) {
+    db.exec(`ALTER TABLE reel_jobs ADD COLUMN claimed_at TEXT`)
+  }
 
   const agencyCols = db.prepare('PRAGMA table_info(agencies)').all() as { name: string }[]
   if (!agencyCols.some((c) => c.name === 'parent_agency_id')) {

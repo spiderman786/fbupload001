@@ -15,7 +15,7 @@ export function resolveWorkerConcurrency(): number {
   if (process.env.WORKER_CONCURRENCY !== undefined && process.env.WORKER_CONCURRENCY !== '') {
     return parsePositiveInt(process.env.WORKER_CONCURRENCY, 3)
   }
-  if (isProductionWorker()) return role === 'worker' ? 3 : 4
+  if (isProductionWorker()) return role === 'worker' ? 2 : 4
   return 20
 }
 
@@ -33,4 +33,13 @@ export function resolvePrefillStartupDelayMs(): number {
   }
   if (isProductionWorker()) return 45_000
   return 5_000
+}
+
+export function resolvePgPoolMax(): number {
+  if (process.env.PG_POOL_MAX !== undefined && process.env.PG_POOL_MAX !== '') {
+    return parsePositiveInt(process.env.PG_POOL_MAX, 10)
+  }
+  if (role === 'worker') return 5
+  if (role === 'web') return 15
+  return 10
 }

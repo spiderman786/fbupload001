@@ -15,6 +15,7 @@ import { trimPageQueueToLimit } from './queueActions.js'
 import { clearScrapeError, markScrapeIdle, notePrefillBlocked } from './scrapeStatus.js'
 import { PREFILL_PAGES_BATCH_SIZE } from '../utils/pagination.js'
 import { resolvePrefillStartupDelayMs } from '../utils/workerRuntime.js'
+import { runIfWorkerLeader } from './workerLeader.js'
 
 let prefilling = false
 let prefillOffset = 0
@@ -75,6 +76,7 @@ export async function tickPrefillQueueForPage(pageId: string, agencyId?: string)
 
 export function tickPrefillQueue() {
   if (!isPrefillEnabled() || prefilling) return
+  if (!runIfWorkerLeader(() => true)) return
   prefilling = true
   void (async () => {
     try {

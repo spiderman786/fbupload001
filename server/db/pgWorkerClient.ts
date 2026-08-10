@@ -2,6 +2,7 @@ import { Worker } from 'node:worker_threads'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import deasync from 'deasync'
+import { resolvePgPoolMax } from '../utils/workerRuntime.js'
 
 type WorkerResponse = {
   id?: number
@@ -41,7 +42,7 @@ function getWorker(): Worker {
   worker = new Worker(workerPath, {
     workerData: {
       databaseUrl,
-      poolMax: Number(process.env.PG_POOL_MAX ?? 30),
+      poolMax: resolvePgPoolMax(),
       idleTimeoutMs: Number(process.env.PG_IDLE_TIMEOUT_MS ?? 30_000),
       ssl: process.env.PG_SSL !== 'false',
     },

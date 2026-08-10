@@ -144,6 +144,7 @@ CREATE TABLE IF NOT EXISTS reel_jobs (
   r2_video_key TEXT,
   r2_thumb_key TEXT,
   retry_count INTEGER NOT NULL DEFAULT 0,
+  claimed_at TEXT,
   created_at TEXT NOT NULL DEFAULT (to_char((NOW() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS'))
 );
 

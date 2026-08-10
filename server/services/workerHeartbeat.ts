@@ -160,3 +160,8 @@ export function pruneStaleWorkerHeartbeats(maxAgeMs = 24 * 60 * 60 * 1000) {
   const cutoff = new Date(Date.now() - maxAgeMs).toISOString()
   db.prepare('DELETE FROM worker_heartbeats WHERE last_beat < ?').run(cutoff)
 }
+
+export function removeWorkerHeartbeat() {
+  const replicaId = resolveReplicaId()
+  db.prepare('DELETE FROM worker_heartbeats WHERE replica_id = ?').run(replicaId)
+}

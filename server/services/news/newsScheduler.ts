@@ -3,6 +3,7 @@ import { db } from '../../db.js'
 import { getCurrentTimeHHMM } from '../../utils/timezone.js'
 import { pollAllFeeds, publishNewsItem } from './newsPipeline.js'
 import { parseJsonArray } from './types.js'
+import { runIfWorkerLeader } from '../workerLeader.js'
 
 let polling = false
 let publishing = false
@@ -18,6 +19,7 @@ function applyOffset(time: string, offsetMinutes: number): string {
 
 async function runPublishCycle() {
   if (publishing) return
+  if (!runIfWorkerLeader(() => true)) return
   publishing = true
   try {
     const settings = db
@@ -68,6 +70,7 @@ async function runPublishCycle() {
 
 async function runPollCycle() {
   if (polling) return
+  if (!runIfWorkerLeader(() => true)) return
   polling = true
   try {
     const result = await pollAllFeeds()
