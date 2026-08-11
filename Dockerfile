@@ -35,5 +35,6 @@ ENV DATABASE_PATH=/app/data/fbuploadpro.db
 
 EXPOSE 3001
 
-# Default: web API only — worker service overrides startCommand via railway.worker.toml/json
-CMD ["npm", "start"]
+# Default: web + embedded worker (matches single Railway service).
+# Dedicated worker service overrides startCommand via railway.worker.json.
+CMD ["npm", "run", "start:production"]

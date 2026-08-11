@@ -3,24 +3,23 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "npm start"
+# Single Railway service: web API + embedded worker (no dedicated worker yet).
+# When you add a separate worker service, switch this to `npm start` and point
+# the worker service at railway.worker.json with PROCESS_ROLE=worker.
+startCommand = "npm run start:production"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 120
 restartPolicyType = "on_failure"
 
-# Web service env (set in Railway dashboard):
+# Recommended env (Railway dashboard):
 # PROCESS_ROLE=web
-# DATABASE_URL=<from Railway Postgres>
+# WORKER_CONCURRENCY=2
+# PG_POOL_MAX=5
+# NODE_OPTIONS=--max-old-space-size=768
+# DATABASE_URL=<Railway Postgres>
 # CLIENT_URL=https://app.fbuploadplus.com
-# JWT_SECRET=<random>
-# (copy R2, SMTP, Facebook, Google OAuth vars from existing service)
-
-# ── 10k page scale (PostgreSQL + split services) ─────────────────────────
-# 1. Add Railway Postgres plugin → copy DATABASE_URL to web + worker
-# 2. Web service:  PROCESS_ROLE=web  + config file railway.toml (this file)
-# 3. Worker service: PROCESS_ROLE=worker + config file railway.worker.json
-#    Worker env: WORKER_CONCURRENCY=2, PG_POOL_MAX=5, NODE_OPTIONS=--max-old-space-size=768
-#    Worker RAM: 1 GB minimum
-# 4. Keep R2 env vars on all services. Videos stay in R2; DB only holds job metadata.
+# Allocate ≥1 GB RAM (ffmpeg/yt-dlp).
 #
-# Single-box (SQLite, <2k pages): leave DATABASE_URL unset, use start:production as-is.
+# Split services later:
+# 1. Web: startCommand npm start, PROCESS_ROLE=web, config railway.toml
+# 2. Worker: config railway.worker.json, PROCESS_ROLE=worker, same DATABASE_URL + R2

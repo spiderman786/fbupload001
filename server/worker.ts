@@ -20,10 +20,16 @@ import {
 } from './utils/workerRuntime.js'
 
 const role = (process.env.PROCESS_ROLE ?? 'all').toLowerCase()
-const runWorker = role === 'all' || role === 'worker'
+const embeddedWorker =
+  process.env.EMBEDDED_WORKER === 'true' || process.env.EMBEDDED_WORKER === '1'
+/** Standalone worker service, or single-box start:production (EMBEDDED_WORKER=true). */
+const runWorker = role === 'all' || role === 'worker' || embeddedWorker
+const standaloneWorker = role === 'worker' && !embeddedWorker
 
-if (process.argv[1]?.includes('worker') && role === 'web') {
-  console.error('[worker] PROCESS_ROLE=web disables worker tasks — set PROCESS_ROLE=worker on the worker service')
+if (process.argv[1]?.includes('worker') && role === 'web' && !embeddedWorker) {
+  console.error(
+    '[worker] PROCESS_ROLE=web disables worker tasks — set PROCESS_ROLE=worker on a dedicated worker service, or use npm run start:production',
+  )
   process.exit(1)
 }
 
@@ -81,7 +87,9 @@ function shutdown() {
   process.exit(0)
 }
 
-if (runWorker) {
+// Only bind /api/health when this process owns PORT (dedicated worker service).
+// Embedded workers share the container with web, which already serves health.
+if (standaloneWorker) {
   startWorkerHealthServer()
 }
 
@@ -118,7 +126,7 @@ if (runWorker) {
 
   workerReady = true
 
-  console.log(`[worker] Running (role=${role}, db=${databaseKind}, queue + scheduler + ops alerts)`)
+  console.log(`[worker] Running (role=${role}, embedded=${embeddedWorker}, db=${databaseKind}, queue + scheduler + ops alerts)`)
   console.log(`[worker] Proxy pool: ${getProxyPoolStats().poolSize} proxies loaded`)
 } else {
   console.log(`[worker] Skipped — PROCESS_ROLE=${role} (web-only node)`)

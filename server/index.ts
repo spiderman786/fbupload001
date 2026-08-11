@@ -74,6 +74,8 @@ app.get('/api/health', (_req, res) => {
     r2: isR2Enabled(),
     database: getDatabaseKind(),
     processRole: process.env.PROCESS_ROLE ?? 'all',
+    embeddedWorker:
+      process.env.EMBEDDED_WORKER === 'true' || process.env.EMBEDDED_WORKER === '1',
     publicSignupEnabled: isPublicSignupEnabled(),
     publicSignupAgencyReady: isPublicSignupAgencyReady(),
     googleOAuthConfigured: isGoogleOAuthConfigured(),
