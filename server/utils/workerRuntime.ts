@@ -7,8 +7,15 @@ function parsePositiveInt(raw: string | undefined, fallback: number): number {
   return Math.floor(n)
 }
 
+function isEmbeddedWorker(): boolean {
+  return process.env.EMBEDDED_WORKER === 'true' || process.env.EMBEDDED_WORKER === '1'
+}
+
 function isProductionWorker(): boolean {
-  return process.env.NODE_ENV === 'production' && (role === 'worker' || role === 'all')
+  return (
+    process.env.NODE_ENV === 'production' &&
+    (role === 'worker' || role === 'all' || isEmbeddedWorker())
+  )
 }
 
 export function resolveWorkerConcurrency(): number {

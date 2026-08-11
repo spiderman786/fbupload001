@@ -12,7 +12,7 @@
     "dev:server": "tsx watch server/index.ts",
     "dev:worker": "tsx watch server/worker.ts",
     "start": "tsx server/index.ts",
-    "start:production": "concurrently -k -n web,worker -c green,yellow \"tsx server/index.ts\" \"tsx server/worker.ts\"",
+    "start:production": "EMBEDDED_WORKER=true concurrently -k -n web,worker -c green,yellow \"tsx server/index.ts\" \"tsx server/worker.ts\"",
     "worker": "tsx server/worker.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
